@@ -1,0 +1,11 @@
+{
+  "name": "rust-electron-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:rust": "cd rust-backend && cargo build --release",
+    "dev": "npm run build:rust && cd electron && npm run dev",
+    "setup": "cd electron && npm install && cd .. && npm run build:rust"
+  }
+}
+

@@ -1,15 +1,41 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// Custom APIs for renderer
-const api = {
-  rustInvoke: (method: string, params?: unknown): Promise<unknown> =>
-    ipcRenderer.invoke('rust-invoke', method, params)
+export interface CaptureStatus {
+  isRunning: boolean
+  capturesDir: string
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
+export interface GoStatus {
+  running: boolean
+  fps: number
+  captureCount: number
+  uptime: number
+  outputDir: string
+}
+
+export interface CaptureResult {
+  success: boolean
+  status?: CaptureStatus
+  error?: string
+}
+
+const api = {
+  startCapture: (fps?: number): Promise<CaptureResult> => ipcRenderer.invoke('capture:start', fps),
+  stopCapture: (): Promise<CaptureResult> => ipcRenderer.invoke('capture:stop'),
+  getCaptureStatus: (): Promise<CaptureStatus> => ipcRenderer.invoke('capture:status'),
+  getGoStatus: (): Promise<GoStatus | null> => ipcRenderer.invoke('capture:go-status'),
+  onCaptureStatus: (callback: (status: CaptureStatus) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: CaptureStatus): void => {
+      callback(status)
+    }
+    ipcRenderer.on('capture:status', handler)
+    return (): void => {
+      ipcRenderer.removeListener('capture:status', handler)
+    }
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
@@ -18,8 +44,8 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
+  // @ts-ignore
   window.electron = electronAPI
-  // @ts-ignore (define in dts)
+  // @ts-ignore
   window.api = api
 }

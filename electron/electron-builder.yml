@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: my-app
+appId: com.context.capture
+productName: Context Capture
 directories:
   buildResources: build
 files:
@@ -9,6 +9,13 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+extraResources:
+  - from: '../golang-backend/capture'
+    to: 'golang-backend/capture'
+  - from: '../golang-backend/images'
+    to: 'golang-backend/images'
+    filter:
+      - '.gitkeep'
 asarUnpack:
   - resources/**
 win:
@@ -25,7 +32,9 @@ mac:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    - NSAccessibilityUsageDescription: Application needs accessibility access to detect mouse clicks.
   notarize: false
+  hardenedRuntime: true
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:

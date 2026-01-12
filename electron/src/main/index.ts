@@ -1,63 +1,19 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
-import { spawn, ChildProcess } from 'child_process'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { captureService } from './capture'
+import log from './logger'
 
-let rustProcess: ChildProcess
-let requestId = 0
-const pendingRequests = new Map<number, (result: unknown) => void>()
-
-function getRustBinaryPath(): string {
-  if (app.isPackaged) {
-    return join(process.resourcesPath, 'rust-backend')
-  } else {
-    return join(app.getAppPath(), '..', 'rust-backend', 'target', 'release', 'rust-backend')
-  }
-}
-
-function startRustBackend(): void {
-  rustProcess = spawn(getRustBinaryPath())
-
-  rustProcess.stdout?.on('data', (data) => {
-    const lines = data.toString().split('\n').filter((line: string) => line.trim())
-    for (const line of lines) {
-      try {
-        const response = JSON.parse(line)
-        const resolver = pendingRequests.get(response.id)
-        if (resolver) {
-          resolver(response.result)
-          pendingRequests.delete(response.id)
-        }
-      } catch (e) {
-        console.error('Failed to parse Rust response:', e)
-      }
-    }
-  })
-
-  rustProcess.stderr?.on('data', (data) => {
-    console.error('Rust stderr:', data.toString())
-  })
-
-  rustProcess.on('close', (code) => {
-    console.log('Rust process exited with code:', code)
-  })
-}
-
-function sendToRust(method: string, params: unknown = {}): Promise<unknown> {
-  return new Promise((resolve) => {
-    const id = ++requestId
-    pendingRequests.set(id, resolve)
-    const request = JSON.stringify({ id, method, params }) + '\n'
-    rustProcess.stdin?.write(request)
-  })
-}
+let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  log.info('Creating main window')
+
+  mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
-    show: false,
+    show: true,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
@@ -66,8 +22,11 @@ function createWindow(): void {
     }
   })
 
+  captureService.setMainWindow(mainWindow)
+
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    log.debug('Main window ready to show')
+    mainWindow!.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -83,16 +42,40 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  log.info('App ready', {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch
+  })
+
   electronApp.setAppUserModelId('com.electron')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  startRustBackend()
+  // Capture service IPC handlers
+  ipcMain.handle('capture:start', async (_event, fps?: number) => {
+    try {
+      await captureService.start(fps)
+      return { success: true, status: captureService.getStatus() }
+    } catch (error) {
+      log.error('Failed to start capture', error)
+      return { success: false, error: String(error) }
+    }
+  })
 
-  ipcMain.handle('rust-invoke', async (_event, method: string, params?: unknown) => {
-    return sendToRust(method, params)
+  ipcMain.handle('capture:stop', () => {
+    captureService.stop()
+    return { success: true, status: captureService.getStatus() }
+  })
+
+  ipcMain.handle('capture:status', () => {
+    return captureService.getStatus()
+  })
+
+  ipcMain.handle('capture:go-status', async () => {
+    return await captureService.getGoStatus()
   })
 
   createWindow()
@@ -103,10 +86,23 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (rustProcess) {
-    rustProcess.kill()
-  }
+  log.info('All windows closed')
+  captureService.stop()
+
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  log.info('App quitting')
+  captureService.stop()
+})
+
+process.on('uncaughtException', (error) => {
+  log.error('Uncaught exception', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  log.error('Unhandled rejection', reason)
 })

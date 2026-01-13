@@ -25,11 +25,25 @@ export class CaptureService {
   private restartAttempts = 0
   private readonly maxRestartAttempts = 3
 
-  private getGolangDir(): string {
+  private getBinaryPath(): string {
     if (app.isPackaged) {
-      return join(process.resourcesPath, 'golang-backend')
+      return join(process.resourcesPath, 'bin', 'capture')
     }
-    return join(app.getAppPath(), '..', 'golang-backend')
+    return join(app.getAppPath(), 'resources', 'bin', 'capture')
+  }
+
+  private getImagesDir(): string {
+    if (app.isPackaged) {
+      return join(process.resourcesPath, 'data', 'images')
+    }
+    return join(app.getAppPath(), 'native', 'capture', 'images')
+  }
+
+  private getWorkingDir(): string {
+    if (app.isPackaged) {
+      return join(process.resourcesPath, 'data')
+    }
+    return join(app.getAppPath(), 'native', 'capture')
   }
 
   private get goServerUrl(): string {
@@ -44,7 +58,7 @@ export class CaptureService {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send('capture:status', {
         isRunning: this.isRunning,
-        capturesDir: join(this.getGolangDir(), 'images')
+        capturesDir: this.getImagesDir()
       })
     }
   }
@@ -107,11 +121,12 @@ export class CaptureService {
   }
 
   private async spawnGoProcess(): Promise<void> {
-    const golangDir = this.getGolangDir()
-    const binaryPath = join(golangDir, 'capture')
+    const binaryPath = this.getBinaryPath()
+    const workingDir = this.getWorkingDir()
 
     log.info('Spawning Go capture daemon', {
       binaryPath,
+      workingDir,
       fps: this.config.fps,
       port: this.config.port
     })
@@ -120,7 +135,7 @@ export class CaptureService {
       binaryPath,
       ['-fps', this.config.fps.toString(), '-port', this.config.port.toString()],
       {
-        cwd: golangDir,
+        cwd: workingDir,
         stdio: ['ignore', 'pipe', 'pipe']
       }
     )
@@ -208,7 +223,7 @@ export class CaptureService {
   getStatus(): { isRunning: boolean; capturesDir: string } {
     return {
       isRunning: this.isRunning,
-      capturesDir: join(this.getGolangDir(), 'images')
+      capturesDir: this.getImagesDir()
     }
   }
 }

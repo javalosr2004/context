@@ -10,10 +10,10 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 extraResources:
-  - from: '../golang-backend/capture'
-    to: 'golang-backend/capture'
-  - from: '../golang-backend/images'
-    to: 'golang-backend/images'
+  - from: 'resources/bin/capture'
+    to: 'bin/capture'
+  - from: 'native/capture/images'
+    to: 'data/images'
     filter:
       - '.gitkeep'
 asarUnpack:

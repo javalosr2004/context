@@ -1,235 +1,30 @@
-@import './base.css';
+@import 'tailwindcss';
 
-:root {
-  --capture-green: #10b981;
-  --capture-green-glow: rgba(16, 185, 129, 0.3);
-  --capture-red: #ef4444;
-  --capture-red-glow: rgba(239, 68, 68, 0.3);
-  --card-bg: rgba(30, 32, 40, 0.95);
-  --card-border: rgba(255, 255, 255, 0.08);
+@theme {
+  --color-capture-green: #10b981;
+  --color-capture-red: #ef4444;
+  --color-card-bg: #1e2028;
+  --color-card-border: #ffffff24;
+
+  --font-display: 'SF Pro Display', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-sans: 'SF Pro Text', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'SF Mono', Menlo, Monaco, Consolas, monospace;
 }
 
-body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  background: linear-gradient(135deg, #0f0f14 0%, #1a1b26 50%, #16161e 100%);
-  user-select: none;
-  min-height: 100vh;
-}
-
-#root {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.capture-app {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-}
-
-.capture-card {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 24px;
-  padding: 48px;
-  min-width: 380px;
-  text-align: center;
-  backdrop-filter: blur(20px);
-  box-shadow: 
-    0 4px 24px rgba(0, 0, 0, 0.4),
-    0 0 80px rgba(99, 102, 241, 0.05);
-}
-
-.capture-header {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  margin-bottom: 16px;
-}
-
-.capture-header h1 {
-  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  color: #f5f5f7;
-  margin: 0;
-  letter-spacing: -0.5px;
-}
-
-.status-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-}
-
-.status-indicator.active {
-  background: var(--capture-green);
-  box-shadow: 0 0 12px var(--capture-green-glow), 0 0 24px var(--capture-green-glow);
-  animation: pulse 2s infinite;
-}
-
-.status-indicator.inactive {
-  background: #4b5563;
-  box-shadow: none;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100vh;
   }
-  50% {
-    opacity: 0.8;
-    transform: scale(1.1);
+
+  body {
+    background: linear-gradient(135deg, #0f0f14 0%, #1a1b26 50%, #16161e 100%);
   }
-}
 
-.capture-description {
-  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 15px;
-  color: #9ca3af;
-  margin-bottom: 32px;
-  line-height: 1.5;
-}
-
-.capture-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 16px 40px;
-  border: none;
-  border-radius: 14px;
-  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  min-width: 180px;
-}
-
-.capture-button .button-icon {
-  width: 20px;
-  height: 20px;
-}
-
-.capture-button.start {
-  background: linear-gradient(135deg, var(--capture-green) 0%, #059669 100%);
-  color: white;
-  box-shadow: 0 4px 16px var(--capture-green-glow);
-}
-
-.capture-button.start:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px var(--capture-green-glow);
-}
-
-.capture-button.stop {
-  background: linear-gradient(135deg, var(--capture-red) 0%, #dc2626 100%);
-  color: white;
-  box-shadow: 0 4px 16px var(--capture-red-glow);
-}
-
-.capture-button.stop:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px var(--capture-red-glow);
-}
-
-.capture-button:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.capture-button:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.loading-spinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+  #root {
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-}
-
-.stats-container {
-  display: flex;
-  justify-content: center;
-  gap: 24px;
-  margin-top: 36px;
-  padding-top: 28px;
-  border-top: 1px solid var(--card-border);
-}
-
-.stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.stat-value {
-  font-family: 'SF Mono', 'Menlo', monospace;
-  font-size: 32px;
-  font-weight: 700;
-  color: #f5f5f7;
-  line-height: 1;
-}
-
-.stat-label {
-  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 13px;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.captures-path {
-  margin-top: 24px;
-  font-size: 12px;
-  color: #6b7280;
-}
-
-.captures-path .path-label {
-  display: block;
-  margin-bottom: 6px;
-}
-
-.captures-path code {
-  display: inline-block;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-family: 'SF Mono', 'Menlo', monospace;
-  font-size: 11px;
-  color: #9ca3af;
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.error-message {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 20px;
-  font-size: 14px;
-  color: #fca5a5;
 }

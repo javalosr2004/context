@@ -26,7 +26,7 @@ function App(): React.JSX.Element {
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const blobRef = useRef<Blob[]>([])
+  const writePromisesRef = useRef<Promise<void>[]>([])
 
   useEffect(() => {
     if (!window.api) return
@@ -38,6 +38,18 @@ function App(): React.JSX.Element {
 
     return () => {
       unsubscribe()
+    }
+  }, [])
+
+  // Cleanup recorder and stream on unmount
+  useEffect(() => {
+    return () => {
+      const recorder = recorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop()
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
     }
   }, [])
   // In your renderer process (App.tsx)
@@ -91,15 +103,62 @@ function App(): React.JSX.Element {
         ? 'video/webm;codecs=vp9'
         : 'video/webm'
 
+      const res = await window.api.startRecording()
+      if (!res.ok) {
+        console.error(res.error)
+        return
+      }
       const recorder = new MediaRecorder(stream, { mimeType })
+      recorderRef.current = recorder
+      writePromisesRef.current = [] // Clear for new recording
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
-          blobRef.current.push(event.data)
+          // Create and track the promise immediately (synchronous)
+          const writePromise = (async () => {
+            const dataArrBuffer = await event.data.arrayBuffer()
+            const result = await window.api.pushRecordingChunk(dataArrBuffer)
+            if (!result.ok) {
+              console.error('Failed to push recording chunk:', result.error)
+              setError(result.error)
+              throw new Error(result.error)
+            }
+          })()
+          writePromisesRef.current.push(writePromise)
         }
       }
+      recorder.start()
       setRunning(true)
     } else {
       window.api.stopMouseTracking()
+
+      // Wait for recorder to fully stop and all writes to complete
+      const recorder = recorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        await new Promise<void>((resolve) => {
+          recorder.onstop = async () => {
+            // Wait for all write promises to complete
+            await Promise.allSettled(writePromisesRef.current)
+            resolve()
+          }
+          recorder.stop()
+        })
+      }
+      writePromisesRef.current = [] // Clear after recording
+
+      streamRef.current?.getTracks().forEach((track) => track.stop()) // Stop stream
+      streamRef.current = null
+
+      // Show file picker to save the recording
+      const defaultName = `screen-recording-${Date.now()}.webm`
+      const result = await window.api.finishRecording(defaultName)
+      if (result.ok) {
+        console.log('Recording saved to:', result.payload.filePath)
+      } else {
+        if (result.error !== 'Save canceled') {
+          setError(result.error)
+        }
+      }
+
       setRunning(false)
     }
 

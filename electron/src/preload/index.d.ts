@@ -7,6 +7,9 @@ interface Api {
   onMousePosition: (callback: (position: MousePosition) => void) => () => void
   startMouseTracking: () => void
   stopMouseTracking: () => void
+  startRecording: () => Promise<Result<{ tempPath: string }>>
+  pushRecordingChunk: (chunk: ArrayBuffer) => Promise<Result<null>>
+  finishRecording: (defaultName: string) => Promise<Result<{ filePath: string }>>
 }
 
 declare global {

@@ -18,7 +18,13 @@ const api = {
     }
   },
   startMouseTracking: (): void => ipcRenderer.send('start-mouse-tracking'),
-  stopMouseTracking: (): void => ipcRenderer.send('stop-mouse-tracking')
+  stopMouseTracking: (): void => ipcRenderer.send('stop-mouse-tracking'),
+  startRecording: (): Promise<Result<{ tempPath: string }>> =>
+    ipcRenderer.invoke('recording:start'),
+  pushRecordingChunk: (chunk: ArrayBuffer): Promise<Result<null>> =>
+    ipcRenderer.invoke('recording:push', chunk),
+  finishRecording: (defaultName: string): Promise<Result<{ filePath: string }>> =>
+    ipcRenderer.invoke('recording:finish', defaultName)
 }
 
 if (process.contextIsolated) {

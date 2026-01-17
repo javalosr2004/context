@@ -1,9 +1,9 @@
-import { app, shell, BrowserWindow, ipcMain, desktopCapturer, screen } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, desktopCapturer, screen, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import log from './logger'
-import { FileHandle, open } from 'fs/promises'
+import { FileHandle, open, rename, unlink } from 'fs/promises'
 import type { ScreenSource } from '../shared/types'
 import { Result, Ok, Err } from '../shared/types'
 
@@ -52,6 +52,64 @@ async function startRecording(): Promise<Result<{ tempPath: string }>> {
     log.error('recording:start failed', { error: message })
     return Err(message)
   }
+}
+
+async function pushRecordingChunk(chunk: ArrayBuffer): Promise<Result<null>> {
+  if (!activeRecording) {
+    return Err("Recording hasn't started.")
+  }
+
+  try {
+    const buffer = Buffer.from(chunk)
+    log.info('recording:push', { bufferLength: buffer.length })
+    await activeRecording.handle.write(buffer)
+    return Ok(null)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    log.error('recording:push failed', { error: message })
+    return Err(message)
+  }
+}
+
+async function finishRecording(defaultName: string): Promise<Result<{ filePath: string }>> {
+  if (!activeRecording) {
+    return Err('No active recording')
+  }
+
+  try {
+    await activeRecording.handle.close()
+  } catch (error) {
+    log.error('recording:finish close failed', { error })
+  }
+
+  const { tempPath } = activeRecording
+  activeRecording = null
+
+  const win = mainWindow ?? BrowserWindow.getFocusedWindow()
+  if (!win || win.isDestroyed()) {
+    // No window, auto-save to videos folder
+    const finalPath = join(app.getPath('videos'), defaultName)
+    await rename(tempPath, finalPath)
+    log.info('recording:finish auto-saved', { finalPath })
+    return Ok({ filePath: finalPath })
+  }
+
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Save Screen Recording',
+    defaultPath: join(app.getPath('videos'), defaultName),
+    filters: [{ name: 'WebM Video', extensions: ['webm'] }]
+  })
+
+  if (canceled || !filePath) {
+    // TODO: Don't delete but keep in temp for 30 days.
+    await unlink(tempPath).catch(() => {})
+    log.info('recording:finish canceled, temp deleted')
+    return Err('Save canceled')
+  }
+
+  await rename(tempPath, filePath)
+  log.info('recording:finish saved', { filePath })
+  return Ok({ filePath })
 }
 
 function createWindow(): void {
@@ -129,6 +187,21 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('recording:start', async (): Promise<Result<{ tempPath: string }>> => {
+    return startRecording()
+  })
+
+  ipcMain.handle('recording:push', async (_event, chunk: ArrayBuffer): Promise<Result<null>> => {
+    return pushRecordingChunk(chunk)
+  })
+
+  ipcMain.handle(
+    'recording:finish',
+    async (_event, defaultName: string): Promise<Result<{ filePath: string }>> => {
+      return finishRecording(defaultName)
+    }
+  )
+
   // Mouse tracking controls
   ipcMain.on('start-mouse-tracking', () => {
     startMouseTracking()
@@ -137,8 +210,6 @@ app.whenReady().then(() => {
   ipcMain.on('stop-mouse-tracking', () => {
     stopMouseTracking()
   })
-
-  ipcMain.on('recording:start', () => {})
 
   createWindow()
 

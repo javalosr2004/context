@@ -1,30 +1,12 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-
-export interface CaptureStatus {
-  isRunning: boolean
-  capturesDir: string
-}
-
-export interface GoStatus {
-  running: boolean
-  fps: number
-  captureCount: number
-  uptime: number
-  outputDir: string
-}
-
-export interface CaptureResult {
-  success: boolean
-  status?: CaptureStatus
-  error?: string
-}
+import type { ScreenSource, MousePosition, Result } from '../shared/types'
 
 interface Api {
-  startCapture: (fps?: number) => Promise<CaptureResult>
-  stopCapture: () => Promise<CaptureResult>
-  getCaptureStatus: () => Promise<CaptureStatus>
-  getGoStatus: () => Promise<GoStatus | null>
-  onCaptureStatus: (callback: (status: CaptureStatus) => void) => () => void
+  getSources: () => Promise<Result<ScreenSource[]>>
+  getCursorDisplay: () => Promise<Result<Electron.Display>>
+  onMousePosition: (callback: (position: MousePosition) => void) => () => void
+  startMouseTracking: () => void
+  stopMouseTracking: () => void
 }
 
 declare global {

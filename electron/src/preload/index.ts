@@ -1,39 +1,24 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { ScreenSource, MousePosition, Result } from '../shared/types'
 
-export interface CaptureStatus {
-  isRunning: boolean
-  capturesDir: string
-}
-
-export interface GoStatus {
-  running: boolean
-  fps: number
-  captureCount: number
-  uptime: number
-  outputDir: string
-}
-
-export interface CaptureResult {
-  success: boolean
-  status?: CaptureStatus
-  error?: string
-}
+type Unsubscribe = () => void
 
 const api = {
-  startCapture: (fps?: number): Promise<CaptureResult> => ipcRenderer.invoke('capture:start', fps),
-  stopCapture: (): Promise<CaptureResult> => ipcRenderer.invoke('capture:stop'),
-  getCaptureStatus: (): Promise<CaptureStatus> => ipcRenderer.invoke('capture:status'),
-  getGoStatus: (): Promise<GoStatus | null> => ipcRenderer.invoke('capture:go-status'),
-  onCaptureStatus: (callback: (status: CaptureStatus) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, status: CaptureStatus): void => {
-      callback(status)
+  getSources: (): Promise<Result<ScreenSource[]>> => ipcRenderer.invoke('get-sources'),
+  getCursorDisplay: (): Promise<Result<Electron.Display>> =>
+    ipcRenderer.invoke('get-cursor-display'),
+  onMousePosition(callback: (position: MousePosition) => void): Unsubscribe {
+    const handler = (_event: Electron.IpcRendererEvent, position: MousePosition): void => {
+      callback(position)
     }
-    ipcRenderer.on('capture:status', handler)
-    return (): void => {
-      ipcRenderer.removeListener('capture:status', handler)
+    ipcRenderer.on('mouse-position', handler)
+    return () => {
+      ipcRenderer.removeListener('mouse-position', handler)
     }
-  }
+  },
+  startMouseTracking: (): void => ipcRenderer.send('start-mouse-tracking'),
+  stopMouseTracking: (): void => ipcRenderer.send('stop-mouse-tracking')
 }
 
 if (process.contextIsolated) {

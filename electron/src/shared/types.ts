@@ -30,3 +30,13 @@ export interface MousePosition {
   y: number
 }
 
+/**
+ * Mouse click event data
+ */
+export interface MouseClick {
+  x: number
+  y: number
+  button: 'left' | 'right' | 'middle'
+  timestamp: number // ms since UTC epoch
+}
+

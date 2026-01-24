@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { ScreenSource, MousePosition, Result } from '../shared/types'
+import type { ScreenSource, MousePosition, MouseClick, Result } from '../shared/types'
 
 type Unsubscribe = () => void
 
@@ -17,8 +17,19 @@ const api = {
       ipcRenderer.removeListener('mouse-position', handler)
     }
   },
+  onMouseClick(callback: (click: MouseClick) => void): Unsubscribe {
+    const handler = (_event: Electron.IpcRendererEvent, click: MouseClick): void => {
+      callback(click)
+    }
+    ipcRenderer.on('mouse-click', handler)
+    return () => {
+      ipcRenderer.removeListener('mouse-click', handler)
+    }
+  },
   startMouseTracking: (): void => ipcRenderer.send('start-mouse-tracking'),
   stopMouseTracking: (): void => ipcRenderer.send('stop-mouse-tracking'),
+  startMouseClickTracking: (): void => ipcRenderer.send('start-mouse-click-tracking'),
+  stopMouseClickTracking: (): void => ipcRenderer.send('stop-mouse-click-tracking'),
   startRecording: (): Promise<Result<{ tempPath: string }>> =>
     ipcRenderer.invoke('recording:start'),
   pushRecordingChunk: (chunk: ArrayBuffer): Promise<Result<null>> =>

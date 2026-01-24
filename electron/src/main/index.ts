@@ -4,17 +4,20 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import log from './logger'
 import { FileHandle, open, rename, unlink } from 'fs/promises'
-import type { ScreenSource } from '../shared/types'
+import type { ScreenSource, MouseClick } from '../shared/types'
 import { Result, Ok, Err } from '../shared/types'
+import { uIOhook, UiohookMouseEvent } from 'uiohook-napi'
 
 interface ActiveRecording {
   handle: FileHandle
   tempPath: string
+  startTime: number // ms since UTC epoch
 }
 
 let mainWindow: BrowserWindow | null = null
 let mouseTrackingInterval: NodeJS.Timeout | null = null
 let activeRecording: ActiveRecording | null = null
+let mouseClickTrackingActive = false
 
 function startMouseTracking(): void {
   if (mouseTrackingInterval) return
@@ -34,6 +37,47 @@ function stopMouseTracking(): void {
   }
 }
 
+function getMouseButton(button: number): MouseClick['button'] {
+  switch (button) {
+    case 1:
+      return 'left'
+    case 2:
+      return 'right'
+    default:
+      return 'middle'
+  }
+}
+
+function handleMouseClick(e: UiohookMouseEvent): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const click: MouseClick = {
+      x: e.x,
+      y: e.y,
+      button: getMouseButton(e.button as number),
+      timestamp: Date.now()
+    }
+    mainWindow.webContents.send('mouse-click', click)
+  }
+}
+
+function startMouseClickTracking(): void {
+  if (mouseClickTrackingActive) return
+
+  uIOhook.on('click', handleMouseClick)
+  uIOhook.start()
+  mouseClickTrackingActive = true
+  log.info('Mouse click tracking started')
+}
+
+function stopMouseClickTracking(): void {
+  if (!mouseClickTrackingActive) return
+
+  uIOhook.off('click', handleMouseClick)
+  uIOhook.stop()
+  mouseClickTrackingActive = false
+  log.info('Mouse click tracking stopped')
+}
+
 async function startRecording(): Promise<Result<{ tempPath: string }>> {
   if (activeRecording) {
     return Err('Recording already in progress')
@@ -41,9 +85,10 @@ async function startRecording(): Promise<Result<{ tempPath: string }>> {
 
   try {
     // Start temporary chunk storage.
-    const tempPath = join(app.getPath('temp'), `screen-recording-${Date.now()}.webm`)
+    const startTime = Date.now()
+    const tempPath = join(app.getPath('temp'), `screen-recording-${startTime}.webm`)
     const handle = await open(tempPath, 'w')
-    activeRecording = { handle, tempPath }
+    activeRecording = { handle, tempPath, startTime }
 
     log.info('recording:start', { tempPath })
     return Ok({ tempPath })
@@ -211,6 +256,15 @@ app.whenReady().then(() => {
     stopMouseTracking()
   })
 
+  // Mouse click tracking controls
+  ipcMain.on('start-mouse-click-tracking', () => {
+    startMouseClickTracking()
+  })
+
+  ipcMain.on('stop-mouse-click-tracking', () => {
+    stopMouseClickTracking()
+  })
+
   createWindow()
 
   app.on('activate', function () {
@@ -228,6 +282,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   log.info('App quitting')
   stopMouseTracking()
+  stopMouseClickTracking()
 })
 
 process.on('uncaughtException', (error) => {

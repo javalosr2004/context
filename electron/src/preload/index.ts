@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { ScreenSource, MousePosition, MouseClick, Result } from '../shared/types'
+import type {
+  ScreenSource,
+  MousePosition,
+  MouseClick,
+  Result,
+  RecordedMouseEvent
+} from '../shared/types'
 
 type Unsubscribe = () => void
 
@@ -26,16 +32,33 @@ const api = {
       ipcRenderer.removeListener('mouse-click', handler)
     }
   },
-  startMouseTracking: (): void => ipcRenderer.send('start-mouse-tracking'),
-  stopMouseTracking: (): void => ipcRenderer.send('stop-mouse-tracking'),
-  startMouseClickTracking: (): void => ipcRenderer.send('start-mouse-click-tracking'),
-  stopMouseClickTracking: (): void => ipcRenderer.send('stop-mouse-click-tracking'),
   startRecording: (): Promise<Result<{ tempPath: string }>> =>
     ipcRenderer.invoke('recording:start'),
   pushRecordingChunk: (chunk: ArrayBuffer): Promise<Result<null>> =>
     ipcRenderer.invoke('recording:push', chunk),
-  finishRecording: (defaultName: string): Promise<Result<{ filePath: string }>> =>
-    ipcRenderer.invoke('recording:finish', defaultName)
+  finishRecording: (defaultName: string): Promise<Result<{ zipPath: string }>> =>
+    ipcRenderer.invoke('recording:finish', defaultName),
+  importRecording: (
+    archivePath: string
+  ): Promise<Result<{ videoPath: string; eventsPath: string; events: RecordedMouseEvent[] }>> =>
+    ipcRenderer.invoke('recording:import', archivePath),
+  showOpenRecordingDialog: (): Promise<Result<{ filePath: string }>> =>
+    ipcRenderer.invoke('recording:show-open-dialog'),
+
+  // Viewer
+  openViewer: (): Promise<Result<null>> => ipcRenderer.invoke('viewer:open'),
+  closeViewer: (): Promise<Result<null>> => ipcRenderer.invoke('viewer:close'),
+  sendViewerData: (data: unknown): Promise<Result<null>> =>
+    ipcRenderer.invoke('viewer:send-data', data),
+  onViewerData(callback: (data: unknown) => void): Unsubscribe {
+    const handler = (_event: Electron.IpcRendererEvent, data: unknown): void => {
+      callback(data)
+    }
+    ipcRenderer.on('viewer:data', handler)
+    return () => {
+      ipcRenderer.removeListener('viewer:data', handler)
+    }
+  }
 }
 
 if (process.contextIsolated) {

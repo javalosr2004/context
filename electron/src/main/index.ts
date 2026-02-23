@@ -1,195 +1,96 @@
-import { app, shell, BrowserWindow, ipcMain, desktopCapturer, screen, dialog } from 'electron'
-import { join } from 'path'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import icon from '../../resources/icon.png?asset'
+import { app, ipcMain, desktopCapturer, dialog, screen, protocol } from 'electron'
+import { electronApp, optimizer } from '@electron-toolkit/utils'
 import log from './logger'
-import { FileHandle, open, rename, unlink } from 'fs/promises'
-import type { ScreenSource, MouseClick } from '../shared/types'
+import type { ScreenSource } from '../shared/types'
 import { Result, Ok, Err } from '../shared/types'
-import { uIOhook, UiohookMouseEvent } from 'uiohook-napi'
+import {
+  startRecording,
+  pushRecordingChunk,
+  finishRecording,
+  importRecording,
+  getRecordingItems,
+  readEventsFile,
+  setMainWindow as setRecordingMainWindow
+} from './recording'
+import type { RecordedMouseEvent } from '../shared/types'
+import { stopMouseTracking, setMainWindow as setMouseTrackingMainWindow } from './mouseTracking'
+import { createWindow, createViewerWindow, getMainWindow, getViewerWindow } from './window'
+import path from 'path'
+import fs from 'node:fs'
+import { Readable } from 'node:stream'
 
-interface ActiveRecording {
-  handle: FileHandle
-  tempPath: string
-  startTime: number // ms since UTC epoch
-}
-
-let mainWindow: BrowserWindow | null = null
-let mouseTrackingInterval: NodeJS.Timeout | null = null
-let activeRecording: ActiveRecording | null = null
-let mouseClickTrackingActive = false
-
-function startMouseTracking(): void {
-  if (mouseTrackingInterval) return
-
-  mouseTrackingInterval = setInterval(() => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      const point = screen.getCursorScreenPoint()
-      mainWindow.webContents.send('mouse-position', { x: point.x, y: point.y })
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: true
     }
-  }, 1000 / 60) // ~60fps
-}
-
-function stopMouseTracking(): void {
-  if (mouseTrackingInterval) {
-    clearInterval(mouseTrackingInterval)
-    mouseTrackingInterval = null
   }
-}
-
-function getMouseButton(button: number): MouseClick['button'] {
-  switch (button) {
-    case 1:
-      return 'left'
-    case 2:
-      return 'right'
-    default:
-      return 'middle'
-  }
-}
-
-function handleMouseClick(e: UiohookMouseEvent): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    const click: MouseClick = {
-      x: e.x,
-      y: e.y,
-      button: getMouseButton(e.button as number),
-      timestamp: Date.now()
-    }
-    mainWindow.webContents.send('mouse-click', click)
-  }
-}
-
-function startMouseClickTracking(): void {
-  if (mouseClickTrackingActive) return
-
-  uIOhook.on('click', handleMouseClick)
-  uIOhook.start()
-  mouseClickTrackingActive = true
-  log.info('Mouse click tracking started')
-}
-
-function stopMouseClickTracking(): void {
-  if (!mouseClickTrackingActive) return
-
-  uIOhook.off('click', handleMouseClick)
-  uIOhook.stop()
-  mouseClickTrackingActive = false
-  log.info('Mouse click tracking stopped')
-}
-
-async function startRecording(): Promise<Result<{ tempPath: string }>> {
-  if (activeRecording) {
-    return Err('Recording already in progress')
-  }
-
-  try {
-    // Start temporary chunk storage.
-    const startTime = Date.now()
-    const tempPath = join(app.getPath('temp'), `screen-recording-${startTime}.webm`)
-    const handle = await open(tempPath, 'w')
-    activeRecording = { handle, tempPath, startTime }
-
-    log.info('recording:start', { tempPath })
-    return Ok({ tempPath })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    log.error('recording:start failed', { error: message })
-    return Err(message)
-  }
-}
-
-async function pushRecordingChunk(chunk: ArrayBuffer): Promise<Result<null>> {
-  if (!activeRecording) {
-    return Err("Recording hasn't started.")
-  }
-
-  try {
-    const buffer = Buffer.from(chunk)
-    log.info('recording:push', { bufferLength: buffer.length })
-    await activeRecording.handle.write(buffer)
-    return Ok(null)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    log.error('recording:push failed', { error: message })
-    return Err(message)
-  }
-}
-
-async function finishRecording(defaultName: string): Promise<Result<{ filePath: string }>> {
-  if (!activeRecording) {
-    return Err('No active recording')
-  }
-
-  try {
-    await activeRecording.handle.close()
-  } catch (error) {
-    log.error('recording:finish close failed', { error })
-  }
-
-  const { tempPath } = activeRecording
-  activeRecording = null
-
-  const win = mainWindow ?? BrowserWindow.getFocusedWindow()
-  if (!win || win.isDestroyed()) {
-    // No window, auto-save to videos folder
-    const finalPath = join(app.getPath('videos'), defaultName)
-    await rename(tempPath, finalPath)
-    log.info('recording:finish auto-saved', { finalPath })
-    return Ok({ filePath: finalPath })
-  }
-
-  const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    title: 'Save Screen Recording',
-    defaultPath: join(app.getPath('videos'), defaultName),
-    filters: [{ name: 'WebM Video', extensions: ['webm'] }]
-  })
-
-  if (canceled || !filePath) {
-    // TODO: Don't delete but keep in temp for 30 days.
-    await unlink(tempPath).catch(() => {})
-    log.info('recording:finish canceled, temp deleted')
-    return Err('Save canceled')
-  }
-
-  await rename(tempPath, filePath)
-  log.info('recording:finish saved', { filePath })
-  return Ok({ filePath })
-}
-
-function createWindow(): void {
-  log.info('Creating main window')
-
-  mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
-    show: true,
-    autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false
-    }
-  })
-
-  mainWindow.on('ready-to-show', () => {
-    log.debug('Main window ready to show')
-    mainWindow!.show()
-  })
-
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
-
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
-}
+])
 
 app.whenReady().then(() => {
+
+
+  protocol.handle('media', async (request) => {
+    const url = new URL(request.url)
+    const pathname = decodeURIComponent(url.pathname)
+    const filePath = path.resolve(pathname)
+
+    const allowedHost = app.getPath('userData')
+    if (!filePath.startsWith(allowedHost)) {
+      return new Response(null, { status: 403 })
+    }
+
+    if (!fs.existsSync(filePath)) {
+      return new Response(null, { status: 404 })
+    }
+
+    const stat = fs.statSync(filePath)
+    const fileSize = stat.size
+    const mimeType = filePath.endsWith('.webm') ? 'video/webm' : 'video/mp4'
+
+    const rangeHeader = request.headers.get('Range')
+
+    if (rangeHeader) {
+      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/)
+      if (match) {
+        const start = parseInt(match[1], 10)
+        const end = match[2] ? parseInt(match[2], 10) : fileSize - 1
+        const chunkSize = end - start + 1
+
+        const stream = fs.createReadStream(filePath, { start, end })
+        const webStream = Readable.toWeb(stream) as ReadableStream
+
+        return new Response(webStream, {
+          status: 206,
+          headers: {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Content-Length': String(chunkSize),
+            'Content-Type': mimeType,
+            'Accept-Ranges': 'bytes'
+          }
+        })
+      }
+    }
+
+    const stream = fs.createReadStream(filePath)
+    const webStream = Readable.toWeb(stream) as ReadableStream
+
+    return new Response(webStream, {
+      status: 200,
+      headers: {
+        'Content-Length': String(fileSize),
+        'Content-Type': mimeType,
+        'Accept-Ranges': 'bytes'
+      }
+    })
+  })
+
+    
   log.info('App ready', {
     version: app.getVersion(),
     platform: process.platform,
@@ -201,6 +102,14 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
+
+  // Initialize windows and set references
+  const mainWindow = createWindow()
+  setRecordingMainWindow(mainWindow)
+  setMouseTrackingMainWindow(mainWindow)
+
+  // Create the viewer window (hidden, ready to show on demand)
+  createViewerWindow()
 
   // Get available screen sources for recording
   ipcMain.handle('get-sources', async (): Promise<Result<ScreenSource[]>> => {
@@ -232,6 +141,7 @@ app.whenReady().then(() => {
     }
   })
 
+  // Recording IPC handlers
   ipcMain.handle('recording:start', async (): Promise<Result<{ tempPath: string }>> => {
     return startRecording()
   })
@@ -242,33 +152,111 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'recording:finish',
-    async (_event, defaultName: string): Promise<Result<{ filePath: string }>> => {
+    async (_event, defaultName: string): Promise<Result<{ zipPath: string }>> => {
       return finishRecording(defaultName)
     }
   )
 
-  // Mouse tracking controls
-  ipcMain.on('start-mouse-tracking', () => {
-    startMouseTracking()
+  // Show open dialog to pick a .ctx file
+  ipcMain.handle(
+    'recording:show-open-dialog',
+    async (): Promise<Result<{ filePath: string }>> => {
+      const win = getMainWindow()
+      const { canceled, filePaths } = win
+        ? await dialog.showOpenDialog(win, {
+            title: 'Open Recording',
+            filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
+            properties: ['openFile']
+          })
+        : await dialog.showOpenDialog({
+            title: 'Open Recording',
+            filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
+            properties: ['openFile']
+          })
+
+      if (canceled || filePaths.length === 0) {
+        return Err('Dialog canceled')
+      }
+      return Ok({ filePath: filePaths[0] })
+    }
+  )
+
+  // Import a .ctx recording archive and extract it
+  ipcMain.handle(
+    'recording:import',
+    async (
+      _event,
+      archivePath: string
+    ): Promise<Result<{ videoPath: string; eventsPath: string; events: RecordedMouseEvent[] }>> => {
+      try {
+        const outputDir = await importRecording(archivePath)
+        const { videoPath, eventsPath } = await getRecordingItems(outputDir)
+        const events = await readEventsFile(eventsPath)
+        return Ok({ videoPath, eventsPath, events })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log.error('recording:import failed', { error: message })
+        return Err(message)
+      }
+    }
+  )
+
+  // Viewer IPC handlers
+  ipcMain.handle('viewer:open', async (): Promise<Result<null>> => {
+    try {
+      let viewer = getViewerWindow()
+      if (!viewer) {
+        viewer = createViewerWindow()
+      }
+      viewer.show()
+      log.info('Viewer window opened')
+      return Ok(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log.error('viewer:open failed', { error: message })
+      return Err(message)
+    }
   })
 
-  ipcMain.on('stop-mouse-tracking', () => {
-    stopMouseTracking()
+  ipcMain.handle('viewer:close', async (): Promise<Result<null>> => {
+    try {
+      const viewer = getViewerWindow()
+      if (viewer) {
+        viewer.hide()
+        log.info('Viewer window hidden')
+      }
+      return Ok(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log.error('viewer:close failed', { error: message })
+      return Err(message)
+    }
   })
 
-  // Mouse click tracking controls
-  ipcMain.on('start-mouse-click-tracking', () => {
-    startMouseClickTracking()
-  })
-
-  ipcMain.on('stop-mouse-click-tracking', () => {
-    stopMouseClickTracking()
-  })
-
-  createWindow()
+  // Send data to the viewer window
+  ipcMain.handle(
+    'viewer:send-data',
+    async (_event, data: unknown): Promise<Result<null>> => {
+      try {
+        const viewer = getViewerWindow()
+        if (viewer) {
+          viewer.webContents.send('viewer:data', data)
+        }
+        return Ok(null)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log.error('viewer:send-data failed', { error: message })
+        return Err(message)
+      }
+    }
+  )
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (getMainWindow() === null) {
+      const newWindow = createWindow()
+      setRecordingMainWindow(newWindow)
+      setMouseTrackingMainWindow(newWindow)
+    }
   })
 })
 
@@ -282,7 +270,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   log.info('App quitting')
   stopMouseTracking()
-  stopMouseClickTracking()
 })
 
 process.on('uncaughtException', (error) => {

@@ -1,0 +1,31 @@
+[package]
+name = "rust-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rdev = "0.5.3"
+scap = "0.0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ts-rs = "11.1"
+accessibility-sys = "0.2.0"
+
+# macOS accessibility FFI
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+core-graphics = "0.24"
+
+# Configure ts-rs to export TypeScript types directly to the Electron resources folder
+[package.metadata.ts-rs]
+output_directory = "../resources/types/"
+
+[[bin]]
+name = "accessibility"
+path = "src/accessibility/main.rs"
+
+[[bin]]
+name = "accessibility"
+path = "src/accessibility/main.rs"
+

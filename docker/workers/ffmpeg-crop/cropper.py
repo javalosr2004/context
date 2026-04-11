@@ -1,0 +1,310 @@
+"""Crop stills from screen recordings using events.jsonl bounding boxes."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from pydantic import BaseModel
+
+
+class BBox(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+class CropSection(BaseModel):
+    timestamp_ms: int
+    bbox: BBox
+
+
+class CropJob(BaseModel):
+    """Job JSON: paths to video, events.jsonl, and output directory."""
+
+    video_path: str
+    events_path: str
+    output_dir: str = "./output"
+
+
+def _int_from_ax(val: object) -> int | None:
+    if val is None:
+        return None
+    try:
+        if isinstance(val, bool):
+            return None
+        if isinstance(val, int):
+            return val
+        if isinstance(val, float):
+            return int(round(val))
+        s = str(val).strip()
+        if "." in s:
+            return int(float(s))
+        return int(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bbox_from_bounding_box_dict(bb: object) -> BBox | None:
+    """Parse ``boundingBox`` object (new schema)."""
+    if not isinstance(bb, dict):
+        return None
+    x = _int_from_ax(bb.get("x"))
+    y = _int_from_ax(bb.get("y"))
+    w = _int_from_ax(bb.get("width"))
+    h = _int_from_ax(bb.get("height"))
+    if x is None or y is None or w is None or h is None:
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return BBox(x=x, y=y, width=w, height=h)
+
+
+def _bbox_from_ax_snapshot(ax: dict) -> BBox | None:
+    """
+    Extract a crop rect from AxSnapshot: ``current``, then ``parents``, then ``children``.
+    Parents are ordered immediate-parent-first (as emitted by the recorder).
+    """
+    current = ax.get("current")
+    if isinstance(current, dict):
+        bb = _bbox_from_bounding_box_dict(current.get("boundingBox"))
+        if bb is not None:
+            return bb
+
+    parents = ax.get("parents")
+    if isinstance(parents, list):
+        for p in parents:
+            if isinstance(p, dict):
+                bb = _bbox_from_bounding_box_dict(p.get("boundingBox"))
+                if bb is not None:
+                    return bb
+
+    children = ax.get("children")
+    if isinstance(children, list):
+        for c in children:
+            if isinstance(c, dict):
+                bb = _bbox_from_bounding_box_dict(c.get("boundingBox"))
+                if bb is not None:
+                    return bb
+
+    return None
+
+
+def _bbox_from_legacy_flat_ax(ax: dict) -> BBox | None:
+    """Legacy flat map: ``bbox_x``, ``bbox_y``, ``bbox_width``, ``bbox_height``."""
+    x = _int_from_ax(ax.get("bbox_x"))
+    y = _int_from_ax(ax.get("bbox_y"))
+    w = _int_from_ax(ax.get("bbox_width"))
+    h = _int_from_ax(ax.get("bbox_height"))
+    if x is None or y is None or w is None or h is None:
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return BBox(x=x, y=y, width=w, height=h)
+
+
+def bbox_from_ax_attributes(ax: dict) -> BBox | None:
+    """
+    Primary bbox for cropping.
+
+    - **AxSnapshot**: structured ``current`` / ``parents`` / ``children`` with
+      ``boundingBox`` on each node (camelCase).
+    - **Legacy**: flat ``bbox_*`` keys only.
+    """
+    if isinstance(ax.get("current"), dict):
+        snap = _bbox_from_ax_snapshot(ax)
+        if snap is not None:
+            return snap
+
+    if any(k in ax for k in ("bbox_x", "bbox_y", "bbox_width", "bbox_height")):
+        return _bbox_from_legacy_flat_ax(ax)
+
+    return None
+
+
+def parse_events_jsonl(path: Path) -> tuple[int, list[CropSection]]:
+    """
+    Read events.jsonl: ``recording_start`` supplies ``timeUtcMs`` as the video baseline;
+    other lines with ``timeUtcMs`` and a usable bbox in ``axAttributes`` become crop sections.
+    """
+    text = path.read_text(encoding="utf-8")
+    base_ms: int | None = None
+    sections: list[CropSection] = []
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+
+        et = obj.get("eventType")
+        if et == "recording_start" and "timeUtcMs" in obj:
+            base_ms = int(obj["timeUtcMs"])
+            continue
+
+        if "timeUtcMs" not in obj:
+            continue
+        ax = obj.get("axAttributes")
+        if not isinstance(ax, dict):
+            continue
+        bb = bbox_from_ax_attributes(ax)
+        if bb is None:
+            continue
+        sections.append(
+            CropSection(timestamp_ms=int(obj["timeUtcMs"]), bbox=bb)
+        )
+
+    if base_ms is None:
+        raise ValueError(
+            f"No recording_start with timeUtcMs in {path}"
+        )
+    return base_ms, sections
+
+
+def load_crop_job(path: Path) -> CropJob:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Job JSON root must be an object")
+    return CropJob.model_validate(data)
+
+
+def _resolve_relative(raw: str, base: Path) -> Path:
+    p = Path(raw).expanduser()
+    return p.resolve() if p.is_absolute() else (base / p).resolve()
+
+
+def resolve_job_paths(job: CropJob, job_file: Path) -> tuple[Path, Path, Path]:
+    base = job_file.parent
+    return (
+        _resolve_relative(job.video_path, base),
+        _resolve_relative(job.events_path, base),
+        _resolve_relative(job.output_dir, base),
+    )
+
+
+def media_duration_seconds(video_path: str | Path) -> float | None:
+    """Return container duration in seconds, or None if ffprobe is unavailable."""
+    try:
+        r = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return float(r.stdout.strip())
+    except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
+        return None
+
+
+def get_cropped_region(video: str, crop: CropSection, t_sec: float, out_path: str) -> None:
+    bbox = crop.bbox
+    vf = f"crop={bbox.width}:{bbox.height}:{bbox.x}:{bbox.y}"
+    # -ss after -i: frame-accurate seek for still extraction (avoids empty output when mis-seeking).
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        video,
+        "-ss",
+        str(t_sec),
+        "-vf",
+        vf,
+        "-frames:v",
+        "1",
+        out_path,
+    ]
+    subprocess.run(cmd, check=True)
+
+
+def run_crop(
+    events_file: Path,
+    video_path: Path,
+    output_dir: Path,
+) -> None:
+    base_ms, crop_sections = parse_events_jsonl(events_file)
+    if not crop_sections:
+        raise ValueError(
+            "No crop rows: need timeUtcMs and a bbox (AxSnapshot: current/parents/children "
+            "boundingBox, or legacy bbox_x/y/width/height) in axAttributes"
+        )
+
+    output_dir = output_dir.expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = video_path.stem
+
+    duration = media_duration_seconds(video_path)
+
+    for crop in crop_sections:
+        t_sec = (crop.timestamp_ms - base_ms) / 1000.0
+        if t_sec < 0:
+            print(
+                f"skip timestamp_ms={crop.timestamp_ms}: negative media time {t_sec:.3f}s "
+                f"(check recording_start timeUtcMs)",
+                file=sys.stderr,
+            )
+            continue
+        if duration is not None and t_sec >= duration:
+            print(
+                f"skip timestamp_ms={crop.timestamp_ms}: seek {t_sec:.3f}s >= "
+                f"video duration {duration:.3f}s",
+                file=sys.stderr,
+            )
+            continue
+
+        get_cropped_region(
+            str(video_path),
+            crop,
+            t_sec,
+            str(output_dir / f"{stem}_{crop.timestamp_ms}.png"),
+        )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Crop still frames from video using a job JSON (video_path, events_path, output_dir)."
+    )
+    parser.add_argument(
+        "job_path",
+        type=Path,
+        help="JSON job file with video_path, events_path, and output_dir",
+    )
+    args = parser.parse_args()
+
+    job_file = args.job_path.expanduser().resolve()
+    if not job_file.is_file():
+        raise SystemExit(f"job file not found: {job_file}")
+
+    job = load_crop_job(job_file)
+    video_path, events_file, out_dir = resolve_job_paths(job, job_file)
+
+    if not events_file.is_file():
+        raise SystemExit(f"events file not found: {events_file}")
+    if not video_path.is_file():
+        raise SystemExit(f"video not found: {video_path}")
+
+    run_crop(events_file, video_path, out_dir)
+
+
+if __name__ == "__main__":
+    main()

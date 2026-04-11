@@ -1,8 +1,7 @@
-use accessibility::AXUIElementRef;
-use accessibility::{
-    AXUIElementCopyAttributeNames, AXUIElementCopyAttributeValue, AXValueGetValue, AXValueRef,
-    kAXParentAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize,
+use accessibility_sys::{
+    AXUIElementCopyAttributeNames, AXUIElementCopyAttributeValue, AXUIElementRef, AXValueGetValue,
+    AXValueRef, kAXChildrenAttribute, kAXParentAttribute, kAXPositionAttribute, kAXSizeAttribute,
+    kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
     array::CFArray,
@@ -11,9 +10,10 @@ use core_foundation::{
     number::CFNumber,
     string::CFString,
 };
-use core_foundation_sys::base::CFRelease;
+use core_foundation_sys::array::CFArrayRef;
+use core_foundation_sys::base::{CFRelease, CFRetain};
+use crate::accessibility::ax_snapshot::{AxAttributes, AxBoundingBox, AxSnapshot};
 use core_graphics::geometry::{CGPoint, CGSize};
-use std::collections::BTreeMap;
 use std::mem;
 use std::ptr;
 
@@ -25,6 +25,7 @@ pub struct OwnedAXUIElement {
 
 impl OwnedAXUIElement {
     const MAX_PARENT_DEPTH: usize = 8;
+    const MAX_CHILDREN_SCAN: usize = 64;
 
     /// Construct from a `Create`/`Copy` API result (already retained, +1).
     pub fn from_create_rule(ptr: AXUIElementRef) -> Option<Self> {
@@ -118,6 +119,47 @@ impl OwnedAXUIElement {
             OwnedAXUIElement::from_create_rule(parent as AXUIElementRef).ok_or(err)
         }
     }
+
+    /// First `max` children from `AXChildren`. Each child is `CFRetain`d so it outlives the array.
+    fn first_children(&self, max: usize) -> Vec<OwnedAXUIElement> {
+        let Ok(value) = self.copy_attr_value(kAXChildrenAttribute) else {
+            return vec![];
+        };
+        let array: CFArray =
+            unsafe { CFArray::wrap_under_create_rule(value as CFArrayRef) };
+        let mut out = Vec::new();
+        for ptr in array.get_all_values().into_iter().take(max) {
+            if ptr.is_null() {
+                continue;
+            }
+            unsafe {
+                let retained = CFRetain(ptr as CFTypeRef) as AXUIElementRef;
+                if let Some(child) = OwnedAXUIElement::from_create_rule(retained) {
+                    out.push(child);
+                }
+            }
+        }
+        out
+    }
+
+    /// Children of this element whose bounding box contains `(x, y)`.
+    /// If this element is a leaf (no `AXChildren`), falls back to the
+    /// immediate parent's children that contain the point.
+    fn children_at_point(&self, x: f64, y: f64) -> Vec<OwnedAXUIElement> {
+        let mut ch = self.first_children(Self::MAX_CHILDREN_SCAN);
+        if ch.is_empty() {
+            if let Ok(parent) = self.get_parent() {
+                ch = parent.first_children(Self::MAX_CHILDREN_SCAN);
+            }
+        }
+        ch.into_iter()
+            .filter(|child| {
+                let Some(p) = child.copy_point_attr(kAXPositionAttribute) else { return false };
+                let Some(s) = child.copy_size_attr(kAXSizeAttribute) else { return false };
+                x >= p.x && x <= p.x + s.width && y >= p.y && y <= p.y + s.height
+            })
+            .collect()
+    }
     
     pub fn print_element_attributes(&self, label: &str) {
         println!("{label}:");
@@ -148,119 +190,72 @@ impl OwnedAXUIElement {
         println!();
     }
 
-    fn write_snapshot_with_prefix(
-        elem: &OwnedAXUIElement,
-        prefix: &str,
-        attrs: &mut BTreeMap<String, String>,
-    ) -> Result<(), i32> {
-        for attr_name in elem.copy_attribute_names()? {
-            if let Ok(value) = elem.copy_attr_as_string(&attr_name) {
-                attrs.insert(format!("{prefix}{attr_name}"), value);
-            }
-        }
-
-        if let (Some(p), Some(s)) = (
-            elem.copy_point_attr(kAXPositionAttribute),
-            elem.copy_size_attr(kAXSizeAttribute),
-        ) {
-            attrs.insert(format!("{prefix}bbox_x"), format!("{:.0}", p.x));
-            attrs.insert(format!("{prefix}bbox_y"), format!("{:.0}", p.y));
-            attrs.insert(format!("{prefix}bbox_width"), format!("{:.0}", s.width));
-            attrs.insert(format!("{prefix}bbox_height"), format!("{:.0}", s.height));
-        }
-
-        Ok(())
-    }
-
-    fn write_intent_snapshot_with_prefix(
-        elem: &OwnedAXUIElement,
-        prefix: &str,
-        attrs: &mut BTreeMap<String, String>,
-    ) {
-        if let Ok(role) = elem.copy_attr_as_string("AXRole") {
-            attrs.insert(format!("{prefix}AXRole"), role);
-        }
-
-        if let Ok(identifier) = elem.copy_attr_as_string("AXIdentifier") {
-            attrs.insert(format!("{prefix}AXIdentifier"), identifier);
-        }
-
-        if let Ok(class_list) = elem.copy_attr_as_string("AXDOMClassList") {
-            attrs.insert(format!("{prefix}AXDOMClassList"), class_list);
-        }
-
-        let title_or_value = elem
-            .copy_attr_as_string("AXTitle")
+    /// Read a string attribute, treating empty strings as absent.
+    fn copy_nonempty_attr(elem: &OwnedAXUIElement, attr: &str) -> Option<String> {
+        elem.copy_attr_as_string(attr)
             .ok()
-            .or_else(|| elem.copy_attr_as_string("AXValue").ok());
-        if let Some(text) = title_or_value {
-            attrs.insert(format!("{prefix}AXTitleOrValue"), text);
-        }
+            .filter(|s| !s.is_empty())
+    }
+
+    fn fill_intent_attributes(elem: &OwnedAXUIElement) -> AxAttributes {
+        let mut a = AxAttributes::default();
+
+        a.ax_role = Self::copy_nonempty_attr(elem, "AXRole");
+        a.ax_subrole = Self::copy_nonempty_attr(elem, "AXSubrole");
+        a.ax_role_description = Self::copy_nonempty_attr(elem, "AXRoleDescription");
+        a.ax_title = Self::copy_nonempty_attr(elem, "AXTitle");
+        a.ax_value = Self::copy_nonempty_attr(elem, "AXValue");
+        a.ax_description = Self::copy_nonempty_attr(elem, "AXDescription");
+        a.ax_label = Self::copy_nonempty_attr(elem, "AXLabel");
+        a.ax_help = Self::copy_nonempty_attr(elem, "AXHelp");
+        a.ax_placeholder_value = Self::copy_nonempty_attr(elem, "AXPlaceholderValue");
+        a.ax_identifier = Self::copy_nonempty_attr(elem, "AXIdentifier");
+        a.ax_dom_identifier = Self::copy_nonempty_attr(elem, "AXDOMIdentifier");
+        a.ax_dom_class_list = Self::copy_nonempty_attr(elem, "AXDOMClassList");
 
         if let (Some(p), Some(s)) = (
             elem.copy_point_attr(kAXPositionAttribute),
             elem.copy_size_attr(kAXSizeAttribute),
         ) {
-            attrs.insert(format!("{prefix}bbox_x"), format!("{:.0}", p.x));
-            attrs.insert(format!("{prefix}bbox_y"), format!("{:.0}", p.y));
-            attrs.insert(format!("{prefix}bbox_width"), format!("{:.0}", s.width));
-            attrs.insert(format!("{prefix}bbox_height"), format!("{:.0}", s.height));
+            a.bounding_box = Some(AxBoundingBox {
+                x: f64::from(p.x),
+                y: f64::from(p.y),
+                width: f64::from(s.width),
+                height: f64::from(s.height),
+            });
         }
+
+        a
     }
 
-    pub fn attribute_snapshot(&self) -> Result<BTreeMap<String, String>, i32> {
-        let mut attrs = BTreeMap::new();
-        Self::write_snapshot_with_prefix(self, "", &mut attrs)?;
+    /// Intent subset (role, identifier, title/value, bbox) for hit target, ancestors, and
+    /// children whose bounding box contains `(mouse_x, mouse_y)`.
+    pub fn intent_ax_snapshot(&self, mouse_x: f64, mouse_y: f64) -> AxSnapshot {
+        let mut current = Self::fill_intent_attributes(self);
+        current.selected = Some(true);
 
+        let mut parents = Vec::new();
         let mut depth = 1usize;
         let mut current_parent = self.get_parent().ok();
         while let Some(parent) = current_parent {
             if depth > Self::MAX_PARENT_DEPTH {
                 break;
             }
-
-            let prefix = format!("parent_{depth}_");
-            let _ = Self::write_snapshot_with_prefix(&parent, &prefix, &mut attrs);
+            parents.push(Self::fill_intent_attributes(&parent));
             current_parent = parent.get_parent().ok();
             depth += 1;
         }
 
-        Ok(attrs)
-    }
+        let children = self
+            .children_at_point(mouse_x, mouse_y)
+            .into_iter()
+            .map(|c| Self::fill_intent_attributes(&c))
+            .collect();
 
-    pub fn intent_attribute_snapshot(&self) -> BTreeMap<String, String> {
-        let mut attrs = BTreeMap::new();
-        Self::write_intent_snapshot_with_prefix(self, "", &mut attrs);
-
-        let mut depth = 1usize;
-        let mut current_parent = self.get_parent().ok();
-        while let Some(parent) = current_parent {
-            if depth > Self::MAX_PARENT_DEPTH {
-                break;
-            }
-
-            let prefix = format!("parent_{depth}_");
-            Self::write_intent_snapshot_with_prefix(&parent, &prefix, &mut attrs);
-            current_parent = parent.get_parent().ok();
-            depth += 1;
-        }
-
-        attrs
-    }
-    
-    pub fn print_parent_hierarchy(&self) {
-        let mut depth = 0usize;
-        let mut current_owner: Option<OwnedAXUIElement> = self.get_parent().ok();
-    
-        loop {
-            let Some(parent) = current_owner else {
-                break;
-            };
-    
-            depth += 1;
-            parent.print_element_attributes(&format!("Parent[{depth}]"));
-    
-            current_owner = parent.get_parent().ok();
+        AxSnapshot {
+            current,
+            parents,
+            children,
         }
     }
 }

@@ -1043,6 +1043,7 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys 0.8.7",
  "core-graphics 0.24.0",
+ "objc",
  "rdev",
  "scap",
  "serde",

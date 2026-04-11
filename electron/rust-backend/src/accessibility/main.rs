@@ -1,4 +1,4 @@
-use rust_backend::accessibility_sys::init::{AXError, AccessibilityTree};
+use rust_backend::accessibility::init::{AXError, AccessibilityTree};
 use rust_backend::mouse::MouseListener;
 
 fn main() {
@@ -16,6 +16,8 @@ fn main() {
         }
     };
 
+    tree.activate_all_apps();
+
     loop {
         let Some(event) = listener.recv() else {
             break;
@@ -29,7 +31,6 @@ fn main() {
         match tree.get_ax_element_at_position(event.x, event.y) {
             Ok(elem) => {
                 elem.print_element_attributes("Element");
-                // elem.print_parent_hierarchy();
             }
             Err(err) => {
                 eprintln!("Failed to get element at mouse position: {err:?}");

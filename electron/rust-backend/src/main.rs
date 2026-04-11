@@ -1,14 +1,15 @@
 use clap::{Parser, Subcommand};
 use rust_backend::mouse::{MouseEvent, MouseListener};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use ts_rs::TS;
-use rust_backend::accessibility_sys::init::AccessibilityTree;
+use rust_backend::accessibility::ax_snapshot::AxSnapshot;
+use rust_backend::accessibility::init::AccessibilityTree;
+use rust_backend::workspace::WorkspaceObserver;
 
 // ─── RPC Result Types ───────────────────────────────────────────────────────
 
@@ -35,8 +36,8 @@ pub struct RpcErrorResult {
 #[ts(export, export_to = "rust_types.ts")]
 pub struct CapturedMouseEvent {
     pub mouse: MouseEvent,
-    #[ts(type = "Record<string, string> | null")]
-    pub ax_attributes: Option<BTreeMap<String, String>>,
+    /// Hit target, ancestor chain, and first two `AXChildren` (intent fields only).
+    pub ax_attributes: Option<AxSnapshot>,
 }
 
 #[derive(Parser)]
@@ -80,18 +81,27 @@ enum CollectorCommand {
 struct EventCollector {
     cmd_tx: Sender<CollectorCommand>,
     event_rx: Receiver<CapturedMouseEvent>,
+    ready_rx: Option<Receiver<usize>>,
+    activated_count: Option<usize>,
     _thread: JoinHandle<()>,
+    _workspace_observer: WorkspaceObserver,
 }
 
 impl EventCollector {
     fn new() -> Self {
         let (cmd_tx, cmd_rx) = channel::<CollectorCommand>();
         let (event_tx, event_rx) = channel::<CapturedMouseEvent>();
+        let (ready_tx, ready_rx) = channel::<usize>();
+        let (launch_tx, launch_rx) = channel::<i32>();
+
+        let workspace_observer = WorkspaceObserver::start(launch_tx);
 
         let worker = thread::spawn(move || {
             let listener = MouseListener::new();
             let mut running = true;
             let tree = AccessibilityTree::new().ok();
+            let activated = tree.as_ref().map_or(0, |t| t.activate_all_apps());
+            let _ = ready_tx.send(activated);
 
             loop {
                 while let Ok(cmd) = cmd_rx.try_recv() {
@@ -107,15 +117,21 @@ impl EventCollector {
                     }
                 }
 
+                while let Ok(pid) = launch_rx.try_recv() {
+                    if let Some(ref t) = tree {
+                        t.activate_pid(pid);
+                    }
+                }
+
                 if !running {
                     thread::sleep(Duration::from_millis(20));
                     continue;
                 }
 
                 if let Some(mouse) = listener.try_recv() {
-                    let ax_attributes = tree.as_ref().and_then(|t| {
-                        t.get_ax_attributes_at_position(mouse.x, mouse.y).ok()
-                    });
+                    let ax_attributes = tree
+                        .as_ref()
+                        .and_then(|t| t.get_ax_snapshot_at_position(mouse.x, mouse.y).ok());
 
                     let _ = event_tx.send(CapturedMouseEvent {
                         mouse,
@@ -130,8 +146,21 @@ impl EventCollector {
         Self {
             cmd_tx,
             event_rx,
+            ready_rx: Some(ready_rx),
+            activated_count: None,
             _thread: worker,
+            _workspace_observer: workspace_observer,
         }
+    }
+
+    /// Blocks until the worker thread finishes activating all apps.
+    fn wait_ready(&mut self) -> usize {
+        if let Some(count) = self.activated_count {
+            return count;
+        }
+        let count = self.ready_rx.take().and_then(|rx| rx.recv().ok()).unwrap_or(0);
+        self.activated_count = Some(count);
+        count
     }
 
     fn start(&self) {
@@ -167,6 +196,14 @@ struct Response {
 
 fn handle_request(req: Request) -> Response {
     let result = match req.method.as_str() {
+        "activate_apps" => {
+            let collector = get_event_collector();
+            let count = collector.lock().unwrap().wait_ready();
+            serde_json::to_value(StatusResult {
+                status: format!("activated {count} apps"),
+            })
+            .unwrap()
+        }
         "start_mouse_listener" => {
             let collector = get_event_collector();
             collector.lock().unwrap().start();

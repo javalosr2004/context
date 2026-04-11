@@ -3,6 +3,7 @@ productName: Context Capture
 directories:
   buildResources: build
 files:
+  - out/**/*
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
@@ -25,6 +26,7 @@ nsis:
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+afterSign: ./scripts/afterSign.cjs
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -46,7 +48,7 @@ linux:
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
-npmRebuild: false
+npmRebuild: true
 publish:
   provider: generic
   url: https://example.com/auto-updates

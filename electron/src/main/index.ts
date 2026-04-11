@@ -10,6 +10,7 @@ import {
   importRecording,
   getRecordingItems,
   readEventsFile,
+  saveEventsFile,
   setMainWindow as setRecordingMainWindow
 } from './recording'
 import type { RecordedMouseEvent } from '../shared/types'
@@ -33,8 +34,6 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 app.whenReady().then(() => {
-
-
   protocol.handle('media', async (request) => {
     const url = new URL(request.url)
     const pathname = decodeURIComponent(url.pathname)
@@ -90,7 +89,6 @@ app.whenReady().then(() => {
     })
   })
 
-    
   log.info('App ready', {
     version: app.getVersion(),
     platform: process.platform,
@@ -158,28 +156,25 @@ app.whenReady().then(() => {
   )
 
   // Show open dialog to pick a .ctx file
-  ipcMain.handle(
-    'recording:show-open-dialog',
-    async (): Promise<Result<{ filePath: string }>> => {
-      const win = getMainWindow()
-      const { canceled, filePaths } = win
-        ? await dialog.showOpenDialog(win, {
-            title: 'Open Recording',
-            filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
-            properties: ['openFile']
-          })
-        : await dialog.showOpenDialog({
-            title: 'Open Recording',
-            filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
-            properties: ['openFile']
-          })
+  ipcMain.handle('recording:show-open-dialog', async (): Promise<Result<{ filePath: string }>> => {
+    const win = getMainWindow()
+    const { canceled, filePaths } = win
+      ? await dialog.showOpenDialog(win, {
+          title: 'Open Recording',
+          filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
+          properties: ['openFile']
+        })
+      : await dialog.showOpenDialog({
+          title: 'Open Recording',
+          filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
+          properties: ['openFile']
+        })
 
-      if (canceled || filePaths.length === 0) {
-        return Err('Dialog canceled')
-      }
-      return Ok({ filePath: filePaths[0] })
+    if (canceled || filePaths.length === 0) {
+      return Err('Dialog canceled')
     }
-  )
+    return Ok({ filePath: filePaths[0] })
+  })
 
   // Import a .ctx recording archive and extract it
   ipcMain.handle(
@@ -196,6 +191,26 @@ app.whenReady().then(() => {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         log.error('recording:import failed', { error: message })
+        return Err(message)
+      }
+    }
+  )
+
+  // Save modified events back to the extracted cache and re-pack the .ctx archive
+  ipcMain.handle(
+    'recording:save-events',
+    async (
+      _event,
+      eventsPath: string,
+      archivePath: string,
+      events: RecordedMouseEvent[]
+    ): Promise<Result<null>> => {
+      try {
+        await saveEventsFile(eventsPath, archivePath, events)
+        return Ok(null)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log.error('recording:save-events failed', { error: message })
         return Err(message)
       }
     }
@@ -234,22 +249,19 @@ app.whenReady().then(() => {
   })
 
   // Send data to the viewer window
-  ipcMain.handle(
-    'viewer:send-data',
-    async (_event, data: unknown): Promise<Result<null>> => {
-      try {
-        const viewer = getViewerWindow()
-        if (viewer) {
-          viewer.webContents.send('viewer:data', data)
-        }
-        return Ok(null)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        log.error('viewer:send-data failed', { error: message })
-        return Err(message)
+  ipcMain.handle('viewer:send-data', async (_event, data: unknown): Promise<Result<null>> => {
+    try {
+      const viewer = getViewerWindow()
+      if (viewer) {
+        viewer.webContents.send('viewer:data', data)
       }
+      return Ok(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log.error('viewer:send-data failed', { error: message })
+      return Err(message)
     }
-  )
+  })
 
   app.on('activate', function () {
     if (getMainWindow() === null) {

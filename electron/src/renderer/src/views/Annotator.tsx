@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
+import type {
+  AxAttributes,
+  AxAttributesPayload,
+  AxBoundingBox,
+  RecordedMouseEvent
+} from '../../../shared/types'
 import { useRecordingStore } from '../store/recordingStore'
 
 export interface AnnotatorEvent {
   eventName: string
   timestampMs: number
-  axAttributes: Record<string, string>
+  axAttributes: AxAttributesPayload
+  /** Screen coordinates from the recording (physical pixels). */
+  x?: number
+  y?: number
+  /** Index into the rawEvents array for persistence. */
+  rawEventIndex: number
 }
 
 function formatTimestamp(ms: number): string {
@@ -34,7 +45,7 @@ async function captureScreen(sourceId: string): Promise<MediaStream> {
 
 export default function Annotator(): React.JSX.Element {
   const navigate = useNavigate()
-  const { archivePath, videoPath, isLoaded, setExtractedPaths, setArchivePath } =
+  const { archivePath, videoPath, eventsPath, isLoaded, setExtractedPaths, setArchivePath } =
     useRecordingStore()
   const [events, setEvents] = useState<AnnotatorEvent[]>([])
   const [durationMs, setDurationMs] = useState(120_000)
@@ -42,7 +53,23 @@ export default function Annotator(): React.JSX.Element {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [videoLayoutPx, setVideoLayoutPx] = useState({ width: 0, height: 0 })
+  const [videoNativePx, setVideoNativePx] = useState({ width: 0, height: 0 })
+  const [activeEventIdx, setActiveEventIdx] = useState<number | null>(null)
+  const [expandedEventIdx, setExpandedEventIdx] = useState<number | null>(null)
+  const [activeNodeKey, setActiveNodeKey] = useState('current')
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  /** Raw events from disk, used for save. Mirrors sortedEvents order but as RecordedMouseEvent[]. */
+  const [rawEvents, setRawEvents] = useState<RecordedMouseEvent[]>([])
   const rafIdRef = useRef<number | null>(null)
+  const eventTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const eventTooltipPointerRef = useRef({ clientX: 0, clientY: 0 })
+  const [eventTooltip, setEventTooltip] = useState<{
+    x: number
+    y: number
+    left: number
+    top: number
+  } | null>(null)
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false)
@@ -62,6 +89,66 @@ export default function Annotator(): React.JSX.Element {
       streamRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+
+    const ro = new ResizeObserver(() => {
+      const rect = el.getBoundingClientRect()
+      setVideoLayoutPx({
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [videoPath])
+
+  const clearEventTooltipTimer = useCallback((): void => {
+    if (eventTooltipTimerRef.current !== null) {
+      clearTimeout(eventTooltipTimerRef.current)
+      eventTooltipTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => clearEventTooltipTimer()
+  }, [clearEventTooltipTimer])
+
+  const scheduleEventTooltip = useCallback(
+    (evt: AnnotatorEvent): void => {
+      clearEventTooltipTimer()
+      const x = evt.x
+      const y = evt.y
+      if (x === undefined || y === undefined || Number.isNaN(x) || Number.isNaN(y)) {
+        return
+      }
+      eventTooltipTimerRef.current = setTimeout(() => {
+        eventTooltipTimerRef.current = null
+        const { clientX, clientY } = eventTooltipPointerRef.current
+        setEventTooltip({ x, y, left: clientX, top: clientY })
+      }, 1000)
+    },
+    [clearEventTooltipTimer]
+  )
+
+  const handleEventHoverMove = useCallback((e: React.MouseEvent): void => {
+    eventTooltipPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
+  }, [])
+
+  const handleEventHoverEnter = useCallback(
+    (evt: AnnotatorEvent, e: React.MouseEvent): void => {
+      eventTooltipPointerRef.current = { clientX: e.clientX, clientY: e.clientY }
+      scheduleEventTooltip(evt)
+    },
+    [scheduleEventTooltip]
+  )
+
+  const handleEventHoverLeave = useCallback((): void => {
+    clearEventTooltipTimer()
+    setEventTooltip(null)
+  }, [clearEventTooltipTimer])
 
   const handleImportCtx = async (): Promise<void> => {
     const result = await window.api.showOpenRecordingDialog()
@@ -190,38 +277,42 @@ export default function Annotator(): React.JSX.Element {
     if (!archivePath || isLoaded) return
 
     const loadRecording = async (): Promise<void> => {
-      console.log('Loading recording.')
       setIsLoading(true)
       setError(null)
 
       try {
         const result = await window.api.importRecording(archivePath)
         if (result.ok) {
-          const { videoPath, eventsPath, events: rawEvents } = result.payload
+          const { videoPath: importedVideoPath, eventsPath: importedEventsPath, events: rawEvents } = result.payload
 
           // Transform Rust events to AnnotatorEvents with relative timestamps
           if (rawEvents.length > 0) {
             // Use recording_start event as baseline, fall back to first event
-            console.log(rawEvents)
             const startEvent = rawEvents.find((e) => e.eventType === 'recording_start')
             if (!startEvent) {
               setError('Failed to load startTime of video.')
               setIsLoading(false)
               return
             }
-            setExtractedPaths(videoPath, eventsPath)
+            setExtractedPaths(importedVideoPath, importedEventsPath)
 
             const startTimeMs = Number(startEvent?.timeUtcMs ?? rawEvents[0].timeUtcMs)
 
             // Filter out the synthetic recording_start event from display
             const annotatorEvents: AnnotatorEvent[] = rawEvents
-              .filter((evt) => evt.eventType !== 'recording_start')
-              .map((evt) => ({
+              .map((evt, idx) => ({ evt, idx }))
+              .filter(({ evt }) => evt.eventType !== 'recording_start')
+              .map(({ evt, idx }) => ({
                 eventName: evt.eventType,
                 timestampMs: Number(evt.timeUtcMs) - startTimeMs,
-                axAttributes: evt.axAttributes
+                axAttributes: evt.axAttributes ?? {},
+                x: evt.x,
+                y: evt.y,
+                rawEventIndex: idx
               }))
             setEvents(annotatorEvents)
+            setRawEvents(rawEvents)
+            setHasUnsavedChanges(false)
           }
         } else {
           setError(result.error)
@@ -240,11 +331,10 @@ export default function Annotator(): React.JSX.Element {
   const handleLoadedMetadata = (): void => {
     if (videoRef.current) {
       setDurationMs(videoRef.current.duration * 1000)
-      const video = videoRef.current
-      console.log('video.videoWidth', video.videoWidth)
-      console.log('video.videoHeight', video.videoHeight)
-      console.log('video.clientWidth', video.clientWidth)
-      console.log('video.clientHeight', video.clientHeight)
+      setVideoNativePx({
+        width: videoRef.current.videoWidth,
+        height: videoRef.current.videoHeight
+      })
     }
   }
 
@@ -281,17 +371,166 @@ export default function Annotator(): React.JSX.Element {
     seekToTime(timeMs)
   }
 
-  const handleEventClick = useCallback(
-    (timestampMs: number): void => {
-      seekToTime(timestampMs)
-    },
-    [seekToTime]
-  )
-
   const sortedEvents = useMemo(
     () => [...events].sort((a, b) => a.timestampMs - b.timestampMs),
     [events]
   )
+
+  /** Determine which node key has `selected: true`, falling back to 'current'. */
+  const resolveSelectedNodeKey = useCallback(
+    (idx: number): string => {
+      const evt = sortedEvents[idx]
+      if (!evt) return 'current'
+      const snap = evt.axAttributes as
+        | { current?: AxAttributes; parents?: AxAttributes[]; children?: AxAttributes[] }
+        | undefined
+      if (!snap) return 'current'
+      if (snap.parents) {
+        for (let i = 0; i < snap.parents.length; i++) {
+          if (snap.parents[i].selected) return `parent-${i}`
+        }
+      }
+      if (snap.children) {
+        for (let i = 0; i < snap.children.length; i++) {
+          if (snap.children[i].selected) return `child-${i}`
+        }
+      }
+      return 'current'
+    },
+    [sortedEvents]
+  )
+
+  const handleEventClick = useCallback(
+    (timestampMs: number, idx: number): void => {
+      seekToTime(timestampMs)
+      setActiveEventIdx(idx)
+      setActiveNodeKey(resolveSelectedNodeKey(idx))
+    },
+    [seekToTime, resolveSelectedNodeKey]
+  )
+
+  const handleEventDoubleClick = useCallback(
+    (timestampMs: number, idx: number): void => {
+      seekToTime(timestampMs)
+      setActiveEventIdx(idx)
+      setExpandedEventIdx(idx)
+      setActiveNodeKey(resolveSelectedNodeKey(idx))
+    },
+    [seekToTime, resolveSelectedNodeKey]
+  )
+
+  const handleCollapseTree = useCallback((): void => {
+    setExpandedEventIdx(null)
+  }, [])
+
+  /** Update `selected` on nodes within the event's axAttributes when the user picks a node. */
+  const selectNode = useCallback(
+    (nodeKey: string): void => {
+      setActiveNodeKey(nodeKey)
+      if (expandedEventIdx === null || expandedEventIdx >= events.length) return
+
+      const evt = events[expandedEventIdx]
+      const snap = evt.axAttributes as
+        | { current?: AxAttributes; parents?: AxAttributes[]; children?: AxAttributes[] }
+        | undefined
+      if (!snap?.current) return
+
+      // Helper: clear all, then set the chosen node
+      const applySelection = (
+        s: { current?: AxAttributes; parents?: AxAttributes[]; children?: AxAttributes[] }
+      ): void => {
+        if (s.current) s.current.selected = undefined
+        s.parents?.forEach((p) => (p.selected = undefined))
+        s.children?.forEach((c) => (c.selected = undefined))
+
+        if (nodeKey === 'current') {
+          if (s.current) s.current.selected = true
+        } else {
+          const [kind, idxStr] = nodeKey.split('-')
+          const idx = Number(idxStr)
+          const list = kind === 'parent' ? s.parents : s.children
+          if (list?.[idx]) list[idx].selected = true
+        }
+      }
+
+      // Update annotator event snapshot
+      applySelection(snap)
+
+      // Mirror into rawEvents for persistence
+      const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as typeof snap | undefined
+      if (rawSnap?.current) applySelection(rawSnap)
+
+      setHasUnsavedChanges(true)
+    },
+    [expandedEventIdx, events, rawEvents]
+  )
+
+  const handleSave = useCallback(async (): Promise<void> => {
+    if (!eventsPath || !archivePath || rawEvents.length === 0) return
+    const result = await window.api.saveEvents(eventsPath, archivePath, rawEvents)
+    if (result.ok) {
+      setHasUnsavedChanges(false)
+    } else {
+      setError(result.error)
+    }
+  }, [eventsPath, archivePath, rawEvents])
+
+  const scale = videoNativePx.width > 0 ? videoLayoutPx.width / videoNativePx.width : 1
+
+  // Auto-activate the nearest event when the playhead is within ±200ms
+  const BBOX_WINDOW_MS = 200
+  const timeWindowEventIdx: number | null = useMemo(() => {
+    if (sortedEvents.length === 0) return null
+    let closest: { idx: number; dist: number } | null = null
+    for (let i = 0; i < sortedEvents.length; i++) {
+      const dist = Math.abs(sortedEvents[i].timestampMs - currentTimeMs)
+      if (dist <= BBOX_WINDOW_MS && (!closest || dist < closest.dist)) {
+        closest = { idx: i, dist }
+      }
+    }
+    return closest?.idx ?? null
+  }, [sortedEvents, currentTimeMs])
+
+  // Clear manual selection when playhead drifts beyond the window
+  useEffect(() => {
+    if (activeEventIdx === null || activeEventIdx >= sortedEvents.length) return
+    const dist = Math.abs(sortedEvents[activeEventIdx].timestampMs - currentTimeMs)
+    if (dist > BBOX_WINDOW_MS) {
+      setActiveEventIdx(null)
+    }
+  }, [currentTimeMs, activeEventIdx, sortedEvents])
+
+  // Prefer manual selection (activeEventIdx), fall back to time-windowed
+  const displayEventIdx = activeEventIdx ?? timeWindowEventIdx
+
+  const activeSnapshot = useMemo(() => {
+    if (displayEventIdx === null || displayEventIdx >= sortedEvents.length) return null
+    const attrs = sortedEvents[displayEventIdx].axAttributes as
+      | {
+          current?: AxAttributes
+          parents?: AxAttributes[]
+          children?: AxAttributes[]
+        }
+      | undefined
+    if (!attrs?.current) return null
+    return attrs as { current: AxAttributes; parents: AxAttributes[]; children: AxAttributes[] }
+  }, [displayEventIdx, sortedEvents])
+
+  // Use manual selection key when user clicked, otherwise resolve from persisted `selected`
+  const displayNodeKey = useMemo(() => {
+    if (activeEventIdx !== null) return activeNodeKey
+    if (displayEventIdx !== null) return resolveSelectedNodeKey(displayEventIdx)
+    return 'current'
+  }, [activeEventIdx, activeNodeKey, displayEventIdx, resolveSelectedNodeKey])
+
+  const activeBbox: AxBoundingBox | null = useMemo(() => {
+    if (!activeSnapshot) return null
+    if (displayNodeKey === 'current') return activeSnapshot.current.boundingBox ?? null
+    const [kind, idxStr] = displayNodeKey.split('-')
+    const idx = Number(idxStr)
+    const list = kind === 'parent' ? activeSnapshot.parents : activeSnapshot.children
+    return list?.[idx]?.boundingBox ?? null
+  }, [activeSnapshot, displayNodeKey])
 
   return (
     <div className="ann">
@@ -356,6 +595,27 @@ export default function Annotator(): React.JSX.Element {
               </svg>
               Import .ctx
             </button>
+            {isLoaded && (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!hasUnsavedChanges}
+                className="ann-btn ann-btn-save"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-4 w-4"
+                >
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                  <polyline points="17 21 17 13 7 13 7 21" />
+                  <polyline points="7 3 7 8 15 8" />
+                </svg>
+                Save
+              </button>
+            )}
           </div>
         </div>
 
@@ -371,13 +631,36 @@ export default function Annotator(): React.JSX.Element {
               <span className="ann-error-text">{error}</span>
             </div>
           ) : videoPath ? (
-            <video
-              ref={videoRef}
-              src={`media://local/${encodeURIComponent(videoPath)}`}
-              className="max-w-full max-h-full"
-              controls
-              onLoadedMetadata={handleLoadedMetadata}
-            />
+            <div>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <video
+                  ref={videoRef}
+                  src={`media://local/${encodeURIComponent(videoPath)}`}
+                  className="max-w-full max-h-full"
+                  controls
+                  onLoadedMetadata={handleLoadedMetadata}
+                />
+                {activeBbox && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: activeBbox.x * scale,
+                      top: activeBbox.y * scale,
+                      width: activeBbox.width * scale,
+                      height: activeBbox.height * scale,
+                      border: '2px solid #ff3b30',
+                      backgroundColor: 'rgba(255, 59, 48, 0.15)',
+                      borderRadius: 3,
+                      pointerEvents: 'none'
+                    }}
+                  />
+                )}
+              </div>
+              <h1 className="ann-video-dimensions">
+                {videoNativePx.width} × {videoNativePx.height} native | {videoLayoutPx.width} ×{' '}
+                {videoLayoutPx.height} layout | scale: {scale.toFixed(3)}
+              </h1>
+            </div>
           ) : (
             <div className="ann-empty">
               <div className="ann-empty-icon">
@@ -435,10 +718,14 @@ export default function Annotator(): React.JSX.Element {
               return (
                 <div
                   key={`${evt.timestampMs}-${i}`}
-                  className="ann-timeline-marker"
+                  className="ann-timeline-marker-hit"
                   style={{ left: `${positionPercent}%` }}
-                  title={`${evt.eventName} at ${formatTimestamp(evt.timestampMs)}`}
-                />
+                  onMouseEnter={(e) => handleEventHoverEnter(evt, e)}
+                  onMouseMove={handleEventHoverMove}
+                  onMouseLeave={handleEventHoverLeave}
+                >
+                  <div className="ann-timeline-marker" aria-hidden />
+                </div>
               )
             })}
           {/* Playhead */}
@@ -457,34 +744,160 @@ export default function Annotator(): React.JSX.Element {
 
       {/* Events sidebar */}
       <aside className="ann-sidebar">
-        <div className="ann-sidebar-head">
-          <h2 className="ann-sidebar-title">Events</h2>
-          <span className="ann-sidebar-count">{sortedEvents.length}</span>
-        </div>
-        <div className="ann-sidebar-list">
-          {sortedEvents.length === 0 ? (
-            <div className="ann-sidebar-empty">No events yet</div>
-          ) : (
-            <ul>
-              {sortedEvents.map((evt, i) => (
-                <li
-                  key={`${evt.timestampMs}-${evt.eventName}-${i}`}
-                  onClick={() => handleEventClick(evt.timestampMs)}
-                  className={`ann-event ${
-                    evt.timestampMs <= currentTimeMs ? 'ann-event-past' : ''
-                  }`}
+        {expandedEventIdx !== null && activeSnapshot ? (
+          <>
+            <div className="ann-sidebar-head">
+              <button
+                type="button"
+                onClick={handleCollapseTree}
+                className="ann-btn ann-btn-ghost"
+                style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-3 w-3"
                 >
-                  <span className="ann-event-dot" />
-                  <div className="ann-event-info">
-                    <span className="ann-event-name">{evt.eventName}</span>
-                    <span className="ann-event-time">{formatTimestamp(evt.timestampMs)}</span>
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+                Events
+              </button>
+              <span className="ann-sidebar-count">
+                {formatTimestamp(sortedEvents[expandedEventIdx].timestampMs)}
+              </span>
+            </div>
+            <div className="ann-sidebar-list">
+              {/* Current (hit target) */}
+              <div className="ax-tree-section">
+                <div className="ax-tree-section-label">Hit Target</div>
+                <div
+                  className={`ax-tree-node ${activeNodeKey === 'current' ? 'ax-tree-node-active' : ''}`}
+                  onClick={() => selectNode('current')}
+                >
+                  <span className="ax-tree-node-role">{activeSnapshot.current.axRole}</span>
+                  <span className="ax-tree-node-text">
+                    {activeSnapshot.current.axTitle ||
+                      activeSnapshot.current.axValue ||
+                      activeSnapshot.current.axDescription ||
+                      activeSnapshot.current.axRoleDescription}
+                  </span>
+                  {activeSnapshot.current.boundingBox && (
+                    <span className="ax-tree-node-bbox">bbox</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Parents */}
+              {activeSnapshot.parents.length > 0 && (
+                <div className="ax-tree-section">
+                  <div className="ax-tree-section-label">
+                    Parents ({activeSnapshot.parents.length})
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                  {activeSnapshot.parents.map((node, i) => {
+                    const key = `parent-${i}`
+                    return (
+                      <div
+                        key={key}
+                        className={`ax-tree-node ${activeNodeKey === key ? 'ax-tree-node-active' : ''}`}
+                        style={{ paddingLeft: `${0.75 + i * 0.5}rem` }}
+                        onClick={() => selectNode(key)}
+                      >
+                        <span className="ax-tree-node-role">{node.axRole}</span>
+                        <span className="ax-tree-node-text">
+                          {node.axTitle ||
+                            node.axValue ||
+                            node.axDescription ||
+                            node.axRoleDescription}
+                        </span>
+                        {node.boundingBox && <span className="ax-tree-node-bbox">bbox</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Children */}
+              {activeSnapshot.children.length > 0 && (
+                <div className="ax-tree-section">
+                  <div className="ax-tree-section-label">
+                    Children ({activeSnapshot.children.length})
+                  </div>
+                  {activeSnapshot.children.map((node, i) => {
+                    const key = `child-${i}`
+                    return (
+                      <div
+                        key={key}
+                        className={`ax-tree-node ${activeNodeKey === key ? 'ax-tree-node-active' : ''}`}
+                        onClick={() => selectNode(key)}
+                      >
+                        <span className="ax-tree-node-role">{node.axRole}</span>
+                        <span className="ax-tree-node-text">
+                          {node.axTitle ||
+                            node.axValue ||
+                            node.axDescription ||
+                            node.axRoleDescription}
+                        </span>
+                        {node.boundingBox && <span className="ax-tree-node-bbox">bbox</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="ann-sidebar-head">
+              <h2 className="ann-sidebar-title">Events</h2>
+              <span className="ann-sidebar-count">{sortedEvents.length}</span>
+            </div>
+            <div className="ann-sidebar-list">
+              {sortedEvents.length === 0 ? (
+                <div className="ann-sidebar-empty">No events yet</div>
+              ) : (
+                <ul>
+                  {sortedEvents.map((evt, i) => (
+                    <li
+                      key={`${evt.timestampMs}-${evt.eventName}-${i}`}
+                      onClick={() => handleEventClick(evt.timestampMs, i)}
+                      onDoubleClick={() => handleEventDoubleClick(evt.timestampMs, i)}
+                      onMouseEnter={(e) => handleEventHoverEnter(evt, e)}
+                      onMouseMove={handleEventHoverMove}
+                      onMouseLeave={handleEventHoverLeave}
+                      className={`ann-event ${
+                        evt.timestampMs <= currentTimeMs ? 'ann-event-past' : ''
+                      } ${activeEventIdx === i ? 'ann-event-selected' : ''}`}
+                    >
+                      <span className="ann-event-dot" />
+                      <div className="ann-event-info">
+                        <span className="ann-event-name">{evt.eventName}</span>
+                        <span className="ann-event-time">{formatTimestamp(evt.timestampMs)}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
       </aside>
+
+      {eventTooltip && (
+        <div
+          role="tooltip"
+          className="ann-event-tooltip"
+          style={{
+            left: eventTooltip.left + 12,
+            top: eventTooltip.top + 12
+          }}
+        >
+          x: {Math.round(eventTooltip.x)}, y: {Math.round(eventTooltip.y)}
+        </div>
+      )}
     </div>
   )
 }

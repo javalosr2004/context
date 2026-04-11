@@ -3,7 +3,6 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type {
   ScreenSource,
   MousePosition,
-  MouseClick,
   Result,
   RecordedMouseEvent
 } from '../shared/types'
@@ -23,15 +22,6 @@ const api = {
       ipcRenderer.removeListener('mouse-position', handler)
     }
   },
-  onMouseClick(callback: (click: MouseClick) => void): Unsubscribe {
-    const handler = (_event: Electron.IpcRendererEvent, click: MouseClick): void => {
-      callback(click)
-    }
-    ipcRenderer.on('mouse-click', handler)
-    return () => {
-      ipcRenderer.removeListener('mouse-click', handler)
-    }
-  },
   startRecording: (): Promise<Result<{ tempPath: string }>> =>
     ipcRenderer.invoke('recording:start'),
   pushRecordingChunk: (chunk: ArrayBuffer): Promise<Result<null>> =>
@@ -44,6 +34,8 @@ const api = {
     ipcRenderer.invoke('recording:import', archivePath),
   showOpenRecordingDialog: (): Promise<Result<{ filePath: string }>> =>
     ipcRenderer.invoke('recording:show-open-dialog'),
+  saveEvents: (eventsPath: string, archivePath: string, events: RecordedMouseEvent[]): Promise<Result<null>> =>
+    ipcRenderer.invoke('recording:save-events', eventsPath, archivePath, events),
 
   // Viewer
   openViewer: (): Promise<Result<null>> => ipcRenderer.invoke('viewer:open'),

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
 import { readFile, readdir, rm } from 'fs/promises'
-import { FileHandle, mkdir, open, unlink } from 'fs/promises'
+import { FileHandle, mkdir, open, unlink, writeFile } from 'fs/promises'
 import { createReadStream, createWriteStream } from 'fs'
 import log from './logger'
 import {
@@ -52,8 +52,8 @@ export async function startRecording(): Promise<Result<{ tempPath: string }>> {
   }
 
   try {
-    // Start mouse tracking
-    startMouseTracking()
+    // Start mouse tracking and wait for all apps to be preloaded
+    await startMouseTracking()
 
     // Start temporary chunk storage.
     const startTime = Date.now()
@@ -272,4 +272,32 @@ export async function readEventsFile(eventsPath: string): Promise<RecordedMouseE
   const content = await readFile(eventsPath, 'utf-8')
   const lines = content.trim().split('\n').filter(Boolean)
   return lines.map((line) => JSON.parse(line) as RecordedMouseEvent)
+}
+
+export async function saveEventsFile(
+  eventsPath: string,
+  archivePath: string,
+  events: RecordedMouseEvent[]
+): Promise<void> {
+  // Write to extracted cache
+  const jsonl = events.map((e) => JSON.stringify(e)).join('\n')
+  await writeFile(eventsPath, jsonl, 'utf-8')
+
+  // Re-pack the .ctx archive from the extracted directory
+  const extractedDir = join(eventsPath, '..')
+  const { videoPath } = await getRecordingItems(extractedDir)
+
+  const output = createWriteStream(archivePath)
+  const archive = archiver('zip', { zlib: { level: 5 } })
+  const archivePromise = new Promise<void>((resolve, reject) => {
+    output.on('close', resolve)
+    archive.on('error', reject)
+  })
+  archive.pipe(output)
+  archive.append(createReadStream(videoPath), { name: 'recording.webm' })
+  archive.append(jsonl, { name: 'events.jsonl' })
+  await archive.finalize()
+  await archivePromise
+
+  log.info('recording:save-events', { eventsPath, archivePath, eventCount: events.length })
 }

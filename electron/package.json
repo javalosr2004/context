@@ -32,7 +32,6 @@
     "electron-updater": "^6.3.9",
     "extract-zip": "^2.0.1",
     "react-router": "^7.13.0",
-    "uiohook-napi": "^1.5.4",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },

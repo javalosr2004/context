@@ -5,11 +5,15 @@ use std::io::{self, BufRead, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use ts_rs::TS;
 use rust_backend::accessibility::ax_snapshot::AxSnapshot;
 use rust_backend::accessibility::init::AccessibilityTree;
-use rust_backend::workspace::WorkspaceObserver;
+
+/// How often to rescan the window list for newly-launched apps and set
+/// `AXEnhancedUserInterface` on them. Chosen to comfortably beat a user's
+/// click-after-launch cadence without burning CPU.
+const APP_SCAN_INTERVAL: Duration = Duration::from_secs(1);
 
 // ─── RPC Result Types ───────────────────────────────────────────────────────
 
@@ -84,7 +88,6 @@ struct EventCollector {
     ready_rx: Option<Receiver<usize>>,
     activated_count: Option<usize>,
     _thread: JoinHandle<()>,
-    _workspace_observer: WorkspaceObserver,
 }
 
 impl EventCollector {
@@ -92,9 +95,6 @@ impl EventCollector {
         let (cmd_tx, cmd_rx) = channel::<CollectorCommand>();
         let (event_tx, event_rx) = channel::<CapturedMouseEvent>();
         let (ready_tx, ready_rx) = channel::<usize>();
-        let (launch_tx, launch_rx) = channel::<i32>();
-
-        let workspace_observer = WorkspaceObserver::start(launch_tx);
 
         let worker = thread::spawn(move || {
             let listener = MouseListener::new();
@@ -102,6 +102,7 @@ impl EventCollector {
             let tree = AccessibilityTree::new().ok();
             let activated = tree.as_ref().map_or(0, |t| t.activate_all_apps());
             let _ = ready_tx.send(activated);
+            let mut last_app_scan = Instant::now();
 
             loop {
                 while let Ok(cmd) = cmd_rx.try_recv() {
@@ -117,10 +118,11 @@ impl EventCollector {
                     }
                 }
 
-                while let Ok(pid) = launch_rx.try_recv() {
+                if last_app_scan.elapsed() >= APP_SCAN_INTERVAL {
                     if let Some(ref t) = tree {
-                        t.activate_pid(pid);
+                        t.activate_all_apps();
                     }
+                    last_app_scan = Instant::now();
                 }
 
                 if !running {
@@ -131,7 +133,15 @@ impl EventCollector {
                 if let Some(mouse) = listener.try_recv() {
                     let ax_attributes = tree
                         .as_ref()
-                        .and_then(|t| t.get_ax_snapshot_at_position(mouse.x, mouse.y).ok());
+                        .and_then(|t| t.get_ax_snapshot_at_position(mouse.x, mouse.y).ok())
+                        .map(|mut snap| {
+                            // Capture-time defaults for the event-level label. The annotator UI
+                            // lets the user replace these with meaningful text.
+                            snap.title = Some(mouse.event_type.clone());
+                            snap.description =
+                                Some(format!("({:.0}, {:.0})", mouse.x, mouse.y));
+                            snap
+                        });
 
                     let _ = event_tx.send(CapturedMouseEvent {
                         mouse,
@@ -149,7 +159,6 @@ impl EventCollector {
             ready_rx: Some(ready_rx),
             activated_count: None,
             _thread: worker,
-            _workspace_observer: workspace_observer,
         }
     }
 

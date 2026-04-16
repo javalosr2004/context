@@ -12,7 +12,8 @@ export type {
   GetMouseEventsResult,
   MouseEvent,
   RpcErrorResult,
-  StatusResult
+  StatusResult,
+  UserOverride
 } from '../../resources/types/rust_types'
 
 /** Legacy JSONL: flat unprefixed + `parent_{n}_*` / `child_{n}_*` string keys. */

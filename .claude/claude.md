@@ -51,6 +51,9 @@ When I ask for help:
 - Incremental milestones with acceptance criteria
 - PR-style reviews of my code when I paste it
 
+## Auto-Commit
+After finishing any code changes, commit them using your turn summary as the commit message (conventional commit format, one line).
+
 ## Important
 - Don’t over-engineer early. Start flat, extract modules only when a boundary becomes necessary.
 - If a change adds complexity, justify it with a concrete invariant or failure mode it prevents.

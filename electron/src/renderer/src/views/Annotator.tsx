@@ -4,12 +4,15 @@ import type {
   AxAttributes,
   AxAttributesPayload,
   AxBoundingBox,
-  RecordedMouseEvent
+  RecordedMouseEvent,
+  UserOverride
 } from '../../../shared/types'
 import { useRecordingStore } from '../store/recordingStore'
 
 export interface AnnotatorEvent {
   eventName: string
+  /** User-authored title; falls back to eventName when absent. */
+  title: string
   timestampMs: number
   axAttributes: AxAttributesPayload
   /** Screen coordinates from the recording (physical pixels). */
@@ -17,6 +20,66 @@ export interface AnnotatorEvent {
   y?: number
   /** Index into the rawEvents array for persistence. */
   rawEventIndex: number
+}
+
+/**
+ * Structural view over a snapshot payload. Fields are optional because older `.ctx` files
+ * use the legacy flat `AxAttributeMap` shape — consumers must null-check before dereferencing.
+ */
+type SnapView = {
+  current?: AxAttributes
+  parents?: AxAttributes[]
+  children?: AxAttributes[]
+  userOverride?: UserOverride | null
+  /** Which node is the annotation target. See selection key format below. */
+  selected?: string
+  title?: string | null
+  description?: string | null
+}
+
+/**
+ * Selection key format — a single string names which node is the annotation target.
+ *
+ *   "current"            → snap.current
+ *   "user_override"      → snap.userOverride
+ *   "parents:<index>"    → snap.parents[index]
+ *   "children:<index>"   → snap.children[index]
+ *
+ * Centralising selection in one string (rather than a `selected: true` flag per node)
+ * makes the invariant structural: exactly one thing is ever selected because there's
+ * exactly one slot. No loops, no cross-node clearing, no corrupt states.
+ */
+const DEFAULT_SELECTED = 'current'
+
+const PARENTS_KEY = /^parents:(\d+)$/
+const CHILDREN_KEY = /^children:(\d+)$/
+
+/** Read the selected node's bounding box, or null for malformed keys / missing nodes. */
+function selectedNodeBoundingBox(snap: SnapView): AxBoundingBox | null {
+  const key = snap.selected ?? DEFAULT_SELECTED
+
+  if (key === 'current') {
+    return snap.current?.boundingBox ?? null
+  }
+  if (key === 'user_override') {
+    return snap.userOverride?.boundingBox ?? null
+  }
+
+  let m = PARENTS_KEY.exec(key)
+  if (m) {
+    const i = Number(m[1])
+    const node = snap.parents?.[i]
+    return node?.boundingBox ?? null
+  }
+
+  m = CHILDREN_KEY.exec(key)
+  if (m) {
+    const i = Number(m[1])
+    const node = snap.children?.[i]
+    return node?.boundingBox ?? null
+  }
+
+  return null
 }
 
 function formatTimestamp(ms: number): string {
@@ -57,7 +120,6 @@ export default function Annotator(): React.JSX.Element {
   const [videoNativePx, setVideoNativePx] = useState({ width: 0, height: 0 })
   const [activeEventIdx, setActiveEventIdx] = useState<number | null>(null)
   const [expandedEventIdx, setExpandedEventIdx] = useState<number | null>(null)
-  const [activeNodeKey, setActiveNodeKey] = useState('current')
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   /** Raw events from disk, used for save. Mirrors sortedEvents order but as RecordedMouseEvent[]. */
   const [rawEvents, setRawEvents] = useState<RecordedMouseEvent[]>([])
@@ -304,6 +366,7 @@ export default function Annotator(): React.JSX.Element {
               .filter(({ evt }) => evt.eventType !== 'recording_start')
               .map(({ evt, idx }) => ({
                 eventName: evt.eventType,
+                title: (evt.axAttributes as SnapView | undefined)?.title ?? evt.eventType,
                 timestampMs: Number(evt.timeUtcMs) - startTimeMs,
                 axAttributes: evt.axAttributes ?? {},
                 x: evt.x,
@@ -376,37 +439,12 @@ export default function Annotator(): React.JSX.Element {
     [events]
   )
 
-  /** Determine which node key has `selected: true`, falling back to 'current'. */
-  const resolveSelectedNodeKey = useCallback(
-    (idx: number): string => {
-      const evt = sortedEvents[idx]
-      if (!evt) return 'current'
-      const snap = evt.axAttributes as
-        | { current?: AxAttributes; parents?: AxAttributes[]; children?: AxAttributes[] }
-        | undefined
-      if (!snap) return 'current'
-      if (snap.parents) {
-        for (let i = 0; i < snap.parents.length; i++) {
-          if (snap.parents[i].selected) return `parent-${i}`
-        }
-      }
-      if (snap.children) {
-        for (let i = 0; i < snap.children.length; i++) {
-          if (snap.children[i].selected) return `child-${i}`
-        }
-      }
-      return 'current'
-    },
-    [sortedEvents]
-  )
-
   const handleEventClick = useCallback(
     (timestampMs: number, idx: number): void => {
       seekToTime(timestampMs)
       setActiveEventIdx(idx)
-      setActiveNodeKey(resolveSelectedNodeKey(idx))
     },
-    [seekToTime, resolveSelectedNodeKey]
+    [seekToTime]
   )
 
   const handleEventDoubleClick = useCallback(
@@ -414,53 +452,68 @@ export default function Annotator(): React.JSX.Element {
       seekToTime(timestampMs)
       setActiveEventIdx(idx)
       setExpandedEventIdx(idx)
-      setActiveNodeKey(resolveSelectedNodeKey(idx))
     },
-    [seekToTime, resolveSelectedNodeKey]
+    [seekToTime]
   )
 
   const handleCollapseTree = useCallback((): void => {
     setExpandedEventIdx(null)
   }, [])
 
-  /** Update `selected` on nodes within the event's axAttributes when the user picks a node. */
+  /**
+   * Write the new selection key onto the expanded event's snapshot and mirror it into
+   * rawEvents for persistence. One field, one write — no clearing, no invariants to maintain.
+   */
   const selectNode = useCallback(
     (nodeKey: string): void => {
-      setActiveNodeKey(nodeKey)
       if (expandedEventIdx === null || expandedEventIdx >= events.length) return
 
       const evt = events[expandedEventIdx]
-      const snap = evt.axAttributes as
-        | { current?: AxAttributes; parents?: AxAttributes[]; children?: AxAttributes[] }
-        | undefined
+      const snap = evt.axAttributes as SnapView | undefined
       if (!snap?.current) return
 
-      // Helper: clear all, then set the chosen node
-      const applySelection = (
-        s: { current?: AxAttributes; parents?: AxAttributes[]; children?: AxAttributes[] }
-      ): void => {
-        if (s.current) s.current.selected = undefined
-        s.parents?.forEach((p) => (p.selected = undefined))
-        s.children?.forEach((c) => (c.selected = undefined))
-
-        if (nodeKey === 'current') {
-          if (s.current) s.current.selected = true
-        } else {
-          const [kind, idxStr] = nodeKey.split('-')
-          const idx = Number(idxStr)
-          const list = kind === 'parent' ? s.parents : s.children
-          if (list?.[idx]) list[idx].selected = true
-        }
-      }
-
-      // Update annotator event snapshot
-      applySelection(snap)
-
-      // Mirror into rawEvents for persistence
-      const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as typeof snap | undefined
-      if (rawSnap?.current) applySelection(rawSnap)
+      const updatedSnap = { ...snap, selected: nodeKey }
+      const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as SnapView | undefined
+      if (rawSnap) rawSnap.selected = nodeKey
 
       setHasUnsavedChanges(true)
+      // Replace the event object so useMemo dependencies on axAttributes see a new reference.
+      setEvents((prev) =>
+        prev.map((e, i) =>
+          i === expandedEventIdx ? { ...e, axAttributes: updatedSnap as AxAttributesPayload } : e
+        )
+      )
+    },
+    [expandedEventIdx, events, rawEvents]
+  )
+
+  /**
+   * Write a label field (title or description) onto the expanded event's snapshot and
+   * mirror it into the rawEvents array so Save persists it.
+   */
+  const updateEventLabel = useCallback(
+    (field: 'title' | 'description', value: string): void => {
+      if (expandedEventIdx === null || expandedEventIdx >= events.length) return
+      const evt = events[expandedEventIdx]
+      const snap = evt.axAttributes as SnapView | undefined
+      if (!snap) return
+
+      // Empty string → clear back to null so the placeholder reappears and JSONL stays clean.
+      const next = value.length === 0 ? null : value
+      snap[field] = next
+
+      const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as SnapView | undefined
+      if (rawSnap) rawSnap[field] = next
+
+      setHasUnsavedChanges(true)
+      // Force re-render — we mutated in place, React won't see it otherwise.
+      // Also sync title onto the AnnotatorEvent view model so the sidebar stays current.
+      setEvents((prev) =>
+        prev.map((e, i) => {
+          if (i !== expandedEventIdx || field !== 'title') return e
+          return { ...e, title: next ?? e.eventName }
+        })
+      )
     },
     [expandedEventIdx, events, rawEvents]
   )
@@ -505,32 +558,18 @@ export default function Annotator(): React.JSX.Element {
 
   const activeSnapshot = useMemo(() => {
     if (displayEventIdx === null || displayEventIdx >= sortedEvents.length) return null
-    const attrs = sortedEvents[displayEventIdx].axAttributes as
-      | {
-          current?: AxAttributes
-          parents?: AxAttributes[]
-          children?: AxAttributes[]
-        }
-      | undefined
+    const attrs = sortedEvents[displayEventIdx].axAttributes as SnapView | undefined
     if (!attrs?.current) return null
-    return attrs as { current: AxAttributes; parents: AxAttributes[]; children: AxAttributes[] }
+    return attrs as Required<Pick<SnapView, 'current' | 'parents' | 'children'>> & SnapView
   }, [displayEventIdx, sortedEvents])
 
-  // Use manual selection key when user clicked, otherwise resolve from persisted `selected`
-  const displayNodeKey = useMemo(() => {
-    if (activeEventIdx !== null) return activeNodeKey
-    if (displayEventIdx !== null) return resolveSelectedNodeKey(displayEventIdx)
-    return 'current'
-  }, [activeEventIdx, activeNodeKey, displayEventIdx, resolveSelectedNodeKey])
+  /** Current selection key, read directly from the snapshot (no separate UI state). */
+  const activeNodeKey = activeSnapshot?.selected ?? DEFAULT_SELECTED
 
-  const activeBbox: AxBoundingBox | null = useMemo(() => {
-    if (!activeSnapshot) return null
-    if (displayNodeKey === 'current') return activeSnapshot.current.boundingBox ?? null
-    const [kind, idxStr] = displayNodeKey.split('-')
-    const idx = Number(idxStr)
-    const list = kind === 'parent' ? activeSnapshot.parents : activeSnapshot.children
-    return list?.[idx]?.boundingBox ?? null
-  }, [activeSnapshot, displayNodeKey])
+  const activeBbox: AxBoundingBox | null = useMemo(
+    () => (activeSnapshot ? selectedNodeBoundingBox(activeSnapshot) : null),
+    [activeSnapshot]
+  )
 
   return (
     <div className="ann">
@@ -771,6 +810,32 @@ export default function Annotator(): React.JSX.Element {
               </span>
             </div>
             <div className="ann-sidebar-list">
+              {/* Event-level label (title + description) */}
+              <div className="ax-tree-section">
+                <div className="ax-tree-section-label">Label</div>
+                <input
+                  type="text"
+                  className="ann-label-input"
+                  value={(activeSnapshot.title as string | null | undefined) ?? ''}
+                  placeholder={sortedEvents[expandedEventIdx].eventName}
+                  onChange={(e) => updateEventLabel('title', e.target.value)}
+                  aria-label="Event title"
+                />
+                <textarea
+                  className="ann-label-textarea"
+                  value={(activeSnapshot.description as string | null | undefined) ?? ''}
+                  placeholder={(() => {
+                    const e = sortedEvents[expandedEventIdx]
+                    return e.x !== undefined && e.y !== undefined
+                      ? `(${Math.round(e.x)}, ${Math.round(e.y)})`
+                      : 'description'
+                  })()}
+                  onChange={(e) => updateEventLabel('description', e.target.value)}
+                  rows={2}
+                  aria-label="Event description"
+                />
+              </div>
+
               {/* Current (hit target) */}
               <div className="ax-tree-section">
                 <div className="ax-tree-section-label">Hit Target</div>
@@ -798,7 +863,7 @@ export default function Annotator(): React.JSX.Element {
                     Parents ({activeSnapshot.parents.length})
                   </div>
                   {activeSnapshot.parents.map((node, i) => {
-                    const key = `parent-${i}`
+                    const key = `parents:${i}`
                     return (
                       <div
                         key={key}
@@ -820,6 +885,21 @@ export default function Annotator(): React.JSX.Element {
                 </div>
               )}
 
+              {/* User-authored override — shown only if one exists for this event. */}
+              {activeSnapshot.userOverride && (
+                <div className="ax-tree-section">
+                  <div className="ax-tree-section-label">Override</div>
+                  <div
+                    className={`ax-tree-node ${activeNodeKey === 'user_override' ? 'ax-tree-node-active' : ''}`}
+                    onClick={() => selectNode('user_override')}
+                  >
+                    <span className="ax-tree-node-role">custom</span>
+                    <span className="ax-tree-node-text">user-drawn region</span>
+                    <span className="ax-tree-node-bbox">bbox</span>
+                  </div>
+                </div>
+              )}
+
               {/* Children */}
               {activeSnapshot.children.length > 0 && (
                 <div className="ax-tree-section">
@@ -827,7 +907,7 @@ export default function Annotator(): React.JSX.Element {
                     Children ({activeSnapshot.children.length})
                   </div>
                   {activeSnapshot.children.map((node, i) => {
-                    const key = `child-${i}`
+                    const key = `children:${i}`
                     return (
                       <div
                         key={key}
@@ -874,7 +954,7 @@ export default function Annotator(): React.JSX.Element {
                     >
                       <span className="ann-event-dot" />
                       <div className="ann-event-info">
-                        <span className="ann-event-name">{evt.eventName}</span>
+                        <span className="ann-event-name">{evt.title}</span>
                         <span className="ann-event-time">{formatTimestamp(evt.timestampMs)}</span>
                       </div>
                     </li>

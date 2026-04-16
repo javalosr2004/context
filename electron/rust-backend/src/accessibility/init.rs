@@ -109,15 +109,6 @@ impl AccessibilityTree {
         }
     }
 
-    /// Activate AXEnhancedUserInterface for a specific PID (e.g. from a workspace
-    /// launch notification).  No-op if the PID was already activated.
-    pub fn activate_pid(&self, pid: i32) {
-        if self.enhanced_pids.borrow_mut().insert(pid) {
-            eprintln!("AXEnhancedUserInterface → pid {pid} (new app)");
-            Self::set_enhanced_ui_for_pid(pid);
-        }
-    }
-
     /// Tell the app owning `elem` to expose its full accessibility tree.
     /// Returns `true` when a previously-unseen app was activated (caller may re-hit-test).
     fn ensure_enhanced_ui(&self, elem: &OwnedAXUIElement) -> bool {

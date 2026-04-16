@@ -231,8 +231,7 @@ impl OwnedAXUIElement {
     /// Intent subset (role, identifier, title/value, bbox) for hit target, ancestors, and
     /// children whose bounding box contains `(mouse_x, mouse_y)`.
     pub fn intent_ax_snapshot(&self, mouse_x: f64, mouse_y: f64) -> AxSnapshot {
-        let mut current = Self::fill_intent_attributes(self);
-        current.selected = Some(true);
+        let current = Self::fill_intent_attributes(self);
 
         let mut parents = Vec::new();
         let mut depth = 1usize;
@@ -256,6 +255,10 @@ impl OwnedAXUIElement {
             current,
             parents,
             children,
+            user_override: None,
+            selected: "current".to_string(),
+            title: None,
+            description: None,
         }
     }
 }

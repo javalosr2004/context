@@ -3,12 +3,7 @@
 /**
  * Intent subset: role, sub-role, descriptions, title, value, DOM metadata, and geometry.
  */
-export type AxAttributes = { axRole?: string | null, axSubrole?: string | null, axRoleDescription?: string | null, axTitle?: string | null, axValue?: string | null, axDescription?: string | null, axLabel?: string | null, axHelp?: string | null, axPlaceholderValue?: string | null, axIdentifier?: string | null, axDomIdentifier?: string | null, axDomClassList?: string | null, boundingBox?: AxBoundingBox | null, 
-/**
- * Whether this node is the user-confirmed target for the event.
- * Defaults to `true` for the hit target (`current`) at capture time.
- */
-selected?: boolean | null, };
+export type AxAttributes = { axRole?: string | null, axSubrole?: string | null, axRoleDescription?: string | null, axTitle?: string | null, axValue?: string | null, axDescription?: string | null, axLabel?: string | null, axHelp?: string | null, axPlaceholderValue?: string | null, axIdentifier?: string | null, axDomIdentifier?: string | null, axDomClassList?: string | null, boundingBox?: AxBoundingBox | null, };
 
 /**
  * Bounding box for an accessibility element (screen coordinates).
@@ -22,8 +17,32 @@ export type AxBoundingBox = { x: number, y: number, width: number, height: numbe
  * `children` are normally the hit element’s `AXChildren`. If the hit target is a leaf with no
  * children (typical for `AXStaticText`, buttons, etc.), we use the first two children of the
  * **immediate parent** instead so the array is often useful for context.
+ *
+ * User-authored fields (`user_override`, `title`, `description`, non-default `selected`) are
+ * populated later by the annotator UI. They are distinct from AX data: the capture pipeline
+ * writes them with defaults, and loaders must tolerate older `.ctx` files that omit them.
  */
-export type AxSnapshot = { current: AxAttributes, parents: Array<AxAttributes>, children: Array<AxAttributes>, };
+export type AxSnapshot = { current: AxAttributes, parents: Array<AxAttributes>, children: Array<AxAttributes>, 
+/**
+ * Optional user-drawn rectangle. Remains in the snapshot as a selectable option even
+ * after the user picks a different node.
+ */
+userOverride?: UserOverride | null, 
+/**
+ * Single source of truth for which node is the annotation target. Valid values:
+ * `"current"`, `"user_override"`, `"parents:<index>"`, `"children:<index>"`.
+ * Defaults to `"current"` at capture time and for legacy `.ctx` files lacking the field.
+ */
+selected: string, 
+/**
+ * Event-level title authored by the user (e.g. "Click the Save button").
+ * Not tied to any single AX node — describes the event as a whole.
+ */
+title?: string | null, 
+/**
+ * Event-level description shown in the tutorial overlay beneath the title.
+ */
+description?: string | null, };
 
 export type CapturedMouseEvent = { mouse: MouseEvent, 
 /**
@@ -38,3 +57,10 @@ export type MouseEvent = { x: number, y: number, eventType: string, timeUtcMs: n
 export type RpcErrorResult = { error: string, };
 
 export type StatusResult = { status: string, };
+
+/**
+ * User-authored bounding box. Created by the annotator UI when no AX node cleanly describes
+ * the target region (canvas, broken ARIA, etc.). Selection is tracked on `AxSnapshot::selected`,
+ * not here — this struct only carries the geometry.
+ */
+export type UserOverride = { boundingBox: AxBoundingBox, };

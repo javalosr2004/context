@@ -54,25 +54,25 @@ const DEFAULT_SELECTED = 'current'
 const PARENTS_KEY = /^parents:(\d+)$/
 const CHILDREN_KEY = /^children:(\d+)$/
 
-/** Read the selected node's bounding box, or null for malformed keys / missing nodes. */
-function selectedNodeBoundingBox(snap: SnapView): AxBoundingBox | null {
-  const key = snap.selected ?? DEFAULT_SELECTED
+/** Bounding box for a given selection key, or null if missing / malformed. */
+function boundingBoxForKey(snap: SnapView, key: string): AxBoundingBox | null {
+  const k = key || DEFAULT_SELECTED
 
-  if (key === 'current') {
+  if (k === 'current') {
     return snap.current?.boundingBox ?? null
   }
-  if (key === 'user_override') {
+  if (k === 'user_override') {
     return snap.userOverride?.boundingBox ?? null
   }
 
-  let m = PARENTS_KEY.exec(key)
+  let m = PARENTS_KEY.exec(k)
   if (m) {
     const i = Number(m[1])
     const node = snap.parents?.[i]
     return node?.boundingBox ?? null
   }
 
-  m = CHILDREN_KEY.exec(key)
+  m = CHILDREN_KEY.exec(k)
   if (m) {
     const i = Number(m[1])
     const node = snap.children?.[i]
@@ -80,6 +80,11 @@ function selectedNodeBoundingBox(snap: SnapView): AxBoundingBox | null {
   }
 
   return null
+}
+
+/** Read the selected node's bounding box, or null for malformed keys / missing nodes. */
+function selectedNodeBoundingBox(snap: SnapView): AxBoundingBox | null {
+  return boundingBoxForKey(snap, snap.selected ?? DEFAULT_SELECTED)
 }
 
 function formatTimestamp(ms: number): string {
@@ -139,6 +144,13 @@ export default function Annotator(): React.JSX.Element {
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const writePromisesRef = useRef<Promise<void>[]>([])
+
+  // Custom annotation / bbox editing state
+  const [isEditingBbox, setIsEditingBbox] = useState(false)
+  const dragHandleRef = useRef<'tl' | 'tr' | 'bl' | 'br' | null>(null)
+  const dragOriginRef = useRef<{ clientX: number; clientY: number; bbox: AxBoundingBox } | null>(
+    null
+  )
 
   // Cleanup recorder and stream on unmount
   useEffect(() => {
@@ -345,7 +357,11 @@ export default function Annotator(): React.JSX.Element {
       try {
         const result = await window.api.importRecording(archivePath)
         if (result.ok) {
-          const { videoPath: importedVideoPath, eventsPath: importedEventsPath, events: rawEvents } = result.payload
+          const {
+            videoPath: importedVideoPath,
+            eventsPath: importedEventsPath,
+            events: rawEvents
+          } = result.payload
 
           // Transform Rust events to AnnotatorEvents with relative timestamps
           if (rawEvents.length > 0) {
@@ -452,17 +468,22 @@ export default function Annotator(): React.JSX.Element {
       seekToTime(timestampMs)
       setActiveEventIdx(idx)
       setExpandedEventIdx(idx)
+      setIsEditingBbox(false)
     },
     [seekToTime]
   )
 
   const handleCollapseTree = useCallback((): void => {
     setExpandedEventIdx(null)
+    setIsEditingBbox(false)
   }, [])
 
   /**
    * Write the new selection key onto the expanded event's snapshot and mirror it into
    * rawEvents for persistence. One field, one write — no clearing, no invariants to maintain.
+   *
+   * In custom-annotation edit mode, the overlay stays on `user_override`; clicking another
+   * node copies that node's bbox into `userOverride` as a reference geometry to refine.
    */
   const selectNode = useCallback(
     (nodeKey: string): void => {
@@ -472,19 +493,42 @@ export default function Annotator(): React.JSX.Element {
       const snap = evt.axAttributes as SnapView | undefined
       if (!snap?.current) return
 
+      if (isEditingBbox && nodeKey !== 'user_override') {
+        const refBbox = boundingBoxForKey(snap, nodeKey)
+        if (!refBbox) return
+
+        const updatedSnap: SnapView = {
+          ...snap,
+          userOverride: { boundingBox: { ...refBbox } },
+          selected: 'user_override'
+        }
+        const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as SnapView | undefined
+        if (rawSnap) {
+          rawSnap.userOverride = { boundingBox: { ...refBbox } }
+          rawSnap.selected = 'user_override'
+        }
+
+        setHasUnsavedChanges(true)
+        setEvents((prev) =>
+          prev.map((e, i) =>
+            i === expandedEventIdx ? { ...e, axAttributes: updatedSnap as AxAttributesPayload } : e
+          )
+        )
+        return
+      }
+
       const updatedSnap = { ...snap, selected: nodeKey }
       const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as SnapView | undefined
       if (rawSnap) rawSnap.selected = nodeKey
 
       setHasUnsavedChanges(true)
-      // Replace the event object so useMemo dependencies on axAttributes see a new reference.
       setEvents((prev) =>
         prev.map((e, i) =>
           i === expandedEventIdx ? { ...e, axAttributes: updatedSnap as AxAttributesPayload } : e
         )
       )
     },
-    [expandedEventIdx, events, rawEvents]
+    [expandedEventIdx, events, rawEvents, isEditingBbox]
   )
 
   /**
@@ -528,7 +572,170 @@ export default function Annotator(): React.JSX.Element {
     }
   }, [eventsPath, archivePath, rawEvents])
 
+  const updateUserOverrideBbox = useCallback(
+    (bbox: AxBoundingBox): void => {
+      if (expandedEventIdx === null || expandedEventIdx >= events.length) return
+      const evt = events[expandedEventIdx]
+      const snap = evt.axAttributes as SnapView | undefined
+      if (!snap) return
+
+      const updatedSnap: SnapView = { ...snap, userOverride: { boundingBox: bbox } }
+      const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as SnapView | undefined
+      if (rawSnap) rawSnap.userOverride = { boundingBox: bbox }
+
+      setHasUnsavedChanges(true)
+      setEvents((prev) =>
+        prev.map((e, i) =>
+          i === expandedEventIdx ? { ...e, axAttributes: updatedSnap as AxAttributesPayload } : e
+        )
+      )
+    },
+    [expandedEventIdx, events, rawEvents]
+  )
+
+  /**
+   * Enter custom annotation edit mode. Preserves an existing userOverride bbox;
+   * seeds a new 100×100 box centered on the event click (native px), clamped to the frame.
+   */
+  const handleStartCustomAnnotation = useCallback((): void => {
+    if (expandedEventIdx === null || expandedEventIdx >= events.length) return
+    const evt = events[expandedEventIdx]
+    const snap = evt.axAttributes as SnapView | undefined
+    if (!snap?.current) return
+
+    if (!snap.userOverride) {
+      const SIZE = 100
+      const half = SIZE / 2
+      const vw = videoNativePx.width
+      const vh = videoNativePx.height
+
+      let cx: number
+      let cy: number
+      if (evt.x !== undefined && evt.y !== undefined) {
+        cx = evt.x
+        cy = evt.y
+      } else if (vw > 0 && vh > 0) {
+        cx = vw / 2
+        cy = vh / 2
+      } else {
+        cx = half
+        cy = half
+      }
+
+      let x = cx - half
+      let y = cy - half
+      if (vw > 0 && vh > 0) {
+        const maxX = Math.max(0, vw - SIZE)
+        const maxY = Math.max(0, vh - SIZE)
+        x = Math.max(0, Math.min(x, maxX))
+        y = Math.max(0, Math.min(y, maxY))
+      }
+
+      const bbox: AxBoundingBox = { x, y, width: SIZE, height: SIZE }
+
+      const updatedSnap: SnapView = {
+        ...snap,
+        userOverride: { boundingBox: bbox },
+        selected: 'user_override'
+      }
+      const rawSnap = rawEvents[evt.rawEventIndex]?.axAttributes as SnapView | undefined
+      if (rawSnap) {
+        rawSnap.userOverride = { boundingBox: bbox }
+        rawSnap.selected = 'user_override'
+      }
+      setHasUnsavedChanges(true)
+      setEvents((prev) =>
+        prev.map((e, i) =>
+          i === expandedEventIdx ? { ...e, axAttributes: updatedSnap as AxAttributesPayload } : e
+        )
+      )
+    } else {
+      selectNode('user_override')
+    }
+    setIsEditingBbox(true)
+  }, [expandedEventIdx, events, rawEvents, selectNode, videoNativePx])
+
   const scale = videoNativePx.width > 0 ? videoLayoutPx.width / videoNativePx.width : 1
+
+  // Keep a ref so the drag mousemove handler always reads the current scale
+  // without needing to be re-registered every time the video resizes.
+  const scaleRef = useRef(scale)
+  useEffect(() => {
+    scaleRef.current = scale
+  }, [scale])
+
+  // Keep a ref so the drag handler always calls the latest updateUserOverrideBbox
+  // closure (which captures the current events / expandedEventIdx) without
+  // re-registering document listeners on every drag step.
+  const updateBboxRef = useRef(updateUserOverrideBbox)
+  useEffect(() => {
+    updateBboxRef.current = updateUserOverrideBbox
+  }, [updateUserOverrideBbox])
+
+  useEffect(() => {
+    if (!isEditingBbox) return
+
+    const handleMouseMove = (e: MouseEvent): void => {
+      if (!dragHandleRef.current || !dragOriginRef.current) return
+      const handle = dragHandleRef.current
+      const origin = dragOriginRef.current
+      const dx = (e.clientX - origin.clientX) / scaleRef.current
+      const dy = (e.clientY - origin.clientY) / scaleRef.current
+      const orig = origin.bbox
+      const MIN = 10
+      const ox = orig.x
+      const oy = orig.y
+      const right = ox + orig.width
+      const bottom = oy + orig.height
+
+      let x: number
+      let y: number
+      let width: number
+      let height: number
+
+      if (handle === 'tl') {
+        // Anchor: bottom-right — (right, bottom) fixed
+        const nx = Math.min(ox + dx, right - MIN)
+        const ny = Math.min(oy + dy, bottom - MIN)
+        x = nx
+        y = ny
+        width = right - nx
+        height = bottom - ny
+      } else if (handle === 'tr') {
+        // Anchor: bottom-left — (ox, bottom) fixed
+        x = ox
+        y = Math.min(oy + dy, bottom - MIN)
+        width = Math.max(MIN, orig.width + dx)
+        height = bottom - y
+      } else if (handle === 'bl') {
+        // Anchor: top-right — (right, oy) fixed
+        x = Math.min(ox + dx, right - MIN)
+        y = oy
+        width = right - x
+        height = Math.max(MIN, orig.height + dy)
+      } else {
+        // br — anchor: top-left — (ox, oy) fixed
+        x = ox
+        y = oy
+        width = Math.max(MIN, orig.width + dx)
+        height = Math.max(MIN, orig.height + dy)
+      }
+
+      updateBboxRef.current({ x, y, width, height })
+    }
+
+    const handleMouseUp = (): void => {
+      dragHandleRef.current = null
+      dragOriginRef.current = null
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isEditingBbox])
 
   // Auto-activate the nearest event when the playhead is within ±200ms
   const BBOX_WINDOW_MS = 200
@@ -680,19 +887,55 @@ export default function Annotator(): React.JSX.Element {
                   onLoadedMetadata={handleLoadedMetadata}
                 />
                 {activeBbox && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: activeBbox.x * scale,
-                      top: activeBbox.y * scale,
-                      width: activeBbox.width * scale,
-                      height: activeBbox.height * scale,
-                      border: '2px solid #ff3b30',
-                      backgroundColor: 'rgba(255, 59, 48, 0.15)',
-                      borderRadius: 3,
-                      pointerEvents: 'none'
-                    }}
-                  />
+                  <>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: activeBbox.x * scale,
+                        top: activeBbox.y * scale,
+                        width: activeBbox.width * scale,
+                        height: activeBbox.height * scale,
+                        border: isEditingBbox ? '2px dashed #ff3b30' : '2px solid #ff3b30',
+                        backgroundColor: 'rgba(255, 59, 48, 0.15)',
+                        borderRadius: 3,
+                        pointerEvents: 'none'
+                      }}
+                    />
+                    {isEditingBbox &&
+                      (['tl', 'tr', 'bl', 'br'] as const).map((handle) => {
+                        const isLeft = handle[1] === 'l'
+                        const isTop = handle[0] === 't'
+                        const cx = isLeft ? activeBbox.x : activeBbox.x + activeBbox.width
+                        const cy = isTop ? activeBbox.y : activeBbox.y + activeBbox.height
+                        return (
+                          <div
+                            key={handle}
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              dragHandleRef.current = handle
+                              dragOriginRef.current = {
+                                clientX: e.clientX,
+                                clientY: e.clientY,
+                                bbox: { ...activeBbox }
+                              }
+                            }}
+                            style={{
+                              position: 'absolute',
+                              left: cx * scale - 5,
+                              top: cy * scale - 5,
+                              width: 10,
+                              height: 10,
+                              backgroundColor: '#ff3b30',
+                              border: '1.5px solid white',
+                              borderRadius: 2,
+                              cursor:
+                                handle === 'tl' || handle === 'br' ? 'nw-resize' : 'ne-resize',
+                              zIndex: 10
+                            }}
+                          />
+                        )
+                      })}
+                  </>
                 )}
               </div>
               <h1 className="ann-video-dimensions">
@@ -805,9 +1048,21 @@ export default function Annotator(): React.JSX.Element {
                 </svg>
                 Events
               </button>
-              <span className="ann-sidebar-count">
-                {formatTimestamp(sortedEvents[expandedEventIdx].timestampMs)}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={
+                    isEditingBbox ? () => setIsEditingBbox(false) : handleStartCustomAnnotation
+                  }
+                  className={`ann-btn ${isEditingBbox ? 'ann-btn-save' : 'ann-btn-secondary'}`}
+                  style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                >
+                  {isEditingBbox ? 'Done' : 'Custom Annotation'}
+                </button>
+                <span className="ann-sidebar-count">
+                  {formatTimestamp(sortedEvents[expandedEventIdx].timestampMs)}
+                </span>
+              </div>
             </div>
             <div className="ann-sidebar-list">
               {/* Event-level label (title + description) */}

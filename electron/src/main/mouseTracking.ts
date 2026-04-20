@@ -78,13 +78,21 @@ export async function startMouseTracking(): Promise<void> {
   log.info('mouseTracking:started')
 }
 
-export function stopMouseTracking(): void {
+export async function stopMouseTracking(
+  method: 'stop_mouse_listener' | 'stop_and_get_mouse_events' = 'stop_mouse_listener'
+): Promise<unknown | null> {
   if (!mouseTrackingActive) return
 
+  let result: unknown | null = null
+
   if (rustProcess) {
-    sendRpcRequest(rustProcess, 'stop_mouse_listener')
-      .then(() => log.info('rust-backend:mouse_listener stopped'))
-      .catch((err) => log.error('rust-backend:stop_mouse_listener failed', { error: err.message }))
+    try {
+      result = await sendRpcRequest(rustProcess, method)
+      log.info('rust-backend:mouse_listener stopped', { method })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error('rust-backend:stop_mouse_listener failed', { error: message, method })
+    }
   }
 
   if (mouseTrackingInterval) {
@@ -94,4 +102,5 @@ export function stopMouseTracking(): void {
 
   mouseTrackingActive = false
   log.info('mouseTracking:stopped')
+  return result
 }

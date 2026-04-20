@@ -26,6 +26,16 @@ export type RecordedMouseEvent = RustMouseEvent & {
   axAttributes?: AxAttributesPayload | null
 }
 
+export interface LoadedRecording {
+  recordingId: string
+  displayName: string
+  videoUrl: string
+}
+
+export interface LoadedRecordingPayload extends LoadedRecording {
+  events: RecordedMouseEvent[]
+}
+
 export type Result<T> = { ok: true; payload: T } | { ok: false; error: string }
 
 export const Ok = <T>(payload: T): Result<T> => ({ ok: true, payload })

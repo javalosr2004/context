@@ -79,7 +79,9 @@ fn get_event_collector() -> &'static Arc<Mutex<EventCollector>> {
 
 enum CollectorCommand {
     Start,
-    Stop,
+    Stop {
+        ack_tx: Sender<()>,
+    },
 }
 
 struct EventCollector {
@@ -111,9 +113,11 @@ impl EventCollector {
                             running = true;
                             listener.start();
                         }
-                        CollectorCommand::Stop => {
+                        CollectorCommand::Stop { ack_tx } => {
                             running = false;
                             listener.stop();
+                            forward_pending_events(&listener, tree.as_ref(), &event_tx);
+                            let _ = ack_tx.send(());
                         }
                     }
                 }
@@ -131,22 +135,7 @@ impl EventCollector {
                 }
 
                 if let Some(mouse) = listener.try_recv() {
-                    let ax_attributes = tree
-                        .as_ref()
-                        .and_then(|t| t.get_ax_snapshot_at_position(mouse.x, mouse.y).ok())
-                        .map(|mut snap| {
-                            // Capture-time defaults for the event-level label. The annotator UI
-                            // lets the user replace these with meaningful text.
-                            snap.title = Some(mouse.event_type.clone());
-                            snap.description =
-                                Some(format!("({:.0}, {:.0})", mouse.x, mouse.y));
-                            snap
-                        });
-
-                    let _ = event_tx.send(CapturedMouseEvent {
-                        mouse,
-                        ax_attributes,
-                    });
+                    let _ = event_tx.send(captured_mouse_event(mouse, tree.as_ref()));
                 } else {
                     thread::sleep(Duration::from_millis(5));
                 }
@@ -177,7 +166,10 @@ impl EventCollector {
     }
 
     fn stop(&self) {
-        let _ = self.cmd_tx.send(CollectorCommand::Stop);
+        let (ack_tx, ack_rx) = channel();
+        if self.cmd_tx.send(CollectorCommand::Stop { ack_tx }).is_ok() {
+            let _ = ack_rx.recv();
+        }
     }
 
     fn drain(&self) -> Vec<CapturedMouseEvent> {
@@ -186,6 +178,41 @@ impl EventCollector {
             out.push(event);
         }
         out
+    }
+
+    fn stop_and_drain(&self) -> Vec<CapturedMouseEvent> {
+        self.stop();
+        self.drain()
+    }
+}
+
+fn captured_mouse_event(
+    mouse: MouseEvent,
+    tree: Option<&AccessibilityTree>,
+) -> CapturedMouseEvent {
+    let ax_attributes = tree
+        .and_then(|t| t.get_ax_snapshot_at_position(mouse.x, mouse.y).ok())
+        .map(|mut snap| {
+            // Capture-time defaults for the event-level label. The annotator UI
+            // lets the user replace these with meaningful text.
+            snap.title = Some(mouse.event_type.clone());
+            snap.description = Some(format!("({:.0}, {:.0})", mouse.x, mouse.y));
+            snap
+        });
+
+    CapturedMouseEvent {
+        mouse,
+        ax_attributes,
+    }
+}
+
+fn forward_pending_events(
+    listener: &MouseListener,
+    tree: Option<&AccessibilityTree>,
+    event_tx: &Sender<CapturedMouseEvent>,
+) {
+    while let Some(mouse) = listener.try_recv() {
+        let _ = event_tx.send(captured_mouse_event(mouse, tree));
     }
 }
 
@@ -224,6 +251,11 @@ fn handle_request(req: Request) -> Response {
         "get_mouse_events" => {
             let collector = get_event_collector();
             let events = collector.lock().unwrap().drain();
+            serde_json::to_value(GetMouseEventsResult { events }).unwrap()
+        }
+        "stop_and_get_mouse_events" => {
+            let collector = get_event_collector();
+            let events = collector.lock().unwrap().stop_and_drain();
             serde_json::to_value(GetMouseEventsResult { events }).unwrap()
         }
         "stop_mouse_listener" => {

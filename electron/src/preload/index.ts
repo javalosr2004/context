@@ -4,6 +4,7 @@ import type {
   ScreenSource,
   MousePosition,
   Result,
+  LoadedRecordingPayload,
   RecordedMouseEvent
 } from '../shared/types'
 
@@ -22,20 +23,16 @@ const api = {
       ipcRenderer.removeListener('mouse-position', handler)
     }
   },
-  startRecording: (): Promise<Result<{ tempPath: string }>> =>
-    ipcRenderer.invoke('recording:start'),
+  startRecording: (): Promise<Result<null>> => ipcRenderer.invoke('recording:start'),
   pushRecordingChunk: (chunk: ArrayBuffer): Promise<Result<null>> =>
     ipcRenderer.invoke('recording:push', chunk),
-  finishRecording: (defaultName: string): Promise<Result<{ zipPath: string }>> =>
+  finishRecording: (defaultName: string): Promise<Result<LoadedRecordingPayload>> =>
     ipcRenderer.invoke('recording:finish', defaultName),
-  importRecording: (
-    archivePath: string
-  ): Promise<Result<{ videoPath: string; eventsPath: string; events: RecordedMouseEvent[] }>> =>
-    ipcRenderer.invoke('recording:import', archivePath),
-  showOpenRecordingDialog: (): Promise<Result<{ filePath: string }>> =>
-    ipcRenderer.invoke('recording:show-open-dialog'),
-  saveEvents: (eventsPath: string, archivePath: string, events: RecordedMouseEvent[]): Promise<Result<null>> =>
-    ipcRenderer.invoke('recording:save-events', eventsPath, archivePath, events),
+  pickRecording: (): Promise<Result<LoadedRecordingPayload>> => ipcRenderer.invoke('recording:pick'),
+  saveRecordingEvents: (
+    recordingId: string,
+    events: RecordedMouseEvent[]
+  ): Promise<Result<null>> => ipcRenderer.invoke('recording:save-events', recordingId, events),
 
   // Viewer
   openViewer: (): Promise<Result<null>> => ipcRenderer.invoke('viewer:open'),

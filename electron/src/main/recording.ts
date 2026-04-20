@@ -1,20 +1,18 @@
 import { app, BrowserWindow, dialog } from 'electron'
-import { join } from 'path'
+import type { OpenDialogOptions } from 'electron'
+import { basename, join } from 'path'
 import { readFile, readdir, rm } from 'fs/promises'
 import { FileHandle, mkdir, open, unlink, writeFile } from 'fs/promises'
 import { createReadStream, createWriteStream } from 'fs'
+import { randomUUID } from 'crypto'
 import log from './logger'
 import {
-  Result,
-  Ok,
-  Err,
   GetMouseEventsResult,
-  RustCapturedMouseEvent,
+  LoadedRecordingPayload,
   RecordedMouseEvent
 } from '../shared/types'
 import archiver from 'archiver'
-import { sendRpcRequest } from './rpc'
-import { getRustProcess, startMouseTracking, stopMouseTracking } from './mouseTracking'
+import { startMouseTracking, stopMouseTracking } from './mouseTracking'
 import extract from 'extract-zip'
 export interface ActiveRecording {
   handle: FileHandle
@@ -23,8 +21,17 @@ export interface ActiveRecording {
   events: RecordedMouseEvent[] // Store events during recording
 }
 
+interface StoredRecording {
+  archivePath: string
+  extractedDir: string
+  videoPath: string
+  eventsPath: string
+  displayName: string
+}
+
 let activeRecording: ActiveRecording | null = null
 let mainWindowRef: BrowserWindow | null = null
+const importedRecordings = new Map<string, StoredRecording>()
 
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindowRef = window
@@ -46,9 +53,9 @@ export function addEventToRecording(event: RecordedMouseEvent): void {
   }
 }
 
-export async function startRecording(): Promise<Result<{ tempPath: string }>> {
+export async function startRecording(): Promise<{ ok: true; payload: null } | { ok: false; error: string }> {
   if (activeRecording) {
-    return Err('Recording already in progress')
+    return { ok: false, error: 'Recording already in progress' }
   }
 
   try {
@@ -59,33 +66,33 @@ export async function startRecording(): Promise<Result<{ tempPath: string }>> {
     const startTime = Date.now()
     const tempPath = join(app.getPath('temp'), `screen-recording-${startTime}.webm`)
     const handle = await open(tempPath, 'w')
-
-
-    activeRecording = { handle, tempPath, startTime, events: [] } 
+    activeRecording = { handle, tempPath, startTime, events: [] }
 
     log.info('recording:start', { tempPath, startTime })
-    return Ok({ tempPath })
+    return { ok: true, payload: null }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     log.error('recording:start failed', { error: message })
-    return Err(message)
+    return { ok: false, error: message }
   }
 }
 
-export async function pushRecordingChunk(chunk: ArrayBuffer): Promise<Result<null>> {
+export async function pushRecordingChunk(
+  chunk: ArrayBuffer
+): Promise<{ ok: true; payload: null } | { ok: false; error: string }> {
   if (!activeRecording) {
-    return Err("Recording hasn't started.")
+    return { ok: false, error: "Recording hasn't started." }
   }
 
   try {
     const buffer = Buffer.from(chunk)
     log.info('recording:push', { bufferLength: buffer.length })
     await activeRecording.handle.write(buffer)
-    return Ok(null)
+    return { ok: true, payload: null }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     log.error('recording:push failed', { error: message })
-    return Err(message)
+    return { ok: false, error: message }
   }
 }
 
@@ -99,15 +106,14 @@ export async function pushRecordingChunk(chunk: ArrayBuffer): Promise<Result<nul
  * 5. Cleans up the temp video file
  *
  * @param defaultName Default name for the file (e.g., "recording-123.webm")
- * @returns Result containing the path to the created zip file
+ * @returns Result containing the opaque id and renderer-safe media URL
  */
-export async function finishRecording(defaultName: string): Promise<Result<{ zipPath: string }>> {
+export async function finishRecording(
+  defaultName: string
+): Promise<{ ok: true; payload: LoadedRecordingPayload } | { ok: false; error: string }> {
   if (!activeRecording) {
-    return Err('No active recording')
+    return { ok: false, error: 'No active recording' }
   }
-
-  // Stop mouse tracking
-  stopMouseTracking()
 
   // Close the file handle
   try {
@@ -137,7 +143,7 @@ export async function finishRecording(defaultName: string): Promise<Result<{ zip
       // Clean up temp file
       await unlink(tempPath).catch(() => {})
       log.info('recording:finish canceled, temp deleted')
-      return Err('Save canceled')
+      return { ok: false, error: 'Save canceled' }
     }
 
     // Create zip using archiver with streaming
@@ -156,25 +162,19 @@ export async function finishRecording(defaultName: string): Promise<Result<{ zip
     // Stream the video file from tempPath (no memory loading)
     archive.append(createReadStream(tempPath), { name: 'recording.webm' })
 
-    // Add events as JSONL
-    // Send RPC request to Rust backend to save events
-    const rustProcess = getRustProcess()
-    if (rustProcess) {
-      await sendRpcRequest(rustProcess, 'get_mouse_events')
-        .then((result) => {
-          const eventResult = result as GetMouseEventsResult
-          if (eventResult.events) {
-            events = eventResult.events.map((captured: RustCapturedMouseEvent) => {
-              const baseEvent: RecordedMouseEvent = { ...captured.mouse }
-              if (captured.axAttributes) {
-                baseEvent.axAttributes = captured.axAttributes
-              }
-              return baseEvent
-            })
-          }
-        })
-        .catch((err) => log.error('rust-backend:mouse_events failed', { error: err.message }))
+    const stopResult = (await stopMouseTracking('stop_and_get_mouse_events')) as
+      | GetMouseEventsResult
+      | null
+    if (stopResult?.events) {
+      events = stopResult.events.map((captured) => {
+        const baseEvent: RecordedMouseEvent = { ...captured.mouse }
+        if (captured.axAttributes) {
+          baseEvent.axAttributes = captured.axAttributes
+        }
+        return baseEvent
+      })
     } 
+
     // Emit synthetic recording_start event as timestamp baseline
     const startEvent: RecordedMouseEvent = {
       x: 0,
@@ -193,14 +193,19 @@ export async function finishRecording(defaultName: string): Promise<Result<{ zip
     // Clean up temp video file
     await unlink(tempPath).catch(() => {})
 
-    log.info('recording:finish created', { zipPath: filePath, eventCount: events.length })
-    return Ok({ zipPath: filePath })
+    const payload = await loadRecordingArchive(filePath)
+    log.info('recording:finish created', {
+      archivePath: filePath,
+      recordingId: payload.recordingId,
+      eventCount: events.length
+    })
+    return { ok: true, payload }
   } catch (error) {
     // Clean up temp file on error
     await unlink(tempPath).catch(() => {})
     const message = error instanceof Error ? error.message : String(error)
     log.error('recording:finish failed', { error: message })
-    return Err(message)
+    return { ok: false, error: message }
   }
 }
 
@@ -237,6 +242,10 @@ export async function getRecordingItems(
 
 const IMPORT_CACHE_DIR = 'recording-imports'
 
+function clearRecordingRegistry(): void {
+  importedRecordings.clear()
+}
+
 async function cleanupOldImports(cacheBase: string): Promise<void> {
   try {
     const entries = await readdir(cacheBase)
@@ -246,9 +255,10 @@ async function cleanupOldImports(cacheBase: string): Promise<void> {
   } catch {
     // Directory may not exist yet, that's fine
   }
+  clearRecordingRegistry()
 }
 
-export async function importRecording(inputFile: string): Promise<string> {
+async function extractRecordingArchive(inputFile: string): Promise<string> {
   const cacheBase = join(app.getPath('userData'), 'cache', IMPORT_CACHE_DIR)
   const timestamp = Date.now()
   const outputPath = join(cacheBase, String(timestamp))
@@ -266,6 +276,76 @@ export async function importRecording(inputFile: string): Promise<string> {
     log.error('recording:import failed', { error: message, inputFile })
     throw error
   }
+}
+
+function buildVideoUrl(recordingId: string): string {
+  return `media://recording/${recordingId}`
+}
+
+export function getRecordingVideoPath(recordingId: string): string | null {
+  return importedRecordings.get(recordingId)?.videoPath ?? null
+}
+
+export async function loadRecordingArchive(archivePath: string): Promise<LoadedRecordingPayload> {
+  const extractedDir = await extractRecordingArchive(archivePath)
+  const { videoPath, eventsPath } = await getRecordingItems(extractedDir)
+  const events = await readEventsFile(eventsPath)
+  const recordingId = randomUUID()
+  const displayName = basename(archivePath)
+
+  importedRecordings.set(recordingId, {
+    archivePath,
+    extractedDir,
+    videoPath,
+    eventsPath,
+    displayName
+  })
+
+  return {
+    recordingId,
+    displayName,
+    videoUrl: buildVideoUrl(recordingId),
+    events
+  }
+}
+
+export async function pickRecording(): Promise<
+  { ok: true; payload: LoadedRecordingPayload } | { ok: false; error: string }
+> {
+  const win = mainWindowRef ?? BrowserWindow.getFocusedWindow()
+  const options: OpenDialogOptions = {
+    title: 'Open Recording',
+    filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
+    properties: ['openFile']
+  }
+
+  const { canceled, filePaths } = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options)
+
+  if (canceled || filePaths.length === 0) {
+    return { ok: false, error: 'Dialog canceled' }
+  }
+
+  try {
+    return { ok: true, payload: await loadRecordingArchive(filePaths[0]) }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    log.error('recording:pick failed', { error: message })
+    return { ok: false, error: message }
+  }
+}
+
+export async function saveRecordingEvents(
+  recordingId: string,
+  events: RecordedMouseEvent[]
+): Promise<void> {
+  const storedRecording = importedRecordings.get(recordingId)
+  if (!storedRecording) {
+    throw new Error('Recording not found or expired')
+  }
+
+  await saveEventsFile(storedRecording.eventsPath, storedRecording.archivePath, events)
 }
 
 export async function readEventsFile(eventsPath: string): Promise<RecordedMouseEvent[]> {

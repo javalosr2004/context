@@ -1,22 +1,20 @@
-import { app, ipcMain, desktopCapturer, dialog, screen, protocol } from 'electron'
+import { app, ipcMain, desktopCapturer, screen, protocol } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import log from './logger'
-import type { ScreenSource } from '../shared/types'
+import type { LoadedRecordingPayload, ScreenSource } from '../shared/types'
 import { Result, Ok, Err } from '../shared/types'
 import {
   startRecording,
   pushRecordingChunk,
   finishRecording,
-  importRecording,
-  getRecordingItems,
-  readEventsFile,
-  saveEventsFile,
+  getRecordingVideoPath,
+  pickRecording,
+  saveRecordingEvents,
   setMainWindow as setRecordingMainWindow
 } from './recording'
 import type { RecordedMouseEvent } from '../shared/types'
 import { stopMouseTracking, setMainWindow as setMouseTrackingMainWindow } from './mouseTracking'
 import { createWindow, createViewerWindow, getMainWindow, getViewerWindow } from './window'
-import path from 'path'
 import fs from 'node:fs'
 import { Readable } from 'node:stream'
 
@@ -36,12 +34,15 @@ protocol.registerSchemesAsPrivileged([
 app.whenReady().then(() => {
   protocol.handle('media', async (request) => {
     const url = new URL(request.url)
-    const pathname = decodeURIComponent(url.pathname)
-    const filePath = path.resolve(pathname)
-
-    const allowedHost = app.getPath('userData')
-    if (!filePath.startsWith(allowedHost)) {
+    if (url.host !== 'recording') {
       return new Response(null, { status: 403 })
+    }
+
+    const recordingId = decodeURIComponent(url.pathname).slice(1)
+    const filePath = getRecordingVideoPath(recordingId)
+
+    if (!filePath) {
+      return new Response(null, { status: 404 })
     }
 
     if (!fs.existsSync(filePath)) {
@@ -140,7 +141,7 @@ app.whenReady().then(() => {
   })
 
   // Recording IPC handlers
-  ipcMain.handle('recording:start', async (): Promise<Result<{ tempPath: string }>> => {
+  ipcMain.handle('recording:start', async (): Promise<Result<null>> => {
     return startRecording()
   })
 
@@ -150,63 +151,21 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'recording:finish',
-    async (_event, defaultName: string): Promise<Result<{ zipPath: string }>> => {
+    async (_event, defaultName: string): Promise<Result<LoadedRecordingPayload>> => {
       return finishRecording(defaultName)
     }
   )
 
-  // Show open dialog to pick a .ctx file
-  ipcMain.handle('recording:show-open-dialog', async (): Promise<Result<{ filePath: string }>> => {
-    const win = getMainWindow()
-    const { canceled, filePaths } = win
-      ? await dialog.showOpenDialog(win, {
-          title: 'Open Recording',
-          filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
-          properties: ['openFile']
-        })
-      : await dialog.showOpenDialog({
-          title: 'Open Recording',
-          filters: [{ name: 'Context Archive', extensions: ['ctx'] }],
-          properties: ['openFile']
-        })
-
-    if (canceled || filePaths.length === 0) {
-      return Err('Dialog canceled')
-    }
-    return Ok({ filePath: filePaths[0] })
+  ipcMain.handle('recording:pick', async (): Promise<Result<LoadedRecordingPayload>> => {
+    return pickRecording()
   })
-
-  // Import a .ctx recording archive and extract it
-  ipcMain.handle(
-    'recording:import',
-    async (
-      _event,
-      archivePath: string
-    ): Promise<Result<{ videoPath: string; eventsPath: string; events: RecordedMouseEvent[] }>> => {
-      try {
-        const outputDir = await importRecording(archivePath)
-        const { videoPath, eventsPath } = await getRecordingItems(outputDir)
-        const events = await readEventsFile(eventsPath)
-        return Ok({ videoPath, eventsPath, events })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        log.error('recording:import failed', { error: message })
-        return Err(message)
-      }
-    }
-  )
 
   // Save modified events back to the extracted cache and re-pack the .ctx archive
   ipcMain.handle(
     'recording:save-events',
-    async (
-      _event,
-      eventsPath: string,
-      archivePath: string,
-      events: RecordedMouseEvent[]
-    ): Promise<Result<null>> => {
+    async (_event, recordingId: string, events: RecordedMouseEvent[]): Promise<Result<null>> => {
       try {
-        await saveEventsFile(eventsPath, archivePath, events)
+        await saveRecordingEvents(recordingId, events)
         return Ok(null)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -281,7 +240,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   log.info('App quitting')
-  stopMouseTracking()
+  void stopMouseTracking()
 })
 
 process.on('uncaughtException', (error) => {

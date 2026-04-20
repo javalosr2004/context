@@ -1,18 +1,21 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type { ScreenSource, MousePosition, Result, RecordedMouseEvent } from '../shared/types'
+import type {
+  LoadedRecordingPayload,
+  MousePosition,
+  RecordedMouseEvent,
+  Result,
+  ScreenSource
+} from '../shared/types'
 
 interface Api {
   getSources: () => Promise<Result<ScreenSource[]>>
   getCursorDisplay: () => Promise<Result<Electron.Display>>
   onMousePosition: (callback: (position: MousePosition) => void) => () => void
-  startRecording: () => Promise<Result<{ tempPath: string }>>
+  startRecording: () => Promise<Result<null>>
   pushRecordingChunk: (chunk: ArrayBuffer) => Promise<Result<null>>
-  finishRecording: (defaultName: string) => Promise<Result<{ zipPath: string }>>
-  importRecording: (
-    archivePath: string
-  ) => Promise<Result<{ videoPath: string; eventsPath: string; events: RecordedMouseEvent[] }>>
-  showOpenRecordingDialog: () => Promise<Result<{ filePath: string }>>
-  saveEvents: (eventsPath: string, archivePath: string, events: RecordedMouseEvent[]) => Promise<Result<null>>
+  finishRecording: (defaultName: string) => Promise<Result<LoadedRecordingPayload>>
+  pickRecording: () => Promise<Result<LoadedRecordingPayload>>
+  saveRecordingEvents: (recordingId: string, events: RecordedMouseEvent[]) => Promise<Result<null>>
   openViewer: () => Promise<Result<null>>
   closeViewer: () => Promise<Result<null>>
   sendViewerData: (data: unknown) => Promise<Result<null>>

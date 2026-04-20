@@ -4,6 +4,7 @@ import type {
   AxAttributes,
   AxAttributesPayload,
   AxBoundingBox,
+  LoadedRecordingPayload,
   RecordedMouseEvent,
   UserOverride
 } from '../../../shared/types'
@@ -111,10 +112,35 @@ async function captureScreen(sourceId: string): Promise<MediaStream> {
   return stream
 }
 
+function buildAnnotatorEvents(rawEvents: RecordedMouseEvent[]): AnnotatorEvent[] {
+  if (rawEvents.length === 0) {
+    throw new Error('Recording has no events.')
+  }
+
+  const startEvent = rawEvents.find((event) => event.eventType === 'recording_start')
+  if (!startEvent) {
+    throw new Error('Failed to load startTime of video.')
+  }
+
+  const startTimeMs = Number(startEvent.timeUtcMs)
+
+  return rawEvents
+    .map((evt, idx) => ({ evt, idx }))
+    .filter(({ evt }) => evt.eventType !== 'recording_start')
+    .map(({ evt, idx }) => ({
+      eventName: evt.eventType,
+      title: (evt.axAttributes as SnapView | undefined)?.title ?? evt.eventType,
+      timestampMs: Number(evt.timeUtcMs) - startTimeMs,
+      axAttributes: evt.axAttributes ?? {},
+      x: evt.x,
+      y: evt.y,
+      rawEventIndex: idx
+    }))
+}
+
 export default function Annotator(): React.JSX.Element {
   const navigate = useNavigate()
-  const { archivePath, videoPath, eventsPath, isLoaded, setExtractedPaths, setArchivePath } =
-    useRecordingStore()
+  const { recordingId, displayName, videoUrl, isLoaded, setLoadedRecording } = useRecordingStore()
   const [events, setEvents] = useState<AnnotatorEvent[]>([])
   const [durationMs, setDurationMs] = useState(120_000)
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
@@ -152,6 +178,35 @@ export default function Annotator(): React.JSX.Element {
     null
   )
 
+  const resetLoadedRecordingState = useCallback((): void => {
+    setEvents([])
+    setRawEvents([])
+    setDurationMs(120_000)
+    setCurrentTimeMs(0)
+    setVideoLayoutPx({ width: 0, height: 0 })
+    setVideoNativePx({ width: 0, height: 0 })
+    setActiveEventIdx(null)
+    setExpandedEventIdx(null)
+    setHasUnsavedChanges(false)
+    setEventTooltip(null)
+    setIsEditingBbox(false)
+  }, [])
+
+  const loadRecordingIntoEditor = useCallback(
+    (payload: LoadedRecordingPayload): void => {
+      const annotatorEvents = buildAnnotatorEvents(payload.events)
+      setLoadedRecording({
+        recordingId: payload.recordingId,
+        displayName: payload.displayName,
+        videoUrl: payload.videoUrl
+      })
+      resetLoadedRecordingState()
+      setEvents(annotatorEvents)
+      setRawEvents(payload.events)
+    },
+    [resetLoadedRecordingState, setLoadedRecording]
+  )
+
   // Cleanup recorder and stream on unmount
   useEffect(() => {
     return () => {
@@ -177,7 +232,7 @@ export default function Annotator(): React.JSX.Element {
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [videoPath])
+  }, [videoUrl])
 
   const clearEventTooltipTimer = useCallback((): void => {
     if (eventTooltipTimerRef.current !== null) {
@@ -225,16 +280,19 @@ export default function Annotator(): React.JSX.Element {
   }, [clearEventTooltipTimer])
 
   const handleImportCtx = async (): Promise<void> => {
-    const result = await window.api.showOpenRecordingDialog()
-    if (!result.ok) {
-      if (result.error !== 'Dialog canceled') {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const result = await window.api.pickRecording()
+      if (result.ok) {
+        loadRecordingIntoEditor(result.payload)
+      } else if (result.error !== 'Dialog canceled') {
         setError(result.error)
       }
-      return
+    } finally {
+      setIsLoading(false)
     }
-    setError(null)
-    setEvents([])
-    setArchivePath(result.payload.filePath)
   }
 
   const handleStartRecording = async (): Promise<void> => {
@@ -331,9 +389,7 @@ export default function Annotator(): React.JSX.Element {
       const defaultName = 'recording.webm'
       const result = await window.api.finishRecording(defaultName)
       if (result.ok) {
-        // Automatically load the new recording
-        setEvents([])
-        setArchivePath(result.payload.zipPath)
+        loadRecordingIntoEditor(result.payload)
       } else {
         if (result.error !== 'Save canceled') {
           setError(result.error)
@@ -345,66 +401,6 @@ export default function Annotator(): React.JSX.Element {
 
     setIsRecordingLoading(false)
   }
-
-  // Load the recording when archivePath changes
-  useEffect(() => {
-    if (!archivePath || isLoaded) return
-
-    const loadRecording = async (): Promise<void> => {
-      setIsLoading(true)
-      setError(null)
-
-      try {
-        const result = await window.api.importRecording(archivePath)
-        if (result.ok) {
-          const {
-            videoPath: importedVideoPath,
-            eventsPath: importedEventsPath,
-            events: rawEvents
-          } = result.payload
-
-          // Transform Rust events to AnnotatorEvents with relative timestamps
-          if (rawEvents.length > 0) {
-            // Use recording_start event as baseline, fall back to first event
-            const startEvent = rawEvents.find((e) => e.eventType === 'recording_start')
-            if (!startEvent) {
-              setError('Failed to load startTime of video.')
-              setIsLoading(false)
-              return
-            }
-            setExtractedPaths(importedVideoPath, importedEventsPath)
-
-            const startTimeMs = Number(startEvent?.timeUtcMs ?? rawEvents[0].timeUtcMs)
-
-            // Filter out the synthetic recording_start event from display
-            const annotatorEvents: AnnotatorEvent[] = rawEvents
-              .map((evt, idx) => ({ evt, idx }))
-              .filter(({ evt }) => evt.eventType !== 'recording_start')
-              .map(({ evt, idx }) => ({
-                eventName: evt.eventType,
-                title: (evt.axAttributes as SnapView | undefined)?.title ?? evt.eventType,
-                timestampMs: Number(evt.timeUtcMs) - startTimeMs,
-                axAttributes: evt.axAttributes ?? {},
-                x: evt.x,
-                y: evt.y,
-                rawEventIndex: idx
-              }))
-            setEvents(annotatorEvents)
-            setRawEvents(rawEvents)
-            setHasUnsavedChanges(false)
-          }
-        } else {
-          setError(result.error)
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    loadRecording()
-  }, [archivePath, isLoaded, setExtractedPaths])
 
   // Update duration when video metadata loads
   const handleLoadedMetadata = (): void => {
@@ -563,14 +559,14 @@ export default function Annotator(): React.JSX.Element {
   )
 
   const handleSave = useCallback(async (): Promise<void> => {
-    if (!eventsPath || !archivePath || rawEvents.length === 0) return
-    const result = await window.api.saveEvents(eventsPath, archivePath, rawEvents)
+    if (!recordingId || rawEvents.length === 0) return
+    const result = await window.api.saveRecordingEvents(recordingId, rawEvents)
     if (result.ok) {
       setHasUnsavedChanges(false)
     } else {
       setError(result.error)
     }
-  }, [eventsPath, archivePath, rawEvents])
+  }, [recordingId, rawEvents])
 
   const updateUserOverrideBbox = useCallback(
     (bbox: AxBoundingBox): void => {
@@ -803,6 +799,11 @@ export default function Annotator(): React.JSX.Element {
           </button>
 
           <div className="ann-toolbar-actions">
+            {displayName && (
+              <span className="font-mono text-[0.7rem] uppercase tracking-[0.12em] text-[#8d91a0]">
+                {displayName}
+              </span>
+            )}
             <button
               type="button"
               onClick={handleStartRecording}
@@ -876,12 +877,12 @@ export default function Annotator(): React.JSX.Element {
             <div className="ann-empty">
               <span className="ann-error-text">{error}</span>
             </div>
-          ) : videoPath ? (
+          ) : videoUrl ? (
             <div>
               <div style={{ position: 'relative', display: 'inline-block' }}>
                 <video
                   ref={videoRef}
-                  src={`media://local/${encodeURIComponent(videoPath)}`}
+                  src={videoUrl}
                   className="max-w-full max-h-full"
                   controls
                   onLoadedMetadata={handleLoadedMetadata}

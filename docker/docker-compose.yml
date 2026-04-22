@@ -1,0 +1,10 @@
+services:
+  ffmpeg-crop:
+    build:
+      context: ./workers/ffmpeg-crop
+    ports:
+      - "8100:8000"
+    volumes:
+      - ./shared:/data
+    environment:
+      - DATA_DIR=/data

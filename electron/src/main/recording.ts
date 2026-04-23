@@ -1,16 +1,12 @@
 import { app, BrowserWindow, dialog } from 'electron'
-import type { OpenDialogOptions } from 'electron'
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { basename, join } from 'path'
 import { readFile, readdir, rm } from 'fs/promises'
 import { FileHandle, mkdir, open, unlink, writeFile } from 'fs/promises'
 import { createReadStream, createWriteStream } from 'fs'
 import { randomUUID } from 'crypto'
 import log from './logger'
-import {
-  GetMouseEventsResult,
-  LoadedRecordingPayload,
-  RecordedMouseEvent
-} from '../shared/types'
+import { GetMouseEventsResult, LoadedRecordingPayload, RecordedMouseEvent } from '../shared/types'
 import archiver from 'archiver'
 import { startMouseTracking, stopMouseTracking } from './mouseTracking'
 import extract from 'extract-zip'
@@ -33,6 +29,91 @@ let activeRecording: ActiveRecording | null = null
 let mainWindowRef: BrowserWindow | null = null
 const importedRecordings = new Map<string, StoredRecording>()
 
+function buildArchiveDialogOptions(defaultName: string): SaveDialogOptions {
+  return {
+    title: 'Save Recording Package',
+    defaultPath: join(app.getPath('videos'), defaultName.replace('.webm', '.ctx')),
+    filters: [{ name: 'Context Archive', extensions: ['ctx'] }]
+  }
+}
+
+async function promptForArchivePath(
+  window: BrowserWindow | null,
+  defaultName: string
+): Promise<string | null> {
+  const options = buildArchiveDialogOptions(defaultName)
+  const result = window
+    ? await dialog.showSaveDialog(window, options)
+    : await dialog.showSaveDialog(options)
+
+  if (result.canceled || !result.filePath) {
+    return null
+  }
+
+  return result.filePath
+}
+
+async function collectRecordedEvents(
+  startTime: number,
+  fallbackEvents: RecordedMouseEvent[]
+): Promise<RecordedMouseEvent[]> {
+  void startTime
+
+  const stopResult = (await stopMouseTracking(
+    'stop_and_get_mouse_events'
+  )) as GetMouseEventsResult | null
+  if (!stopResult?.events) {
+    return fallbackEvents
+  }
+
+  return stopResult.events.map((captured) => {
+    const baseEvent: RecordedMouseEvent = { ...captured.mouse }
+    if (captured.axAttributes) {
+      baseEvent.axAttributes = captured.axAttributes
+    }
+    return baseEvent
+  })
+}
+
+function buildEventsJsonl(startTime: number, events: RecordedMouseEvent[]): string {
+  const startEvent: RecordedMouseEvent = {
+    x: 0,
+    y: 0,
+    eventType: 'recording_start',
+    timeUtcMs: startTime
+  }
+
+  return `${JSON.stringify(startEvent)}\n${events.map((event) => JSON.stringify(event)).join('\n')}`
+}
+
+function createArchiveWriter(outputPath: string): {
+  archive: ReturnType<typeof archiver>
+  archivePromise: Promise<void>
+} {
+  const output = createWriteStream(outputPath)
+  const archive = archiver('zip', { zlib: { level: 5 } })
+  const archivePromise = new Promise<void>((resolve, reject) => {
+    output.on('close', resolve)
+    archive.on('error', reject)
+  })
+
+  archive.pipe(output)
+  return { archive, archivePromise }
+}
+
+function appendRecordingArchiveContents(
+  archive: ReturnType<typeof archiver>,
+  tempPath: string,
+  jsonl: string
+): void {
+  archive.append(createReadStream(tempPath), { name: 'recording.webm' })
+  archive.append(jsonl, { name: 'events.jsonl' })
+}
+
+async function cleanupTempRecording(tempPath: string): Promise<void> {
+  await unlink(tempPath).catch(() => {})
+}
+
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindowRef = window
 }
@@ -53,7 +134,9 @@ export function addEventToRecording(event: RecordedMouseEvent): void {
   }
 }
 
-export async function startRecording(): Promise<{ ok: true; payload: null } | { ok: false; error: string }> {
+export async function startRecording(): Promise<
+  { ok: true; payload: null } | { ok: false; error: string }
+> {
   if (activeRecording) {
     return { ok: false, error: 'Recording already in progress' }
   }
@@ -122,87 +205,36 @@ export async function finishRecording(
     log.error('recording:finish close handle failed', { error })
   }
 
-  let { tempPath, startTime, events } = activeRecording
+  const { tempPath, startTime, events: fallbackEvents } = activeRecording
+  let events = fallbackEvents
   activeRecording = null
 
   try {
     const win = mainWindowRef ?? BrowserWindow.getFocusedWindow()
-
-    // Show save dialog for zip file
-    const zipName = defaultName.replace('.webm', '.ctx')
-    const dialogOptions = {
-      title: 'Save Recording Package',
-      defaultPath: join(app.getPath('videos'), zipName),
-      filters: [{ name: 'Context Archive', extensions: ['ctx'] }]
-    }
-    const { canceled, filePath } = win
-      ? await dialog.showSaveDialog(win, dialogOptions)
-      : await dialog.showSaveDialog(dialogOptions)
-
-    if (canceled || !filePath) {
-      // Clean up temp file
-      await unlink(tempPath).catch(() => {})
+    const archivePath = await promptForArchivePath(win, defaultName)
+    if (!archivePath) {
+      await cleanupTempRecording(tempPath)
       log.info('recording:finish canceled, temp deleted')
       return { ok: false, error: 'Save canceled' }
     }
 
-    // Create zip using archiver with streaming
-    const output = createWriteStream(filePath)
-    const archive = archiver('zip', { zlib: { level: 5 } })
-
-    // Create a promise that resolves when the archive is finalized
-    const archivePromise = new Promise<void>((resolve, reject) => {
-      output.on('close', resolve)
-      archive.on('error', reject)
-    })
-
-    // Pipe archive data to the output file
-    archive.pipe(output)
-
-    // Stream the video file from tempPath (no memory loading)
-    archive.append(createReadStream(tempPath), { name: 'recording.webm' })
-
-    const stopResult = (await stopMouseTracking('stop_and_get_mouse_events')) as
-      | GetMouseEventsResult
-      | null
-    if (stopResult?.events) {
-      events = stopResult.events.map((captured) => {
-        const baseEvent: RecordedMouseEvent = { ...captured.mouse }
-        if (captured.axAttributes) {
-          baseEvent.axAttributes = captured.axAttributes
-        }
-        return baseEvent
-      })
-    } 
-
-    // Emit synthetic recording_start event as timestamp baseline
-    const startEvent: RecordedMouseEvent = {
-      x: 0,
-      y: 0,
-      eventType: 'recording_start',
-      timeUtcMs: (startTime)
-    }
-    let jsonlContent = JSON.stringify(startEvent) + "\n"
-    jsonlContent += events.map((event) => JSON.stringify(event)).join('\n') ?? ''
-    archive.append(jsonlContent, { name: 'events.jsonl' })
-
-    // Finalize the archive
+    events = await collectRecordedEvents(startTime, events)
+    const jsonl = buildEventsJsonl(startTime, events)
+    const { archive, archivePromise } = createArchiveWriter(archivePath)
+    appendRecordingArchiveContents(archive, tempPath, jsonl)
     await archive.finalize()
     await archivePromise
+    await cleanupTempRecording(tempPath)
 
-    // Clean up temp video file
-    await unlink(tempPath).catch(() => {})
-
-    const payload = await loadRecordingArchive(filePath)
+    const payload = await loadRecordingArchive(archivePath)
     log.info('recording:finish created', {
-      archivePath: filePath,
+      archivePath,
       recordingId: payload.recordingId,
       eventCount: events.length
     })
     return { ok: true, payload }
   } catch (error) {
-    // Clean up temp file on error
-    await unlink(tempPath).catch(() => {})
+    await cleanupTempRecording(tempPath)
     const message = error instanceof Error ? error.message : String(error)
     log.error('recording:finish failed', { error: message })
     return { ok: false, error: message }
@@ -217,9 +249,7 @@ export async function getRecordingItems(
 ): Promise<{ videoPath: string; eventsPath: string }> {
   const entries = await readdir(outputDir)
 
-  const videoFile = entries.find((f) =>
-    VALID_VIDEO_EXTENSIONS.some((ext) => f.endsWith(ext))
-  )
+  const videoFile = entries.find((f) => VALID_VIDEO_EXTENSIONS.some((ext) => f.endsWith(ext)))
   const eventsFile = entries.find((f) => f.endsWith(VALID_EVENTS_EXTENSION))
 
   if (!videoFile || !eventsFile) {
@@ -229,9 +259,7 @@ export async function getRecordingItems(
   }
 
   if (entries.length !== 2) {
-    throw new Error(
-      `Invalid recording archive: expected exactly 2 items, found ${entries.length}`
-    )
+    throw new Error(`Invalid recording archive: expected exactly 2 items, found ${entries.length}`)
   }
 
   return {
@@ -319,16 +347,16 @@ export async function pickRecording(): Promise<
     properties: ['openFile']
   }
 
-  const { canceled, filePaths } = win
+  const result = win
     ? await dialog.showOpenDialog(win, options)
     : await dialog.showOpenDialog(options)
 
-  if (canceled || filePaths.length === 0) {
+  if (result.canceled || result.filePaths.length === 0) {
     return { ok: false, error: 'Dialog canceled' }
   }
 
   try {
-    return { ok: true, payload: await loadRecordingArchive(filePaths[0]) }
+    return { ok: true, payload: await loadRecordingArchive(result.filePaths[0]) }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     log.error('recording:pick failed', { error: message })

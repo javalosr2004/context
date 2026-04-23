@@ -147,52 +147,54 @@ export default function Annotator(): React.JSX.Element {
         onSave={annotationEditor.save}
       />
 
-      <AnnotatorVideoPane
-        isLoading={isLoading}
-        error={error}
-        videoUrl={videoUrl}
-        videoRef={videoRef}
-        activeBbox={activeBbox}
-        currentTimeMs={timeline.currentTimeMs}
-        durationMs={timeline.durationMs}
-        sortedEvents={timeline.sortedEvents}
-        scale={scale}
-        isEditingBbox={annotationEditor.isEditingBbox}
-        videoNativePx={videoNativePx}
-        videoLayoutPx={videoLayoutPx}
-        formatTimestamp={timeline.formatTimestamp}
-        onLoadedMetadata={handleLoadedMetadata}
-        onImport={recording.importRecording}
-        onTimelineClick={timeline.handleTimelineClick}
-        onEventHoverEnter={timeline.handleEventHoverEnter}
-        onEventHoverMove={timeline.handleEventHoverMove}
-        onEventHoverLeave={timeline.handleEventHoverLeave}
-        onBboxHandleMouseDown={annotationEditor.beginBboxResize}
-      />
+      <div className="ann-body">
+        <AnnotatorVideoPane
+          isLoading={isLoading}
+          error={error}
+          videoUrl={videoUrl}
+          videoRef={videoRef}
+          activeBbox={activeBbox}
+          currentTimeMs={timeline.currentTimeMs}
+          durationMs={timeline.durationMs}
+          sortedEvents={timeline.sortedEvents}
+          scale={scale}
+          isEditingBbox={annotationEditor.isEditingBbox}
+          videoNativePx={videoNativePx}
+          videoLayoutPx={videoLayoutPx}
+          formatTimestamp={timeline.formatTimestamp}
+          onLoadedMetadata={handleLoadedMetadata}
+          onImport={recording.importRecording}
+          onTimelineClick={timeline.handleTimelineClick}
+          onEventHoverEnter={timeline.handleEventHoverEnter}
+          onEventHoverMove={timeline.handleEventHoverMove}
+          onEventHoverLeave={timeline.handleEventHoverLeave}
+          onBboxHandleMouseDown={annotationEditor.beginBboxResize}
+        />
 
-      <AnnotatorSidebar
-        sortedEvents={timeline.sortedEvents}
-        currentTimeMs={timeline.currentTimeMs}
-        activeEventIdx={timeline.activeEventIdx}
-        expandedEventIdx={timeline.expandedEventIdx}
-        activeSnapshot={annotationEditor.activeSnapshot}
-        activeNodeKey={sidebarNodeKey}
-        isEditingBbox={annotationEditor.isEditingBbox}
-        formatTimestamp={timeline.formatTimestamp}
-        onCollapseTree={timeline.handleCollapseTree}
-        onStopEditingBbox={annotationEditor.stopEditingBbox}
-        onStartCustomAnnotation={annotationEditor.handleStartCustomAnnotation}
-        onSelectNode={annotationEditor.selectNode}
-        onUpdateLabel={annotationEditor.updateEventLabel}
-        onEventClick={timeline.handleEventClick}
-        onEventDoubleClick={(timestampMs, index) => {
-          annotationEditor.stopEditingBbox()
-          timeline.handleEventDoubleClick(timestampMs, index)
-        }}
-        onEventHoverEnter={timeline.handleEventHoverEnter}
-        onEventHoverMove={timeline.handleEventHoverMove}
-        onEventHoverLeave={timeline.handleEventHoverLeave}
-      />
+        <AnnotatorSidebar
+          sortedEvents={timeline.sortedEvents}
+          currentTimeMs={timeline.currentTimeMs}
+          activeEventIdx={timeline.activeEventIdx}
+          expandedEventIdx={timeline.expandedEventIdx}
+          activeSnapshot={annotationEditor.activeSnapshot}
+          activeNodeKey={sidebarNodeKey}
+          isEditingBbox={annotationEditor.isEditingBbox}
+          formatTimestamp={timeline.formatTimestamp}
+          onCollapseTree={timeline.handleCollapseTree}
+          onStopEditingBbox={annotationEditor.stopEditingBbox}
+          onStartCustomAnnotation={annotationEditor.handleStartCustomAnnotation}
+          onSelectNode={annotationEditor.selectNode}
+          onUpdateLabel={annotationEditor.updateEventLabel}
+          onEventClick={timeline.handleEventClick}
+          onEventDoubleClick={(timestampMs, index) => {
+            annotationEditor.stopEditingBbox()
+            timeline.handleEventDoubleClick(timestampMs, index)
+          }}
+          onEventHoverEnter={timeline.handleEventHoverEnter}
+          onEventHoverMove={timeline.handleEventHoverMove}
+          onEventHoverLeave={timeline.handleEventHoverLeave}
+        />
+      </div>
 
       <EventTooltip tooltip={timeline.eventTooltip} />
     </div>

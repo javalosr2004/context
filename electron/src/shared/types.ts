@@ -22,8 +22,17 @@ export type AxAttributeMap = Record<string, string>
 /** New recordings: structured snapshot; older `.ctx` files may still use `AxAttributeMap`. */
 export type AxAttributesPayload = AxSnapshot | AxAttributeMap
 
+export interface DisplayInfo {
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor: number
+}
+
 export type RecordedMouseEvent = RustMouseEvent & {
   axAttributes?: AxAttributesPayload | null
+  display?: DisplayInfo | null
 }
 
 export interface LoadedRecording {

@@ -5,7 +5,8 @@ import type {
   MousePosition,
   Result,
   LoadedRecordingPayload,
-  RecordedMouseEvent
+  RecordedMouseEvent,
+  DisplayInfo
 } from '../shared/types'
 
 type Unsubscribe = () => void
@@ -23,7 +24,8 @@ const api = {
       ipcRenderer.removeListener('mouse-position', handler)
     }
   },
-  startRecording: (): Promise<Result<null>> => ipcRenderer.invoke('recording:start'),
+  startRecording: (display: DisplayInfo): Promise<Result<null>> =>
+    ipcRenderer.invoke('recording:start', display),
   pushRecordingChunk: (chunk: ArrayBuffer): Promise<Result<null>> =>
     ipcRenderer.invoke('recording:push', chunk),
   finishRecording: (defaultName: string): Promise<Result<LoadedRecordingPayload>> =>

@@ -1,5 +1,6 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type {
+  DisplayInfo,
   LoadedRecordingPayload,
   MousePosition,
   RecordedMouseEvent,
@@ -11,7 +12,7 @@ interface Api {
   getSources: () => Promise<Result<ScreenSource[]>>
   getCursorDisplay: () => Promise<Result<Electron.Display>>
   onMousePosition: (callback: (position: MousePosition) => void) => () => void
-  startRecording: () => Promise<Result<null>>
+  startRecording: (display: DisplayInfo) => Promise<Result<null>>
   pushRecordingChunk: (chunk: ArrayBuffer) => Promise<Result<null>>
   finishRecording: (defaultName: string) => Promise<Result<LoadedRecordingPayload>>
   pickRecording: () => Promise<Result<LoadedRecordingPayload>>

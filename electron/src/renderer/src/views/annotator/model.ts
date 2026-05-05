@@ -2,9 +2,10 @@ import type {
   AxAttributes,
   AxAttributesPayload,
   AxBoundingBox,
+  DisplayInfo,
   RecordedMouseEvent
 } from '../../../../shared/types'
-import type { AnnotatorEvent, SnapView } from './types'
+import type { AnnotatorEvent, BboxTransform, SnapView, VideoDimensions } from './types'
 
 export const DEFAULT_SELECTED = 'current'
 
@@ -19,6 +20,50 @@ export function isSnapView(
   }
 
   return 'current' in payload && 'parents' in payload && 'children' in payload
+}
+
+export function extractDisplayInfo(rawEvents: RecordedMouseEvent[]): DisplayInfo | null {
+  const startEvent = rawEvents.find((event) => event.eventType === 'recording_start')
+  return startEvent?.display ?? null
+}
+
+const IDENTITY_TRANSFORM: BboxTransform = { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 }
+
+/**
+ * Maps an AX bounding box (in macOS screen-points) to the layout pixels of the
+ * <video> overlay. Two coordinate spaces are involved:
+ *   - displayPx: the recorded display's logical bounds (origin + size in points)
+ *   - videoLayoutPx: the rendered <video>'s on-screen size in CSS pixels
+ *   - videoNativePx: the captured video's intrinsic resolution (legacy fallback)
+ */
+export function computeBboxTransform({
+  displayPx,
+  videoNativePx,
+  videoLayoutPx
+}: {
+  displayPx: DisplayInfo | null
+  videoNativePx: VideoDimensions
+  videoLayoutPx: VideoDimensions
+}): BboxTransform {
+  if (videoLayoutPx.width === 0 || videoLayoutPx.height === 0) {
+    return IDENTITY_TRANSFORM
+  }
+
+  if (displayPx && displayPx.width > 0 && displayPx.height > 0) {
+    return {
+      scaleX: videoLayoutPx.width / displayPx.width,
+      scaleY: videoLayoutPx.height / displayPx.height,
+      offsetX: displayPx.x,
+      offsetY: displayPx.y
+    }
+  }
+
+  if (videoNativePx.width > 0) {
+    const uniform = videoLayoutPx.width / videoNativePx.width
+    return { scaleX: uniform, scaleY: uniform, offsetX: 0, offsetY: 0 }
+  }
+
+  return IDENTITY_TRANSFORM
 }
 
 export function buildAnnotatorEvents(rawEvents: RecordedMouseEvent[]): AnnotatorEvent[] {

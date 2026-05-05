@@ -1,6 +1,6 @@
 import type { JSX, MouseEvent as ReactMouseEvent, RefObject } from 'react'
 import type { AxBoundingBox } from './types'
-import type { AnnotatorEvent, DragHandle, VideoDimensions } from './types'
+import type { AnnotatorEvent, BboxTransform, DragHandle, VideoDimensions } from './types'
 
 interface AnnotatorVideoPaneProps {
   isLoading: boolean
@@ -11,7 +11,7 @@ interface AnnotatorVideoPaneProps {
   currentTimeMs: number
   durationMs: number
   sortedEvents: AnnotatorEvent[]
-  scale: number
+  transform: BboxTransform
   isEditingBbox: boolean
   videoNativePx: VideoDimensions
   videoLayoutPx: VideoDimensions
@@ -40,7 +40,7 @@ export function AnnotatorVideoPane({
   currentTimeMs,
   durationMs,
   sortedEvents,
-  scale,
+  transform,
   isEditingBbox,
   videoNativePx,
   videoLayoutPx,
@@ -80,10 +80,10 @@ export function AnnotatorVideoPane({
                   <div
                     style={{
                       position: 'absolute',
-                      left: activeBbox.x * scale,
-                      top: activeBbox.y * scale,
-                      width: activeBbox.width * scale,
-                      height: activeBbox.height * scale,
+                      left: (activeBbox.x - transform.offsetX) * transform.scaleX,
+                      top: (activeBbox.y - transform.offsetY) * transform.scaleY,
+                      width: activeBbox.width * transform.scaleX,
+                      height: activeBbox.height * transform.scaleY,
                       border: isEditingBbox ? '2px dashed #ff3b30' : '2px solid #ff3b30',
                       backgroundColor: 'rgba(255, 59, 48, 0.15)',
                       borderRadius: 3,
@@ -103,8 +103,8 @@ export function AnnotatorVideoPane({
                           onMouseDown={(event) => onBboxHandleMouseDown(handle, event, activeBbox)}
                           style={{
                             position: 'absolute',
-                            left: x * scale - 5,
-                            top: y * scale - 5,
+                            left: (x - transform.offsetX) * transform.scaleX - 5,
+                            top: (y - transform.offsetY) * transform.scaleY - 5,
                             width: 10,
                             height: 10,
                             backgroundColor: '#ff3b30',
@@ -121,7 +121,8 @@ export function AnnotatorVideoPane({
             </div>
             <h1 className="ann-video-dimensions">
               {videoNativePx.width} × {videoNativePx.height} native | {videoLayoutPx.width} ×{' '}
-              {videoLayoutPx.height} layout | scale: {scale.toFixed(3)}
+              {videoLayoutPx.height} layout | scale:{' '}
+              {transform.scaleX.toFixed(3)}×{transform.scaleY.toFixed(3)}
             </h1>
           </div>
         ) : (

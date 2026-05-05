@@ -39,6 +39,13 @@ export interface VideoDimensions {
   height: number
 }
 
+export interface BboxTransform {
+  scaleX: number
+  scaleY: number
+  offsetX: number
+  offsetY: number
+}
+
 export interface EventTooltipState {
   x: number
   y: number

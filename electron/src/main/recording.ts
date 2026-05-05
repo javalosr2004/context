@@ -6,7 +6,12 @@ import { FileHandle, mkdir, open, unlink, writeFile } from 'fs/promises'
 import { createReadStream, createWriteStream } from 'fs'
 import { randomUUID } from 'crypto'
 import log from './logger'
-import { GetMouseEventsResult, LoadedRecordingPayload, RecordedMouseEvent } from '../shared/types'
+import {
+  DisplayInfo,
+  GetMouseEventsResult,
+  LoadedRecordingPayload,
+  RecordedMouseEvent
+} from '../shared/types'
 import archiver from 'archiver'
 import { startMouseTracking, stopMouseTracking } from './mouseTracking'
 import extract from 'extract-zip'
@@ -14,6 +19,7 @@ export interface ActiveRecording {
   handle: FileHandle
   tempPath: string
   startTime: number // ms since UTC epoch
+  display: DisplayInfo // captured at recording start; persisted on the recording_start event
   events: RecordedMouseEvent[] // Store events during recording
 }
 
@@ -75,12 +81,17 @@ async function collectRecordedEvents(
   })
 }
 
-function buildEventsJsonl(startTime: number, events: RecordedMouseEvent[]): string {
+function buildEventsJsonl(
+  startTime: number,
+  display: DisplayInfo,
+  events: RecordedMouseEvent[]
+): string {
   const startEvent: RecordedMouseEvent = {
     x: 0,
     y: 0,
     eventType: 'recording_start',
-    timeUtcMs: startTime
+    timeUtcMs: startTime,
+    display
   }
 
   return `${JSON.stringify(startEvent)}\n${events.map((event) => JSON.stringify(event)).join('\n')}`
@@ -134,9 +145,9 @@ export function addEventToRecording(event: RecordedMouseEvent): void {
   }
 }
 
-export async function startRecording(): Promise<
-  { ok: true; payload: null } | { ok: false; error: string }
-> {
+export async function startRecording(
+  display: DisplayInfo
+): Promise<{ ok: true; payload: null } | { ok: false; error: string }> {
   if (activeRecording) {
     return { ok: false, error: 'Recording already in progress' }
   }
@@ -149,9 +160,9 @@ export async function startRecording(): Promise<
     const startTime = Date.now()
     const tempPath = join(app.getPath('temp'), `screen-recording-${startTime}.webm`)
     const handle = await open(tempPath, 'w')
-    activeRecording = { handle, tempPath, startTime, events: [] }
+    activeRecording = { handle, tempPath, startTime, display, events: [] }
 
-    log.info('recording:start', { tempPath, startTime })
+    log.info('recording:start', { tempPath, startTime, display })
     return { ok: true, payload: null }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -205,7 +216,7 @@ export async function finishRecording(
     log.error('recording:finish close handle failed', { error })
   }
 
-  const { tempPath, startTime, events: fallbackEvents } = activeRecording
+  const { tempPath, startTime, display, events: fallbackEvents } = activeRecording
   let events = fallbackEvents
   activeRecording = null
 
@@ -219,7 +230,7 @@ export async function finishRecording(
     }
 
     events = await collectRecordedEvents(startTime, events)
-    const jsonl = buildEventsJsonl(startTime, events)
+    const jsonl = buildEventsJsonl(startTime, display, events)
     const { archive, archivePromise } = createArchiveWriter(archivePath)
     appendRecordingArchiveContents(archive, tempPath, jsonl)
     await archive.finalize()

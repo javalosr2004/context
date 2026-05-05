@@ -3,7 +3,14 @@ import type { Dispatch, MouseEvent as ReactMouseEvent, SetStateAction } from 're
 import type { AxAttributesPayload, RecordedMouseEvent } from '../../../../shared/types'
 import type { AxBoundingBox } from './types'
 import { boundingBoxForSelection, isSnapView } from './model'
-import type { AnnotatorEvent, DragHandle, LabelField, SnapView, VideoDimensions } from './types'
+import type {
+  AnnotatorEvent,
+  BboxTransform,
+  DragHandle,
+  LabelField,
+  SnapView,
+  VideoDimensions
+} from './types'
 
 interface UseAnnotationEditorOptions {
   recordingId: string | null
@@ -13,7 +20,7 @@ interface UseAnnotationEditorOptions {
   sortedEvents: AnnotatorEvent[]
   expandedEventIdx: number | null
   videoNativePx: VideoDimensions
-  scale: number
+  transform: BboxTransform
   onError: (error: string) => void
 }
 
@@ -39,7 +46,7 @@ export function useAnnotationEditor({
   sortedEvents,
   expandedEventIdx,
   videoNativePx,
-  scale,
+  transform,
   onError
 }: UseAnnotationEditorOptions): UseAnnotationEditorResult {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
@@ -48,7 +55,7 @@ export function useAnnotationEditor({
   const dragOriginRef = useRef<{ clientX: number; clientY: number; bbox: AxBoundingBox } | null>(
     null
   )
-  const scaleRef = useRef(scale)
+  const transformRef = useRef(transform)
 
   const expandedEvent = useMemo(() => {
     if (expandedEventIdx === null || expandedEventIdx >= sortedEvents.length) {
@@ -76,8 +83,8 @@ export function useAnnotationEditor({
   }, [])
 
   useEffect(() => {
-    scaleRef.current = scale
-  }, [scale])
+    transformRef.current = transform
+  }, [transform])
 
   const applySnapshotUpdate = useCallback(
     (transform: (snapshot: SnapView, event: AnnotatorEvent) => SnapView | null): void => {
@@ -227,8 +234,9 @@ export function useAnnotationEditor({
 
       const min = 10
       const origin = dragOriginRef.current
-      const dx = (event.clientX - origin.clientX) / scaleRef.current
-      const dy = (event.clientY - origin.clientY) / scaleRef.current
+      const { scaleX, scaleY } = transformRef.current
+      const dx = scaleX !== 0 ? (event.clientX - origin.clientX) / scaleX : 0
+      const dy = scaleY !== 0 ? (event.clientY - origin.clientY) / scaleY : 0
       const original = origin.bbox
       const right = original.x + original.width
       const bottom = original.y + original.height

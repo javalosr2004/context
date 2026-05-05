@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import type { RecordedMouseEvent } from '../../../shared/types'
+import type { DisplayInfo, RecordedMouseEvent } from '../../../shared/types'
 import { useRecordingStore } from '../store/recordingStore'
 import { AnnotatorSidebar } from './annotator/AnnotatorSidebar'
 import { AnnotatorToolbar } from './annotator/AnnotatorToolbar'
 import { AnnotatorVideoPane } from './annotator/AnnotatorVideoPane'
 import { EventTooltip } from './annotator/EventTooltip'
-import { DEFAULT_SELECTED, isSnapView, selectedBoundingBox } from './annotator/model'
+import {
+  DEFAULT_SELECTED,
+  computeBboxTransform,
+  extractDisplayInfo,
+  isSnapView,
+  selectedBoundingBox
+} from './annotator/model'
 import type { AnnotatorEvent, VideoDimensions } from './annotator/types'
 import { useAnnotationEditor } from './annotator/useAnnotationEditor'
 import { useAnnotatorRecording } from './annotator/useAnnotatorRecording'
@@ -23,11 +29,15 @@ export default function Annotator(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [videoLayoutPx, setVideoLayoutPx] = useState<VideoDimensions>(EMPTY_VIDEO_DIMENSIONS)
   const [videoNativePx, setVideoNativePx] = useState<VideoDimensions>(EMPTY_VIDEO_DIMENSIONS)
+  const [displayPx, setDisplayPx] = useState<DisplayInfo | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   const timeline = useAnnotatorTimeline({ events, videoRef })
 
-  const scale = videoNativePx.width > 0 ? videoLayoutPx.width / videoNativePx.width : 1
+  const transform = useMemo(
+    () => computeBboxTransform({ displayPx, videoNativePx, videoLayoutPx }),
+    [displayPx, videoNativePx, videoLayoutPx]
+  )
 
   const annotationEditor = useAnnotationEditor({
     recordingId,
@@ -37,7 +47,7 @@ export default function Annotator(): React.JSX.Element {
     sortedEvents: timeline.sortedEvents,
     expandedEventIdx: timeline.expandedEventIdx,
     videoNativePx,
-    scale,
+    transform,
     onError: setError
   })
 
@@ -62,6 +72,7 @@ export default function Annotator(): React.JSX.Element {
       })
       setEvents(nextEvents)
       setRawEvents(nextRawEvents)
+      setDisplayPx(extractDisplayInfo(nextRawEvents))
       setVideoLayoutPx(EMPTY_VIDEO_DIMENSIONS)
       setVideoNativePx(EMPTY_VIDEO_DIMENSIONS)
       timeline.resetTimelineState()
@@ -157,7 +168,7 @@ export default function Annotator(): React.JSX.Element {
           currentTimeMs={timeline.currentTimeMs}
           durationMs={timeline.durationMs}
           sortedEvents={timeline.sortedEvents}
-          scale={scale}
+          transform={transform}
           isEditingBbox={annotationEditor.isEditingBbox}
           videoNativePx={videoNativePx}
           videoLayoutPx={videoLayoutPx}

@@ -121,7 +121,14 @@ export function useAnnotatorRecording({
         const stream = await captureScreen(source.id)
         streamRef.current = stream
 
-        const startResult = await window.api.startRecording()
+        const display = displayResult.payload
+        const startResult = await window.api.startRecording({
+          x: display.bounds.x,
+          y: display.bounds.y,
+          width: display.bounds.width,
+          height: display.bounds.height,
+          scaleFactor: display.scaleFactor
+        })
         if (!startResult.ok) {
           resetRecordingResources()
           onError(startResult.error)

@@ -1,7 +1,7 @@
 import { app, ipcMain, desktopCapturer, screen, protocol } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import log from './logger'
-import type { LoadedRecordingPayload, ScreenSource } from '../shared/types'
+import type { DisplayInfo, LoadedRecordingPayload, ScreenSource } from '../shared/types'
 import { Result, Ok, Err } from '../shared/types'
 import {
   startRecording,
@@ -141,9 +141,12 @@ app.whenReady().then(() => {
   })
 
   // Recording IPC handlers
-  ipcMain.handle('recording:start', async (): Promise<Result<null>> => {
-    return startRecording()
-  })
+  ipcMain.handle(
+    'recording:start',
+    async (_event, display: DisplayInfo): Promise<Result<null>> => {
+      return startRecording(display)
+    }
+  )
 
   ipcMain.handle('recording:push', async (_event, chunk: ArrayBuffer): Promise<Result<null>> => {
     return pushRecordingChunk(chunk)

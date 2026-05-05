@@ -16,11 +16,60 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXBuildFile section */
+		A20000000000000000000001 /* ContextAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ContextAppApp.swift */; };
+		A20000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* AppDelegate.swift */; };
+		A20000000000000000000003 /* PopupState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* PopupState.swift */; };
+		A20000000000000000000004 /* ScreenBoundsKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000034 /* ScreenBoundsKeeper.swift */; };
+		A20000000000000000000005 /* BboxPositionGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000035 /* BboxPositionGenerator.swift */; };
+		A20000000000000000000006 /* DebugBboxState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000036 /* DebugBboxState.swift */; };
+		A20000000000000000000007 /* ChatMessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000037 /* ChatMessageStore.swift */; };
+		A20000000000000000000008 /* OverlayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000038 /* OverlayCoordinator.swift */; };
+		A20000000000000000000009 /* PopupController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000039 /* PopupController.swift */; };
+		A2000000000000000000000A /* IconMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003A /* IconMenuController.swift */; };
+		A2000000000000000000000B /* DebugBboxController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003B /* DebugBboxController.swift */; };
+		A2000000000000000000000C /* PopupPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003C /* PopupPanel.swift */; };
+		A2000000000000000000000D /* IconPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003D /* IconPanel.swift */; };
+		A2000000000000000000000E /* DebugBboxPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003E /* DebugBboxPanel.swift */; };
+		A2000000000000000000000F /* ChatPopupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003F /* ChatPopupView.swift */; };
+		A20000000000000000000010 /* IconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* IconView.swift */; };
+		A20000000000000000000011 /* DebugBboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* DebugBboxView.swift */; };
+		A20000000000000000000012 /* IconContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* IconContextMenu.swift */; };
+		A20000000000000000000013 /* PopupStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* PopupStateTests.swift */; };
+		A20000000000000000000014 /* ScreenBoundsKeeperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* ScreenBoundsKeeperTests.swift */; };
+		A20000000000000000000015 /* BboxPositionGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* BboxPositionGeneratorTests.swift */; };
+		A20000000000000000000016 /* DebugBboxStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000046 /* DebugBboxStateTests.swift */; };
+		A20000000000000000000017 /* ChatMessageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000047 /* ChatMessageStoreTests.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		A10000000000000000000004 /* ContextApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ContextApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000005 /* ContextAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ContextAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000007 /* ContextApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ContextApp.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000031 /* ContextAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextAppApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000032 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		A20000000000000000000033 /* PopupState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupState.swift; sourceTree = "<group>"; };
+		A20000000000000000000034 /* ScreenBoundsKeeper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenBoundsKeeper.swift; sourceTree = "<group>"; };
+		A20000000000000000000035 /* BboxPositionGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BboxPositionGenerator.swift; sourceTree = "<group>"; };
+		A20000000000000000000036 /* DebugBboxState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxState.swift; sourceTree = "<group>"; };
+		A20000000000000000000037 /* ChatMessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000038 /* OverlayCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayCoordinator.swift; sourceTree = "<group>"; };
+		A20000000000000000000039 /* PopupController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupController.swift; sourceTree = "<group>"; };
+		A2000000000000000000003A /* IconMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconMenuController.swift; sourceTree = "<group>"; };
+		A2000000000000000000003B /* DebugBboxController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxController.swift; sourceTree = "<group>"; };
+		A2000000000000000000003C /* PopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupPanel.swift; sourceTree = "<group>"; };
+		A2000000000000000000003D /* IconPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPanel.swift; sourceTree = "<group>"; };
+		A2000000000000000000003E /* DebugBboxPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxPanel.swift; sourceTree = "<group>"; };
+		A2000000000000000000003F /* ChatPopupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPopupView.swift; sourceTree = "<group>"; };
+		A20000000000000000000040 /* IconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconView.swift; sourceTree = "<group>"; };
+		A20000000000000000000041 /* DebugBboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxView.swift; sourceTree = "<group>"; };
+		A20000000000000000000042 /* IconContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconContextMenu.swift; sourceTree = "<group>"; };
+		A20000000000000000000043 /* PopupStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupStateTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000044 /* ScreenBoundsKeeperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenBoundsKeeperTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000045 /* BboxPositionGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BboxPositionGeneratorTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000046 /* DebugBboxStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxStateTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000047 /* ChatMessageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -65,6 +114,11 @@
 		A1000000000000000000000C /* ContextAppTests */ = {
 			isa = PBXGroup;
 			children = (
+				A20000000000000000000043 /* PopupStateTests.swift */,
+				A20000000000000000000044 /* ScreenBoundsKeeperTests.swift */,
+				A20000000000000000000045 /* BboxPositionGeneratorTests.swift */,
+				A20000000000000000000046 /* DebugBboxStateTests.swift */,
+				A20000000000000000000047 /* ChatMessageStoreTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -81,6 +135,8 @@
 		A1000000000000000000000E /* App */ = {
 			isa = PBXGroup;
 			children = (
+				A20000000000000000000031 /* ContextAppApp.swift */,
+				A20000000000000000000032 /* AppDelegate.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -88,6 +144,11 @@
 		A1000000000000000000000F /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				A20000000000000000000033 /* PopupState.swift */,
+				A20000000000000000000034 /* ScreenBoundsKeeper.swift */,
+				A20000000000000000000035 /* BboxPositionGenerator.swift */,
+				A20000000000000000000036 /* DebugBboxState.swift */,
+				A20000000000000000000037 /* ChatMessageStore.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -95,6 +156,10 @@
 		A10000000000000000000010 /* Application */ = {
 			isa = PBXGroup;
 			children = (
+				A20000000000000000000038 /* OverlayCoordinator.swift */,
+				A20000000000000000000039 /* PopupController.swift */,
+				A2000000000000000000003A /* IconMenuController.swift */,
+				A2000000000000000000003B /* DebugBboxController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -102,8 +167,39 @@
 		A10000000000000000000011 /* Presentation */ = {
 			isa = PBXGroup;
 			children = (
+				A20000000000000000000021 /* Panels */,
+				A20000000000000000000022 /* Views */,
+				A20000000000000000000023 /* Menu */,
 			);
 			path = Presentation;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000021 /* Panels */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000003C /* PopupPanel.swift */,
+				A2000000000000000000003D /* IconPanel.swift */,
+				A2000000000000000000003E /* DebugBboxPanel.swift */,
+			);
+			path = Panels;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000022 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000003F /* ChatPopupView.swift */,
+				A20000000000000000000040 /* IconView.swift */,
+				A20000000000000000000041 /* DebugBboxView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000023 /* Menu */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000042 /* IconContextMenu.swift */,
+			);
+			path = Menu;
 			sourceTree = "<group>";
 		};
 		A10000000000000000000012 /* Resources */ = {
@@ -213,6 +309,24 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20000000000000000000001 /* ContextAppApp.swift in Sources */,
+				A20000000000000000000002 /* AppDelegate.swift in Sources */,
+				A20000000000000000000003 /* PopupState.swift in Sources */,
+				A20000000000000000000004 /* ScreenBoundsKeeper.swift in Sources */,
+				A20000000000000000000005 /* BboxPositionGenerator.swift in Sources */,
+				A20000000000000000000006 /* DebugBboxState.swift in Sources */,
+				A20000000000000000000007 /* ChatMessageStore.swift in Sources */,
+				A20000000000000000000008 /* OverlayCoordinator.swift in Sources */,
+				A20000000000000000000009 /* PopupController.swift in Sources */,
+				A2000000000000000000000A /* IconMenuController.swift in Sources */,
+				A2000000000000000000000B /* DebugBboxController.swift in Sources */,
+				A2000000000000000000000C /* PopupPanel.swift in Sources */,
+				A2000000000000000000000D /* IconPanel.swift in Sources */,
+				A2000000000000000000000E /* DebugBboxPanel.swift in Sources */,
+				A2000000000000000000000F /* ChatPopupView.swift in Sources */,
+				A20000000000000000000010 /* IconView.swift in Sources */,
+				A20000000000000000000011 /* DebugBboxView.swift in Sources */,
+				A20000000000000000000012 /* IconContextMenu.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -220,6 +334,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20000000000000000000013 /* PopupStateTests.swift in Sources */,
+				A20000000000000000000014 /* ScreenBoundsKeeperTests.swift in Sources */,
+				A20000000000000000000015 /* BboxPositionGeneratorTests.swift in Sources */,
+				A20000000000000000000016 /* DebugBboxStateTests.swift in Sources */,
+				A20000000000000000000017 /* ChatMessageStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

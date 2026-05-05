@@ -30,13 +30,13 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T007 Create the SwiftUI app entry point in `ContextApp/ContextApp/App/ContextAppApp.swift`
-- [ ] T008 Create the `NSApplicationDelegate` lifecycle shell in `ContextApp/ContextApp/App/AppDelegate.swift`
-- [ ] T009 Create the overlay startup coordinator shell in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
-- [ ] T010 [P] Create the base popup panel class with borderless non-activating panel defaults in `ContextApp/ContextApp/Presentation/Panels/PopupPanel.swift`
-- [ ] T011 [P] Create the base minified icon panel class with borderless non-activating panel defaults in `ContextApp/ContextApp/Presentation/Panels/IconPanel.swift`
-- [ ] T012 [P] Create the base debug bbox panel class with transparent click-through defaults in `ContextApp/ContextApp/Presentation/Panels/DebugBboxPanel.swift`
-- [ ] T013 Add the domain import guard command documentation to `ContextApp/README.md`
+- [X] T007 Create the SwiftUI app entry point in `ContextApp/ContextApp/App/ContextAppApp.swift`
+- [X] T008 Create the `NSApplicationDelegate` lifecycle shell in `ContextApp/ContextApp/App/AppDelegate.swift`
+- [X] T009 Create the overlay startup coordinator shell in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
+- [X] T010 [P] Create the base popup panel class with borderless non-activating panel defaults in `ContextApp/ContextApp/Presentation/Panels/PopupPanel.swift`
+- [X] T011 [P] Create the base minified icon panel class with borderless non-activating panel defaults in `ContextApp/ContextApp/Presentation/Panels/IconPanel.swift`
+- [X] T012 [P] Create the base debug bbox panel class with transparent click-through defaults in `ContextApp/ContextApp/Presentation/Panels/DebugBboxPanel.swift`
+- [X] T013 Add the domain import guard command documentation to `ContextApp/README.md`
 
 **Checkpoint**: App lifecycle starts, panels can be constructed, and story implementation can proceed without changing project structure.
 
@@ -52,19 +52,19 @@
 
 > Write these tests first and verify they fail before implementing the corresponding domain code.
 
-- [ ] T014 [P] [US1] Add popup state transition tests in `ContextApp/ContextAppTests/PopupStateTests.swift`
-- [ ] T015 [P] [US1] Add screen bounds clamping tests in `ContextApp/ContextAppTests/ScreenBoundsKeeperTests.swift`
+- [X] T014 [P] [US1] Add popup state transition tests in `ContextApp/ContextAppTests/PopupStateTests.swift`
+- [X] T015 [P] [US1] Add screen bounds clamping tests in `ContextApp/ContextAppTests/ScreenBoundsKeeperTests.swift`
 
 ### Implementation for User Story 1
 
-- [ ] T016 [P] [US1] Implement `PopupState` expanded/minified transitions in `ContextApp/ContextApp/Domain/PopupState.swift`
-- [ ] T017 [P] [US1] Implement `ScreenBoundsKeeper` frame clamping in `ContextApp/ContextApp/Domain/ScreenBoundsKeeper.swift`
-- [ ] T018 [US1] Implement popup visibility, minify, restore, and clamping orchestration in `ContextApp/ContextApp/Application/PopupController.swift`
-- [ ] T019 [P] [US1] Implement the popup SwiftUI shell with header, minify control, message list placeholder, and input placeholder in `ContextApp/ContextApp/Presentation/Views/ChatPopupView.swift`
-- [ ] T020 [P] [US1] Implement the minified icon SwiftUI view in `ContextApp/ContextApp/Presentation/Views/IconView.swift`
-- [ ] T021 [US1] Wire `PopupPanel`, `IconPanel`, `PopupController`, and views together in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
-- [ ] T022 [US1] Handle primary display bounds changes and reclamp visible panels in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
-- [ ] T023 [US1] Document US1 manual validation steps in `ContextApp/README.md`
+- [X] T016 [P] [US1] Implement `PopupState` expanded/minified transitions in `ContextApp/ContextApp/Domain/PopupState.swift`
+- [X] T017 [P] [US1] Implement `ScreenBoundsKeeper` frame clamping in `ContextApp/ContextApp/Domain/ScreenBoundsKeeper.swift`
+- [X] T018 [US1] Implement popup visibility, minify, restore, and clamping orchestration in `ContextApp/ContextApp/Application/PopupController.swift`
+- [X] T019 [P] [US1] Implement the popup SwiftUI shell with header, minify control, message list placeholder, and input placeholder in `ContextApp/ContextApp/Presentation/Views/ChatPopupView.swift`
+- [X] T020 [P] [US1] Implement the minified icon SwiftUI view in `ContextApp/ContextApp/Presentation/Views/IconView.swift`
+- [X] T021 [US1] Wire `PopupPanel`, `IconPanel`, `PopupController`, and views together in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
+- [X] T022 [US1] Handle primary display bounds changes and reclamp visible panels in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
+- [X] T023 [US1] Document US1 manual validation steps in `ContextApp/README.md`
 
 **Checkpoint**: User Story 1 is fully functional and testable as the MVP shell.
 
@@ -80,19 +80,19 @@
 
 > Write these tests first and verify they fail before implementing the corresponding domain code.
 
-- [ ] T024 [P] [US2] Add bbox position generator tests in `ContextApp/ContextAppTests/BboxPositionGeneratorTests.swift`
-- [ ] T025 [P] [US2] Add single-bbox replacement state tests in `ContextApp/ContextAppTests/DebugBboxStateTests.swift`
+- [X] T024 [P] [US2] Add bbox position generator tests in `ContextApp/ContextAppTests/BboxPositionGeneratorTests.swift`
+- [X] T025 [P] [US2] Add single-bbox replacement state tests in `ContextApp/ContextAppTests/DebugBboxStateTests.swift`
 
 ### Implementation for User Story 2
 
-- [ ] T026 [P] [US2] Implement `DebugBoundingBox` and `BboxPositionGenerator` in `ContextApp/ContextApp/Domain/BboxPositionGenerator.swift`
-- [ ] T027 [P] [US2] Implement `DebugBboxState` replacement semantics in `ContextApp/ContextApp/Domain/DebugBboxState.swift`
-- [ ] T028 [P] [US2] Implement the green outline bbox SwiftUI view in `ContextApp/ContextApp/Presentation/Views/DebugBboxView.swift`
-- [ ] T029 [P] [US2] Implement icon context menu construction with Debug -> Test green bbox in `ContextApp/ContextApp/Presentation/Menu/IconContextMenu.swift`
-- [ ] T030 [US2] Implement menu action handling in `ContextApp/ContextApp/Application/IconMenuController.swift`
-- [ ] T031 [US2] Implement bbox generation, replacement, and panel frame updates in `ContextApp/ContextApp/Application/DebugBboxController.swift`
-- [ ] T032 [US2] Wire `IconMenuController` and `DebugBboxController` into `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
-- [ ] T033 [US2] Document US2 manual validation steps in `ContextApp/README.md`
+- [X] T026 [P] [US2] Implement `DebugBoundingBox` and `BboxPositionGenerator` in `ContextApp/ContextApp/Domain/BboxPositionGenerator.swift`
+- [X] T027 [P] [US2] Implement `DebugBboxState` replacement semantics in `ContextApp/ContextApp/Domain/DebugBboxState.swift`
+- [X] T028 [P] [US2] Implement the green outline bbox SwiftUI view in `ContextApp/ContextApp/Presentation/Views/DebugBboxView.swift`
+- [X] T029 [P] [US2] Implement icon context menu construction with Debug -> Test green bbox in `ContextApp/ContextApp/Presentation/Menu/IconContextMenu.swift`
+- [X] T030 [US2] Implement menu action handling in `ContextApp/ContextApp/Application/IconMenuController.swift`
+- [X] T031 [US2] Implement bbox generation, replacement, and panel frame updates in `ContextApp/ContextApp/Application/DebugBboxController.swift`
+- [X] T032 [US2] Wire `IconMenuController` and `DebugBboxController` into `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
+- [X] T033 [US2] Document US2 manual validation steps in `ContextApp/README.md`
 
 **Checkpoint**: User Stories 1 and 2 work independently; the explicit debug validation hook is complete.
 
@@ -108,15 +108,15 @@
 
 > Write these tests first and verify they fail before implementing the corresponding domain code.
 
-- [ ] T034 [P] [US3] Add chat append, trimming, rejection, and ordering tests in `ContextApp/ContextAppTests/ChatMessageStoreTests.swift`
+- [X] T034 [P] [US3] Add chat append, trimming, rejection, and ordering tests in `ContextApp/ContextAppTests/ChatMessageStoreTests.swift`
 
 ### Implementation for User Story 3
 
-- [ ] T035 [US3] Implement `ChatMessage` and `ChatMessageStore` in `ContextApp/ContextApp/Domain/ChatMessageStore.swift`
-- [ ] T036 [US3] Connect `ChatMessageStore` to popup state in `ContextApp/ContextApp/Application/PopupController.swift`
-- [ ] T037 [US3] Replace placeholder message/input UI with bound scrollable chat behavior in `ContextApp/ContextApp/Presentation/Views/ChatPopupView.swift`
-- [ ] T038 [US3] Preserve chat store instance across minify and restore in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
-- [ ] T039 [US3] Document US3 manual validation steps in `ContextApp/README.md`
+- [X] T035 [US3] Implement `ChatMessage` and `ChatMessageStore` in `ContextApp/ContextApp/Domain/ChatMessageStore.swift`
+- [X] T036 [US3] Connect `ChatMessageStore` to popup state in `ContextApp/ContextApp/Application/PopupController.swift`
+- [X] T037 [US3] Replace placeholder message/input UI with bound scrollable chat behavior in `ContextApp/ContextApp/Presentation/Views/ChatPopupView.swift`
+- [X] T038 [US3] Preserve chat store instance across minify and restore in `ContextApp/ContextApp/Application/OverlayCoordinator.swift`
+- [X] T039 [US3] Document US3 manual validation steps in `ContextApp/README.md`
 
 **Checkpoint**: All user stories are independently functional for the MVP shell.
 
@@ -126,11 +126,11 @@
 
 **Purpose**: Validate the shell, tighten failure modes, and update project documentation without expanding product scope.
 
-- [ ] T040 [P] Run the XCTest suite with `xcodebuild -scheme ContextApp -destination 'platform=macOS' test` and record the result in `ContextApp/README.md`
-- [ ] T041 Add quickstart launch and troubleshooting notes for `LSUIElement`, panel level, and click-through behavior in `ContextApp/README.md`
-- [ ] T042 Verify no `ContextApp/ContextApp/Domain/` file imports `AppKit` or `SwiftUI` and record the check in `ContextApp/README.md`
+- [X] T040 [P] Run the XCTest suite with `xcodebuild -scheme ContextApp -destination 'platform=macOS' test` and record the result in `ContextApp/README.md`
+- [X] T041 Add quickstart launch and troubleshooting notes for `LSUIElement`, panel level, and click-through behavior in `ContextApp/README.md`
+- [X] T042 Verify no `ContextApp/ContextApp/Domain/` file imports `AppKit` or `SwiftUI` and record the check in `ContextApp/README.md`
 - [ ] T043 Manually validate SC-001 through SC-007 from `specs/001-overlay-tutorial/quickstart.md` and record results in `ContextApp/README.md`
-- [ ] T044 Review all source files for small functions, clear naming, and layer separation in `ContextApp/ContextApp/`
+- [X] T044 Review all source files for small functions, clear naming, and layer separation in `ContextApp/ContextApp/`
 
 ---
 

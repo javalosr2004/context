@@ -15,12 +15,12 @@
 
 **Purpose**: Create the macOS app skeleton, test target, and layer directories described in `plan.md`.
 
-- [ ] T001 Create the Xcode macOS app project at `ContextApp/ContextApp.xcodeproj`
-- [ ] T002 Configure the `ContextApp` app target for Swift 5.9 and macOS 13.0 in `ContextApp/ContextApp.xcodeproj/project.pbxproj`
-- [ ] T003 Configure the `ContextAppTests` XCTest target in `ContextApp/ContextApp.xcodeproj/project.pbxproj`
-- [ ] T004 [P] Create app target layer directories under `ContextApp/ContextApp/App/`, `ContextApp/ContextApp/Domain/`, `ContextApp/ContextApp/Application/`, `ContextApp/ContextApp/Presentation/`, and `ContextApp/ContextApp/Resources/`
-- [ ] T005 [P] Create test target directory at `ContextApp/ContextAppTests/`
-- [ ] T006 Configure `LSUIElement`, app sandbox, bundle identifier, and macOS deployment settings in `ContextApp/ContextApp/Resources/Info.plist`
+- [X] T001 Create the Xcode macOS app project at `ContextApp/ContextApp.xcodeproj`
+- [X] T002 Configure the `ContextApp` app target for Swift 5.9 and macOS 13.0 in `ContextApp/ContextApp.xcodeproj/project.pbxproj`
+- [X] T003 Configure the `ContextAppTests` XCTest target in `ContextApp/ContextApp.xcodeproj/project.pbxproj`
+- [X] T004 [P] Create app target layer directories under `ContextApp/ContextApp/App/`, `ContextApp/ContextApp/Domain/`, `ContextApp/ContextApp/Application/`, `ContextApp/ContextApp/Presentation/`, and `ContextApp/ContextApp/Resources/`
+- [X] T005 [P] Create test target directory at `ContextApp/ContextAppTests/`
+- [X] T006 Configure `LSUIElement`, app sandbox, bundle identifier, and macOS deployment settings in `ContextApp/ContextApp/Resources/Info.plist`
 
 ---
 

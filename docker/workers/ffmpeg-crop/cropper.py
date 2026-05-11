@@ -281,38 +281,9 @@ def clamp_bbox_to_image(bbox: BBox, image_width: int, image_height: int) -> BBox
     return BBox(x=left, y=top, width=right - left, height=bottom - top)
 
 
-def zoom_inset_bounds(bbox: BBox, image_width: int, image_height: int) -> BBox:
-    margin = max(24, min(image_width, image_height) // 40)
-    available_width = max(bbox.width, image_width - (margin * 2))
-    available_height = max(bbox.height, image_height - (margin * 2))
-    max_width = min(max(160, int(image_width * 0.34)), available_width)
-    max_height = min(max(120, int(image_height * 0.34)), available_height)
-    scale = min(max_width / bbox.width, max_height / bbox.height, 5.0)
-    scale = max(scale, 2.0)
-    width = min(max_width, int(round(bbox.width * scale)))
-    height = min(max_height, int(round(bbox.height * scale)))
-
-    bbox_center_x = bbox.x + (bbox.width / 2)
-    if bbox_center_x < image_width / 2:
-        x = image_width - width - margin
-    else:
-        x = margin
-
-    target_center_y = bbox.y + (bbox.height / 2)
-    y = int(round(target_center_y - (height / 2)))
-    y = max(margin, min(y, image_height - height - margin))
-
-    return BBox(x=x, y=y, width=width, height=height)
-
-
-def annotate_frame(
-    image_path: Path,
-    bbox: BBox,
-    output_path: Path,
-    step_number: int = 1,
-) -> None:
+def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
     except ImportError as exc:
         raise RuntimeError(
             "Pillow is required for tutorial PDF generation. Install requirements.txt."
@@ -331,10 +302,9 @@ def annotate_frame(
             clamped.x + clamped.width,
             clamped.y + clamped.height,
         ]
-        target = image.crop(tuple(rect))
 
         focused = image.copy()
-        dim = Image.new("RGBA", image.size, (17, 24, 39, 78))
+        dim = Image.new("RGBA", image.size, (17, 24, 39, 58))
         focused.alpha_composite(dim)
         halo_padding = max(10, min(image.width, image.height) // 90)
         halo = [
@@ -346,64 +316,18 @@ def annotate_frame(
         focused.paste(image.crop(tuple(halo)), (halo[0], halo[1]))
 
         draw = ImageDraw.Draw(focused)
-        stroke_width = max(3, min(image.width, image.height) // 240)
+        stroke_width = max(2, min(image.width, image.height) // 280)
         radius = max(10, min(clamped.width, clamped.height) // 8)
         draw.rounded_rectangle(
             halo,
             radius=radius,
-            outline=(255, 255, 255, 235),
-            width=stroke_width + 2,
+            outline=(255, 255, 255, 225),
+            width=stroke_width + 1,
         )
         draw.rounded_rectangle(
             halo,
             radius=radius,
             outline=(249, 115, 22, 255),
-            width=stroke_width,
-        )
-
-        marker_size = max(28, min(image.width, image.height) // 38)
-        marker_x = max(8, min(clamped.x - marker_size // 2, image.width - marker_size - 8))
-        marker_y = max(8, min(clamped.y - marker_size // 2, image.height - marker_size - 8))
-        draw.ellipse(
-            [marker_x, marker_y, marker_x + marker_size, marker_y + marker_size],
-            fill=(249, 115, 22, 255),
-            outline=(255, 255, 255, 255),
-            width=max(2, stroke_width),
-        )
-        font = ImageFont.load_default()
-        marker_text = str(step_number)
-        marker_box = draw.textbbox((0, 0), marker_text, font=font)
-        marker_text_x = marker_x + (marker_size - (marker_box[2] - marker_box[0])) / 2
-        marker_text_y = marker_y + (marker_size - (marker_box[3] - marker_box[1])) / 2 - 1
-        draw.text((marker_text_x, marker_text_y), marker_text, fill=(255, 255, 255, 255), font=font)
-
-        resample = getattr(Image, "Resampling", Image).LANCZOS
-        inset = zoom_inset_bounds(clamped, image.width, image.height)
-        card_padding = max(10, min(image.width, image.height) // 75)
-        crop_width = max(1, inset.width - (card_padding * 2))
-        crop_height = max(1, inset.height - (card_padding * 2))
-        resized_target = target.resize((crop_width, crop_height), resample=resample)
-
-        card_rect = [inset.x, inset.y, inset.x + inset.width, inset.y + inset.height]
-        shadow_offset = max(5, min(image.width, image.height) // 120)
-        shadow_rect = [
-            card_rect[0] + shadow_offset,
-            card_rect[1] + shadow_offset,
-            card_rect[2] + shadow_offset,
-            card_rect[3] + shadow_offset,
-        ]
-        card_radius = max(14, min(inset.width, inset.height) // 12)
-        draw.rounded_rectangle(shadow_rect, radius=card_radius, fill=(0, 0, 0, 85))
-        draw.rounded_rectangle(card_rect, radius=card_radius, fill=(255, 255, 255, 255))
-
-        crop_x = inset.x + card_padding
-        crop_y = inset.y + card_padding
-        focused.paste(resized_target, (crop_x, crop_y))
-        crop_rect = [crop_x, crop_y, crop_x + crop_width, crop_y + crop_height]
-        draw.rounded_rectangle(
-            crop_rect,
-            radius=max(8, card_radius - card_padding),
-            outline=(16, 185, 129, 255),
             width=stroke_width,
         )
         focused.convert("RGB").save(output_path)
@@ -582,7 +506,7 @@ def run_tutorial_pdf(input_path: Path, output_pdf: Path) -> None:
             for index, section in enumerate(sections, start=1):
                 frame_path = source_image_for_step(section, base_ms, source, temp_dir)
                 annotated_path = temp_dir / f"annotated_{index:04d}.png"
-                annotate_frame(frame_path, section.bbox, annotated_path, step_number=index)
+                annotate_frame(frame_path, section.bbox, annotated_path)
                 annotated_steps.append((section, annotated_path))
 
             write_tutorial_pdf(annotated_steps, output_pdf.expanduser().resolve())

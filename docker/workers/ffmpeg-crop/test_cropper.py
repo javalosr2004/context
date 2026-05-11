@@ -10,7 +10,6 @@ from cropper import (
     clamp_bbox_to_image,
     parse_events_jsonl,
     resolve_tutorial_source,
-    zoom_inset_bounds,
 )
 
 
@@ -113,15 +112,6 @@ class BBoxClampTests(unittest.TestCase):
         self.assertIsNone(bbox)
 
 
-class ZoomInsetTests(unittest.TestCase):
-    def test_zoom_inset_uses_opposite_side_of_image(self) -> None:
-        inset = zoom_inset_bounds(BBox(x=10, y=40, width=30, height=20), 300, 200)
-
-        self.assertGreater(inset.x, 40)
-        self.assertGreater(inset.width, 30)
-        self.assertGreater(inset.height, 20)
-
-
 class AnnotationTests(unittest.TestCase):
     def test_annotation_dims_background_and_preserves_target(self) -> None:
         try:
@@ -143,33 +133,6 @@ class AnnotationTests(unittest.TestCase):
 
         self.assertLess(background_pixel[0], 170)
         self.assertEqual(target_pixel, (200, 200, 200))
-
-    def test_annotation_overlays_scaled_crop_inset(self) -> None:
-        try:
-            from PIL import Image
-        except ImportError:
-            self.skipTest("Pillow is not installed")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            source_path = root / "source.png"
-            output_path = root / "annotated.png"
-            image = Image.new("RGB", (300, 200), (180, 180, 180))
-            for x in range(10, 40):
-                for y in range(40, 60):
-                    image.putpixel((x, y), (20, 140, 220))
-            image.save(source_path)
-            bbox = BBox(x=10, y=40, width=30, height=20)
-            inset = zoom_inset_bounds(bbox, 300, 200)
-
-            annotate_frame(source_path, bbox, output_path)
-
-            with Image.open(output_path).convert("RGB") as annotated:
-                inset_pixel = annotated.getpixel(
-                    (inset.x + inset.width // 2, inset.y + inset.height // 2)
-                )
-
-        self.assertEqual(inset_pixel, (20, 140, 220))
 
 
 if __name__ == "__main__":

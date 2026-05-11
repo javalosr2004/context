@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -21,6 +24,13 @@ class BBox(BaseModel):
 class CropSection(BaseModel):
     timestamp_ms: int
     bbox: BBox
+    event_type: str | None = None
+
+
+class TutorialSource(BaseModel):
+    events_path: str
+    video_path: str | None = None
+    frames_dir: str | None = None
 
 
 class CropJob(BaseModel):
@@ -160,7 +170,11 @@ def parse_events_jsonl(path: Path) -> tuple[int, list[CropSection]]:
         if bb is None:
             continue
         sections.append(
-            CropSection(timestamp_ms=int(obj["timeUtcMs"]), bbox=bb)
+            CropSection(
+                timestamp_ms=int(obj["timeUtcMs"]),
+                bbox=bb,
+                event_type=str(et) if et is not None else None,
+            )
         )
 
     if base_ms is None:
@@ -237,6 +251,243 @@ def get_cropped_region(video: str, crop: CropSection, t_sec: float, out_path: st
     subprocess.run(cmd, check=True)
 
 
+def get_full_frame(video: str, t_sec: float, out_path: str) -> None:
+    # -ss after -i keeps this aligned with get_cropped_region's frame-accurate seek.
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        video,
+        "-ss",
+        str(t_sec),
+        "-frames:v",
+        "1",
+        out_path,
+    ]
+    subprocess.run(cmd, check=True)
+
+
+def clamp_bbox_to_image(bbox: BBox, image_width: int, image_height: int) -> BBox | None:
+    left = max(0, min(bbox.x, image_width))
+    top = max(0, min(bbox.y, image_height))
+    right = max(0, min(bbox.x + bbox.width, image_width))
+    bottom = max(0, min(bbox.y + bbox.height, image_height))
+
+    if right <= left or bottom <= top:
+        return None
+    return BBox(x=left, y=top, width=right - left, height=bottom - top)
+
+
+def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as exc:
+        raise RuntimeError(
+            "Pillow is required for tutorial PDF generation. Install requirements.txt."
+        ) from exc
+
+    with Image.open(image_path).convert("RGBA") as image:
+        clamped = clamp_bbox_to_image(bbox, image.width, image.height)
+        if clamped is None:
+            raise ValueError(
+                f"bbox {bbox.model_dump()} does not overlap image {image.width}x{image.height}"
+            )
+
+        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        rect = [
+            clamped.x,
+            clamped.y,
+            clamped.x + clamped.width,
+            clamped.y + clamped.height,
+        ]
+        draw.rectangle(rect, outline=(255, 45, 45, 255), width=6)
+        draw.rectangle(rect, fill=(255, 45, 45, 45))
+        Image.alpha_composite(image, overlay).convert("RGB").save(output_path)
+
+
+def write_tutorial_pdf(
+    annotated_steps: list[tuple[CropSection, Path]],
+    output_pdf: Path,
+) -> None:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import landscape, letter
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas
+    except ImportError as exc:
+        raise RuntimeError(
+            "reportlab is required for tutorial PDF generation. Install requirements.txt."
+        ) from exc
+
+    if not annotated_steps:
+        raise ValueError("No annotated tutorial steps to write.")
+
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+    page_width, page_height = landscape(letter)
+    margin = 36
+    title_height = 58
+    footer_height = 26
+    image_max_width = page_width - (margin * 2)
+    image_max_height = page_height - title_height - footer_height - (margin * 2)
+
+    pdf = canvas.Canvas(str(output_pdf), pagesize=(page_width, page_height))
+    for index, (section, image_path) in enumerate(annotated_steps, start=1):
+        image = ImageReader(str(image_path))
+        image_width, image_height = image.getSize()
+        scale = min(image_max_width / image_width, image_max_height / image_height)
+        drawn_width = image_width * scale
+        drawn_height = image_height * scale
+        image_x = margin + ((image_max_width - drawn_width) / 2)
+        image_y = margin + footer_height
+
+        pdf.setFillColor(colors.HexColor("#111827"))
+        pdf.setFont("Helvetica-Bold", 18)
+        pdf.drawString(margin, page_height - margin - 10, f"Step {index}")
+
+        pdf.setFillColor(colors.HexColor("#4b5563"))
+        pdf.setFont("Helvetica", 10)
+        label = section.event_type or "interaction"
+        pdf.drawString(
+            margin,
+            page_height - margin - 28,
+            f"{label} at {section.timestamp_ms} ms",
+        )
+
+        pdf.drawImage(
+            image,
+            image_x,
+            image_y,
+            width=drawn_width,
+            height=drawn_height,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+
+        pdf.setFillColor(colors.HexColor("#6b7280"))
+        pdf.setFont("Helvetica", 9)
+        bbox = section.bbox
+        pdf.drawString(
+            margin,
+            margin - 4,
+            f"Target bbox: x={bbox.x}, y={bbox.y}, width={bbox.width}, height={bbox.height}",
+        )
+        pdf.showPage()
+
+    pdf.save()
+
+
+def _first_existing_file(root: Path, names: tuple[str, ...]) -> Path | None:
+    for name in names:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _first_file_with_suffix(root: Path, suffixes: tuple[str, ...]) -> Path | None:
+    for path in sorted(root.iterdir()):
+        if path.is_file() and path.suffix.lower() in suffixes:
+            return path
+    return None
+
+
+def resolve_tutorial_source(path: Path) -> TutorialSource:
+    if path.is_dir():
+        events = _first_existing_file(path, ("events.jsonl",))
+        if events is None:
+            raise ValueError(f"events.jsonl not found in {path}")
+        video = _first_file_with_suffix(path, (".webm", ".mp4", ".mov", ".mkv"))
+        frames = path / "frames"
+        return TutorialSource(
+            events_path=str(events),
+            video_path=str(video) if video is not None else None,
+            frames_dir=str(frames) if frames.is_dir() else None,
+        )
+
+    if path.name == "events.jsonl":
+        return TutorialSource(events_path=str(path))
+
+    if path.suffix.lower() == ".json":
+        job = load_crop_job(path)
+        video, events, _ = resolve_job_paths(job, path)
+        return TutorialSource(events_path=str(events), video_path=str(video))
+
+    raise ValueError(
+        f"Unsupported tutorial source: {path}. Use a .ctx file, recording directory, events.jsonl, or job JSON."
+    )
+
+
+@contextlib.contextmanager
+def extracted_context(path: Path):
+    if path.suffix.lower() != ".ctx":
+        yield path
+        return
+
+    with tempfile.TemporaryDirectory(prefix="context-pdf-") as temp_dir:
+        temp_path = Path(temp_dir)
+        with zipfile.ZipFile(path) as archive:
+            archive.extractall(temp_path)
+        yield temp_path
+
+
+def source_image_for_step(
+    section: CropSection,
+    base_ms: int,
+    source: TutorialSource,
+    temp_dir: Path,
+) -> Path:
+    if source.video_path:
+        t_sec = (section.timestamp_ms - base_ms) / 1000.0
+        if t_sec < 0:
+            raise ValueError(
+                f"timestamp_ms={section.timestamp_ms} is before recording_start={base_ms}"
+            )
+        frame_path = temp_dir / f"frame_{section.timestamp_ms}.png"
+        get_full_frame(source.video_path, t_sec, str(frame_path))
+        return frame_path
+
+    if source.frames_dir:
+        frames_dir = Path(source.frames_dir)
+        candidates = (
+            frames_dir / f"{section.timestamp_ms}.png",
+            frames_dir / f"{section.timestamp_ms}.jpg",
+            frames_dir / f"{section.timestamp_ms}.jpeg",
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+
+    raise ValueError(
+        "No video or matching frame image found for tutorial PDF generation."
+    )
+
+
+def run_tutorial_pdf(input_path: Path, output_pdf: Path) -> None:
+    with extracted_context(input_path) as source_root:
+        source = resolve_tutorial_source(source_root)
+        events_file = Path(source.events_path)
+        base_ms, sections = parse_events_jsonl(events_file)
+        if not sections:
+            raise ValueError(
+                "No tutorial steps: need events with timeUtcMs and a usable bbox in axAttributes."
+            )
+
+        with tempfile.TemporaryDirectory(prefix="context-pdf-frames-") as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            annotated_steps: list[tuple[CropSection, Path]] = []
+            for index, section in enumerate(sections, start=1):
+                frame_path = source_image_for_step(section, base_ms, source, temp_dir)
+                annotated_path = temp_dir / f"annotated_{index:04d}.png"
+                annotate_frame(frame_path, section.bbox, annotated_path)
+                annotated_steps.append((section, annotated_path))
+
+            write_tutorial_pdf(annotated_steps, output_pdf.expanduser().resolve())
+
+
 def run_crop(
     events_file: Path,
     video_path: Path,
@@ -282,16 +533,28 @@ def run_crop(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Crop still frames from video using a job JSON (video_path, events_path, output_dir)."
+        description="Crop still frames or build a tutorial PDF from a context recording."
     )
     parser.add_argument(
-        "job_path",
+        "input_path",
         type=Path,
-        help="JSON job file with video_path, events_path, and output_dir",
+        help="Crop job JSON, .ctx file, recording directory, or events.jsonl",
+    )
+    parser.add_argument(
+        "--pdf",
+        type=Path,
+        help="Write one tutorial PDF with full-frame screenshots and bbox overlays",
     )
     args = parser.parse_args()
 
-    job_file = args.job_path.expanduser().resolve()
+    input_path = args.input_path.expanduser().resolve()
+    if args.pdf is not None:
+        if not input_path.exists():
+            raise SystemExit(f"input not found: {input_path}")
+        run_tutorial_pdf(input_path, args.pdf)
+        return
+
+    job_file = input_path
     if not job_file.is_file():
         raise SystemExit(f"job file not found: {job_file}")
 

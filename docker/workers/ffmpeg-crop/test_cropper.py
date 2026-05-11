@@ -5,6 +5,7 @@ from pathlib import Path
 
 from cropper import (
     BBox,
+    annotate_frame,
     bbox_from_ax_attributes,
     clamp_bbox_to_image,
     parse_events_jsonl,
@@ -109,6 +110,29 @@ class BBoxClampTests(unittest.TestCase):
         bbox = clamp_bbox_to_image(BBox(x=110, y=10, width=20, height=30), 100, 100)
 
         self.assertIsNone(bbox)
+
+
+class AnnotationTests(unittest.TestCase):
+    def test_annotation_dims_background_and_preserves_target(self) -> None:
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is not installed")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_path = root / "source.png"
+            output_path = root / "annotated.png"
+            Image.new("RGB", (80, 80), (200, 200, 200)).save(source_path)
+
+            annotate_frame(source_path, BBox(x=30, y=30, width=20, height=20), output_path)
+
+            with Image.open(output_path).convert("RGB") as annotated:
+                background_pixel = annotated.getpixel((10, 10))
+                target_pixel = annotated.getpixel((40, 40))
+
+        self.assertLess(background_pixel[0], 120)
+        self.assertEqual(target_pixel, (200, 200, 200))
 
 
 if __name__ == "__main__":

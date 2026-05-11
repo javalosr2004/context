@@ -283,7 +283,7 @@ def clamp_bbox_to_image(bbox: BBox, image_width: int, image_height: int) -> BBox
 
 def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageEnhance
     except ImportError as exc:
         raise RuntimeError(
             "Pillow is required for tutorial PDF generation. Install requirements.txt."
@@ -296,17 +296,21 @@ def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
                 f"bbox {bbox.model_dump()} does not overlap image {image.width}x{image.height}"
             )
 
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
+        focused = ImageEnhance.Brightness(image).enhance(0.42)
         rect = [
             clamped.x,
             clamped.y,
             clamped.x + clamped.width,
             clamped.y + clamped.height,
         ]
-        draw.rectangle(rect, outline=(255, 45, 45, 255), width=6)
-        draw.rectangle(rect, fill=(255, 45, 45, 45))
-        Image.alpha_composite(image, overlay).convert("RGB").save(output_path)
+        target = image.crop(tuple(rect))
+        focused.paste(target, (clamped.x, clamped.y))
+
+        draw = ImageDraw.Draw(focused)
+        stroke_width = max(4, min(image.width, image.height) // 180)
+        draw.rectangle(rect, outline=(255, 255, 255, 255), width=stroke_width + 4)
+        draw.rectangle(rect, outline=(255, 45, 45, 255), width=stroke_width)
+        focused.convert("RGB").save(output_path)
 
 
 def write_tutorial_pdf(

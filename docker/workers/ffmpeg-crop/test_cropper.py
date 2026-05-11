@@ -10,6 +10,8 @@ from cropper import (
     clamp_bbox_to_image,
     parse_events_jsonl,
     resolve_tutorial_source,
+    step_text_from_event,
+    zoom_region_for_bbox,
 )
 
 
@@ -51,6 +53,21 @@ class BBoxParsingTests(unittest.TestCase):
 
         self.assertIsNone(bbox)
 
+    def test_uses_selected_user_override_bbox(self) -> None:
+        bbox = bbox_from_ax_attributes(
+            {
+                "current": {
+                    "boundingBox": {"x": 10, "y": 20, "width": 30, "height": 40}
+                },
+                "selected": "user_override",
+                "userOverride": {
+                    "boundingBox": {"x": 100, "y": 120, "width": 130, "height": 140}
+                },
+            }
+        )
+
+        self.assertEqual(bbox, BBox(x=100, y=120, width=130, height=140))
+
 
 class EventParsingTests(unittest.TestCase):
     def test_parse_events_keeps_event_type_for_pdf_labels(self) -> None:
@@ -62,6 +79,8 @@ class EventParsingTests(unittest.TestCase):
                     "eventType": "mousedown_left",
                     "timeUtcMs": 1250,
                     "axAttributes": {
+                        "title": "Click the save button",
+                        "description": "Confirm the dialog is ready first.",
                         "current": {
                             "boundingBox": {
                                 "x": 10,
@@ -82,7 +101,26 @@ class EventParsingTests(unittest.TestCase):
         self.assertEqual(base_ms, 1000)
         self.assertEqual(len(sections), 1)
         self.assertEqual(sections[0].event_type, "mousedown_left")
+        self.assertEqual(sections[0].title, "Click the save button")
+        self.assertEqual(sections[0].description, "Confirm the dialog is ready first.")
         self.assertEqual(sections[0].bbox, BBox(x=10, y=20, width=30, height=40))
+
+    def test_step_text_falls_back_to_target_label(self) -> None:
+        title, description = step_text_from_event(
+            {"eventType": "mousedown_left"},
+            {
+                "title": "mousedown_left",
+                "description": "(12, 34)",
+                "current": {
+                    "axTitle": "Save",
+                    "boundingBox": {"x": 1, "y": 2, "width": 3, "height": 4},
+                },
+            },
+            "mousedown_left",
+        )
+
+        self.assertEqual(title, "Click Save")
+        self.assertIsNone(description)
 
 
 class TutorialSourceTests(unittest.TestCase):
@@ -112,8 +150,20 @@ class BBoxClampTests(unittest.TestCase):
         self.assertIsNone(bbox)
 
 
+class ZoomRegionTests(unittest.TestCase):
+    def test_zoom_region_contains_clamped_bbox(self) -> None:
+        zoom = zoom_region_for_bbox(BBox(x=180, y=130, width=20, height=10), 200, 150)
+
+        self.assertIsNotNone(zoom)
+        assert zoom is not None
+        self.assertLessEqual(zoom.x, 180)
+        self.assertLessEqual(zoom.y, 130)
+        self.assertGreaterEqual(zoom.x + zoom.width, 200)
+        self.assertGreaterEqual(zoom.y + zoom.height, 140)
+
+
 class AnnotationTests(unittest.TestCase):
-    def test_annotation_dims_background_and_preserves_target(self) -> None:
+    def test_annotation_dims_background_and_draws_target_accent(self) -> None:
         try:
             from PIL import Image
         except ImportError:
@@ -129,10 +179,11 @@ class AnnotationTests(unittest.TestCase):
 
             with Image.open(output_path).convert("RGB") as annotated:
                 background_pixel = annotated.getpixel((10, 10))
-                target_pixel = annotated.getpixel((52, 72))
+                accent_pixel = annotated.getpixel((52, 72))
 
         self.assertLess(background_pixel[0], 170)
-        self.assertEqual(target_pixel, (200, 200, 200))
+        self.assertGreater(accent_pixel[0], 220)
+        self.assertLess(accent_pixel[1], 100)
 
 
 if __name__ == "__main__":

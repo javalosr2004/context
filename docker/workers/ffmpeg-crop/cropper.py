@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -25,6 +26,8 @@ class CropSection(BaseModel):
     timestamp_ms: int
     bbox: BBox
     event_type: str | None = None
+    title: str | None = None
+    description: str | None = None
 
 
 class TutorialSource(BaseModel):
@@ -39,6 +42,11 @@ class CropJob(BaseModel):
     video_path: str
     events_path: str
     output_dir: str = "./output"
+
+
+class TutorialMetadata(BaseModel):
+    recording_name: str
+    recorded_at_ms: int
 
 
 def _int_from_ax(val: object) -> int | None:
@@ -104,6 +112,40 @@ def _bbox_from_ax_snapshot(ax: dict) -> BBox | None:
     return None
 
 
+def _bbox_from_selected_snapshot_node(ax: dict) -> BBox | None:
+    selected = ax.get("selected")
+    if selected == "user_override":
+        override = ax.get("userOverride")
+        if isinstance(override, dict):
+            return _bbox_from_bounding_box_dict(override.get("boundingBox"))
+        return None
+
+    if selected == "current":
+        current = ax.get("current")
+        if isinstance(current, dict):
+            return _bbox_from_bounding_box_dict(current.get("boundingBox"))
+        return None
+
+    if not isinstance(selected, str) or ":" not in selected:
+        return None
+
+    group, raw_index = selected.split(":", 1)
+    if group not in ("parents", "children"):
+        return None
+    try:
+        index = int(raw_index)
+    except ValueError:
+        return None
+
+    nodes = ax.get(group)
+    if not isinstance(nodes, list) or index < 0 or index >= len(nodes):
+        return None
+    node = nodes[index]
+    if not isinstance(node, dict):
+        return None
+    return _bbox_from_bounding_box_dict(node.get("boundingBox"))
+
+
 def _bbox_from_legacy_flat_ax(ax: dict) -> BBox | None:
     """Legacy flat map: ``bbox_x``, ``bbox_y``, ``bbox_width``, ``bbox_height``."""
     x = _int_from_ax(ax.get("bbox_x"))
@@ -126,6 +168,10 @@ def bbox_from_ax_attributes(ax: dict) -> BBox | None:
     - **Legacy**: flat ``bbox_*`` keys only.
     """
     if isinstance(ax.get("current"), dict):
+        selected = _bbox_from_selected_snapshot_node(ax)
+        if selected is not None:
+            return selected
+
         snap = _bbox_from_ax_snapshot(ax)
         if snap is not None:
             return snap
@@ -134,6 +180,114 @@ def bbox_from_ax_attributes(ax: dict) -> BBox | None:
         return _bbox_from_legacy_flat_ax(ax)
 
     return None
+
+
+def _clean_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return " ".join(text.split())
+
+
+def _looks_like_pointer_description(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("(") and stripped.endswith(")") and "," in stripped
+
+
+def _text_from_annotation(obj: dict, ax: dict, key: str, event_type: str | None) -> str | None:
+    for source in (obj, ax):
+        text = _clean_text(source.get(key))
+        if text and text != event_type and not _looks_like_pointer_description(text):
+            return text
+
+    annotation = obj.get("annotation")
+    if isinstance(annotation, dict):
+        text = _clean_text(annotation.get(key))
+        if text and text != event_type and not _looks_like_pointer_description(text):
+            return text
+
+    return None
+
+
+def _selected_ax_node(ax: dict) -> dict | None:
+    selected = ax.get("selected", "current")
+    if selected == "current":
+        current = ax.get("current")
+        return current if isinstance(current, dict) else None
+    if not isinstance(selected, str) or ":" not in selected:
+        return None
+    group, raw_index = selected.split(":", 1)
+    try:
+        index = int(raw_index)
+    except ValueError:
+        return None
+    nodes = ax.get(group)
+    if not isinstance(nodes, list) or index < 0 or index >= len(nodes):
+        return None
+    node = nodes[index]
+    return node if isinstance(node, dict) else None
+
+
+def _target_text_from_snapshot(ax: dict) -> str | None:
+    node = _selected_ax_node(ax)
+    if node is None:
+        node = ax.get("current") if isinstance(ax.get("current"), dict) else None
+    if node is None:
+        return None
+
+    for key in (
+        "axTitle",
+        "axValue",
+        "axDescription",
+        "axLabel",
+        "axPlaceholderValue",
+        "axRoleDescription",
+    ):
+        text = _clean_text(node.get(key))
+        if text:
+            return text
+    return None
+
+
+def _target_text_from_legacy_ax(ax: dict) -> str | None:
+    for key in ("AXTitleOrValue", "AXTitle", "AXValue", "AXDescription", "AXRole"):
+        text = _clean_text(ax.get(key))
+        if text:
+            return text
+    return None
+
+
+def step_text_from_event(obj: dict, ax: dict, event_type: str | None) -> tuple[str | None, str | None]:
+    title = _text_from_annotation(obj, ax, "title", event_type)
+    description = _text_from_annotation(obj, ax, "description", event_type)
+    if title is not None:
+        return title, description
+
+    target_text = (
+        _target_text_from_snapshot(ax)
+        if isinstance(ax.get("current"), dict)
+        else _target_text_from_legacy_ax(ax)
+    )
+    if target_text:
+        action = "Click" if event_type == "mousedown_left" else _event_label(event_type)
+        return f"{action} {target_text}", description
+
+    return _event_label(event_type), description
+
+
+def _event_label(event_type: str | None) -> str:
+    labels = {
+        "mousedown_left": "Click",
+        "mousedown_right": "Right click",
+        "mouseup_left": "Release click",
+        "scroll": "Scroll",
+        "keypress": "Type",
+    }
+    if event_type in labels:
+        return labels[event_type]
+    return (event_type or "Interaction").replace("_", " ").title()
 
 
 def parse_events_jsonl(path: Path) -> tuple[int, list[CropSection]]:
@@ -169,11 +323,14 @@ def parse_events_jsonl(path: Path) -> tuple[int, list[CropSection]]:
         bb = bbox_from_ax_attributes(ax)
         if bb is None:
             continue
+        title, description = step_text_from_event(obj, ax, str(et) if et is not None else None)
         sections.append(
             CropSection(
                 timestamp_ms=int(obj["timeUtcMs"]),
                 bbox=bb,
                 event_type=str(et) if et is not None else None,
+                title=title,
+                description=description,
             )
         )
 
@@ -281,7 +438,53 @@ def clamp_bbox_to_image(bbox: BBox, image_width: int, image_height: int) -> BBox
     return BBox(x=left, y=top, width=right - left, height=bottom - top)
 
 
-def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
+def zoom_region_for_bbox(bbox: BBox, image_width: int, image_height: int) -> BBox | None:
+    clamped = clamp_bbox_to_image(bbox, image_width, image_height)
+    if clamped is None:
+        return None
+
+    target_width = max(clamped.width * 4, image_width // 3)
+    target_height = max(clamped.height * 4, image_height // 3)
+    target_width = min(image_width, target_width)
+    target_height = min(image_height, target_height)
+
+    center_x = clamped.x + (clamped.width / 2)
+    center_y = clamped.y + (clamped.height / 2)
+    left = int(round(center_x - (target_width / 2)))
+    top = int(round(center_y - (target_height / 2)))
+    left = max(0, min(left, image_width - target_width))
+    top = max(0, min(top, image_height - target_height))
+
+    return BBox(x=left, y=top, width=target_width, height=target_height)
+
+
+def _draw_callout_marker(draw, number: int, x: int, y: int, radius: int) -> None:
+    try:
+        from PIL import ImageFont
+
+        font = ImageFont.truetype("Arial Bold.ttf", max(12, radius))
+    except Exception:
+        font = None
+
+    draw.ellipse(
+        [x - radius, y - radius, x + radius, y + radius],
+        fill=(20, 184, 166, 255),
+        outline=(255, 255, 255, 255),
+        width=max(2, radius // 5),
+    )
+    label = str(number)
+    text_box = draw.textbbox((0, 0), label, font=font)
+    text_width = text_box[2] - text_box[0]
+    text_height = text_box[3] - text_box[1]
+    draw.text(
+        (x - (text_width / 2), y - (text_height / 2) - 1),
+        label,
+        fill=(255, 255, 255, 255),
+        font=font,
+    )
+
+
+def annotate_frame(image_path: Path, bbox: BBox, output_path: Path, step_number: int = 1) -> None:
     try:
         from PIL import Image, ImageDraw
     except ImportError as exc:
@@ -296,46 +499,98 @@ def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
                 f"bbox {bbox.model_dump()} does not overlap image {image.width}x{image.height}"
             )
 
-        rect = [
-            clamped.x,
-            clamped.y,
-            clamped.x + clamped.width,
-            clamped.y + clamped.height,
-        ]
+        zoom = zoom_region_for_bbox(clamped, image.width, image.height)
+        if zoom is None:
+            raise ValueError(
+                f"bbox {bbox.model_dump()} does not overlap image {image.width}x{image.height}"
+            )
 
-        focused = image.copy()
-        dim = Image.new("RGBA", image.size, (17, 24, 39, 58))
-        focused.alpha_composite(dim)
-        halo_padding = max(10, min(image.width, image.height) // 90)
-        halo = [
-            max(0, clamped.x - halo_padding),
-            max(0, clamped.y - halo_padding),
-            min(image.width, clamped.x + clamped.width + halo_padding),
-            min(image.height, clamped.y + clamped.height + halo_padding),
-        ]
-        focused.paste(image.crop(tuple(halo)), (halo[0], halo[1]))
+        composed = image.copy()
+        dim = Image.new("RGBA", image.size, (17, 24, 39, 92))
+        composed.alpha_composite(dim)
 
-        draw = ImageDraw.Draw(focused)
-        stroke_width = max(2, min(image.width, image.height) // 280)
-        radius = max(10, min(clamped.width, clamped.height) // 8)
+        draw = ImageDraw.Draw(composed)
+        context_width = max(2, min(image.width, image.height) // 270)
         draw.rounded_rectangle(
-            halo,
-            radius=radius,
-            outline=(255, 255, 255, 225),
-            width=stroke_width + 1,
+            [
+                clamped.x,
+                clamped.y,
+                clamped.x + clamped.width,
+                clamped.y + clamped.height,
+            ],
+            radius=max(6, min(clamped.width, clamped.height) // 8),
+            outline=(239, 68, 68, 230),
+            width=context_width,
+        )
+
+        crop = image.crop((zoom.x, zoom.y, zoom.x + zoom.width, zoom.y + zoom.height))
+        max_zoom_width = int(image.width * 0.72)
+        max_zoom_height = int(image.height * 0.68)
+        zoom_scale = min(max_zoom_width / crop.width, max_zoom_height / crop.height)
+        zoomed_width = int(crop.width * zoom_scale)
+        zoomed_height = int(crop.height * zoom_scale)
+        crop = crop.resize((zoomed_width, zoomed_height), Image.Resampling.LANCZOS)
+
+        image_center_x = clamped.x + (clamped.width / 2)
+        panel_x = int(round(image_center_x - (zoomed_width / 2)))
+        panel_x = max(24, min(panel_x, image.width - zoomed_width - 24))
+        panel_y = max(24, min(clamped.y - zoomed_height - 40, image.height - zoomed_height - 24))
+        if panel_y < 24 or panel_y + zoomed_height > image.height - 24:
+            panel_y = max(24, min(clamped.y + clamped.height + 40, image.height - zoomed_height - 24))
+
+        shadow = Image.new("RGBA", (zoomed_width + 24, zoomed_height + 24), (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow)
+        shadow_draw.rounded_rectangle(
+            [8, 8, zoomed_width + 16, zoomed_height + 16],
+            radius=18,
+            fill=(17, 24, 39, 70),
+        )
+        composed.alpha_composite(shadow, (panel_x - 12, panel_y - 12))
+        composed.paste(crop, (panel_x, panel_y))
+
+        draw = ImageDraw.Draw(composed)
+        panel_radius = max(12, min(zoomed_width, zoomed_height) // 36)
+        draw.rounded_rectangle(
+            [panel_x, panel_y, panel_x + zoomed_width, panel_y + zoomed_height],
+            radius=panel_radius,
+            outline=(255, 255, 255, 255),
+            width=max(3, context_width),
+        )
+
+        target_in_panel = [
+            panel_x + int(round((clamped.x - zoom.x) * zoom_scale)),
+            panel_y + int(round((clamped.y - zoom.y) * zoom_scale)),
+            panel_x + int(round((clamped.x + clamped.width - zoom.x) * zoom_scale)),
+            panel_y + int(round((clamped.y + clamped.height - zoom.y) * zoom_scale)),
+        ]
+        target_width = max(3, min(image.width, image.height) // 190)
+        draw.rounded_rectangle(
+            target_in_panel,
+            radius=max(8, min(target_in_panel[2] - target_in_panel[0], target_in_panel[3] - target_in_panel[1]) // 8),
+            outline=(255, 255, 255, 255),
+            width=target_width + 2,
         )
         draw.rounded_rectangle(
-            halo,
-            radius=radius,
-            outline=(249, 115, 22, 255),
-            width=stroke_width,
+            target_in_panel,
+            radius=max(8, min(target_in_panel[2] - target_in_panel[0], target_in_panel[3] - target_in_panel[1]) // 8),
+            outline=(239, 68, 68, 255),
+            width=target_width,
         )
-        focused.convert("RGB").save(output_path)
+
+        marker_radius = max(16, min(image.width, image.height) // 48)
+        marker_x = max(panel_x + marker_radius + 4, target_in_panel[0] - marker_radius)
+        marker_y = max(panel_y + marker_radius + 4, target_in_panel[1] - marker_radius)
+        marker_x = min(marker_x, panel_x + zoomed_width - marker_radius - 4)
+        marker_y = min(marker_y, panel_y + zoomed_height - marker_radius - 4)
+        _draw_callout_marker(draw, step_number, marker_x, marker_y, marker_radius)
+
+        composed.convert("RGB").save(output_path)
 
 
 def write_tutorial_pdf(
     annotated_steps: list[tuple[CropSection, Path]],
     output_pdf: Path,
+    metadata: TutorialMetadata,
 ) -> None:
     try:
         from reportlab.lib import colors
@@ -352,14 +607,19 @@ def write_tutorial_pdf(
 
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
     page_width, page_height = landscape(letter)
-    margin = 36
-    title_height = 58
-    footer_height = 26
+    margin = 42
+    title_height = 86
+    footer_height = 32
     image_max_width = page_width - (margin * 2)
     image_max_height = page_height - title_height - footer_height - (margin * 2)
 
     pdf = canvas.Canvas(str(output_pdf), pagesize=(page_width, page_height))
+    _draw_cover_page(pdf, page_width, page_height, metadata, len(annotated_steps))
+
     for index, (section, image_path) in enumerate(annotated_steps, start=1):
+        pdf.setFillColor(colors.HexColor("#f8fafc"))
+        pdf.rect(0, 0, page_width, page_height, stroke=0, fill=1)
+
         image = ImageReader(str(image_path))
         image_width, image_height = image.getSize()
         scale = min(image_max_width / image_width, image_max_height / image_height)
@@ -368,18 +628,29 @@ def write_tutorial_pdf(
         image_x = margin + ((image_max_width - drawn_width) / 2)
         image_y = margin + footer_height
 
+        _draw_context_logo(pdf, margin, page_height - margin + 3)
+
         pdf.setFillColor(colors.HexColor("#111827"))
-        pdf.setFont("Helvetica-Bold", 18)
-        pdf.drawString(margin, page_height - margin - 10, f"Step {index}")
+        pdf.setFont("Helvetica-Bold", 22)
+        pdf.drawString(margin, page_height - margin - 27, f"Step {index}")
 
         pdf.setFillColor(colors.HexColor("#4b5563"))
-        pdf.setFont("Helvetica", 10)
-        label = section.event_type or "interaction"
-        pdf.drawString(
-            margin,
-            page_height - margin - 28,
-            f"{label} at {section.timestamp_ms} ms",
-        )
+        pdf.setFont("Helvetica-Bold", 14)
+        label = section.title or _event_label(section.event_type)
+        _draw_wrapped_text(pdf, label, margin + 92, page_height - margin - 27, image_max_width - 92, 16)
+
+        if section.description:
+            pdf.setFillColor(colors.HexColor("#6b7280"))
+            pdf.setFont("Helvetica", 10)
+            _draw_wrapped_text(
+                pdf,
+                section.description,
+                margin + 92,
+                page_height - margin - 47,
+                image_max_width - 92,
+                12,
+                max_lines=2,
+            )
 
         pdf.drawImage(
             image,
@@ -396,12 +667,98 @@ def write_tutorial_pdf(
         bbox = section.bbox
         pdf.drawString(
             margin,
-            margin - 4,
-            f"Target bbox: x={bbox.x}, y={bbox.y}, width={bbox.width}, height={bbox.height}",
+            margin - 6,
+            f"{_event_label(section.event_type)} | {section.timestamp_ms} ms | "
+            f"Target bbox: x={bbox.x}, y={bbox.y}, w={bbox.width}, h={bbox.height}",
         )
         pdf.showPage()
 
     pdf.save()
+
+
+def _formatted_recording_date(timestamp_ms: int) -> str:
+    return datetime.fromtimestamp(timestamp_ms / 1000).strftime("%B %d, %Y")
+
+
+def _draw_context_logo(pdf, x: float, y: float) -> None:
+    from reportlab.lib import colors
+
+    pdf.setFillColor(colors.HexColor("#111827"))
+    pdf.setFont("Helvetica-Bold", 13)
+    pdf.drawString(x + 23, y - 8, "Context")
+    pdf.setFillColor(colors.HexColor("#ef4444"))
+    pdf.circle(x + 7, y - 4, 5, stroke=0, fill=1)
+    pdf.setFillColor(colors.HexColor("#14b8a6"))
+    pdf.circle(x + 15, y - 12, 5, stroke=0, fill=1)
+
+
+def _draw_wrapped_text(
+    pdf,
+    text: str,
+    x: float,
+    y: float,
+    max_width: float,
+    line_height: float,
+    max_lines: int = 1,
+) -> None:
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if pdf.stringWidth(candidate) <= max_width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        current = word
+        if len(lines) == max_lines:
+            break
+    if current and len(lines) < max_lines:
+        lines.append(current)
+
+    for index, line in enumerate(lines[:max_lines]):
+        if index == max_lines - 1 and len(lines) == max_lines and words:
+            while pdf.stringWidth(line + "...") > max_width and line:
+                line = line[:-1].rstrip()
+            if line != text and max_lines == 1:
+                line = line + "..."
+        pdf.drawString(x, y - (index * line_height), line)
+
+
+def _draw_cover_page(
+    pdf,
+    page_width: float,
+    page_height: float,
+    metadata: TutorialMetadata,
+    step_count: int,
+) -> None:
+    from reportlab.lib import colors
+
+    pdf.setFillColor(colors.HexColor("#f8fafc"))
+    pdf.rect(0, 0, page_width, page_height, stroke=0, fill=1)
+
+    margin = 64
+    _draw_context_logo(pdf, margin, page_height - margin)
+
+    pdf.setFillColor(colors.HexColor("#111827"))
+    pdf.setFont("Helvetica-Bold", 34)
+    pdf.drawString(margin, page_height - 170, "Tutorial Guide")
+
+    pdf.setFillColor(colors.HexColor("#374151"))
+    pdf.setFont("Helvetica-Bold", 20)
+    _draw_wrapped_text(pdf, metadata.recording_name, margin, page_height - 210, page_width - (margin * 2), 24)
+
+    pdf.setFillColor(colors.HexColor("#6b7280"))
+    pdf.setFont("Helvetica", 13)
+    pdf.drawString(margin, page_height - 256, f"{step_count} steps")
+    pdf.drawString(margin, page_height - 278, _formatted_recording_date(metadata.recorded_at_ms))
+
+    pdf.setFillColor(colors.HexColor("#ef4444"))
+    pdf.roundRect(margin, 88, 120, 8, 4, stroke=0, fill=1)
+    pdf.setFillColor(colors.HexColor("#14b8a6"))
+    pdf.roundRect(margin + 134, 88, 120, 8, 4, stroke=0, fill=1)
+    pdf.showPage()
 
 
 def _first_existing_file(root: Path, names: tuple[str, ...]) -> Path | None:
@@ -506,10 +863,18 @@ def run_tutorial_pdf(input_path: Path, output_pdf: Path) -> None:
             for index, section in enumerate(sections, start=1):
                 frame_path = source_image_for_step(section, base_ms, source, temp_dir)
                 annotated_path = temp_dir / f"annotated_{index:04d}.png"
-                annotate_frame(frame_path, section.bbox, annotated_path)
+                annotate_frame(frame_path, section.bbox, annotated_path, index)
                 annotated_steps.append((section, annotated_path))
 
-            write_tutorial_pdf(annotated_steps, output_pdf.expanduser().resolve())
+            metadata = TutorialMetadata(
+                recording_name=input_path.stem if input_path.is_file() else input_path.name,
+                recorded_at_ms=base_ms,
+            )
+            write_tutorial_pdf(
+                annotated_steps,
+                output_pdf.expanduser().resolve(),
+                metadata,
+            )
 
 
 def run_crop(

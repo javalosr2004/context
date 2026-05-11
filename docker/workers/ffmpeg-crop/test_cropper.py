@@ -141,7 +141,7 @@ class AnnotationTests(unittest.TestCase):
                 background_pixel = annotated.getpixel((10, 10))
                 target_pixel = annotated.getpixel((52, 72))
 
-        self.assertLess(background_pixel[0], 120)
+        self.assertLess(background_pixel[0], 170)
         self.assertEqual(target_pixel, (200, 200, 200))
 
     def test_annotation_overlays_scaled_crop_inset(self) -> None:

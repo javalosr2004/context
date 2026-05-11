@@ -281,6 +281,30 @@ def clamp_bbox_to_image(bbox: BBox, image_width: int, image_height: int) -> BBox
     return BBox(x=left, y=top, width=right - left, height=bottom - top)
 
 
+def zoom_inset_bounds(bbox: BBox, image_width: int, image_height: int) -> BBox:
+    margin = max(24, min(image_width, image_height) // 40)
+    available_width = max(bbox.width, image_width - (margin * 2))
+    available_height = max(bbox.height, image_height - (margin * 2))
+    max_width = min(max(160, int(image_width * 0.34)), available_width)
+    max_height = min(max(120, int(image_height * 0.34)), available_height)
+    scale = min(max_width / bbox.width, max_height / bbox.height, 5.0)
+    scale = max(scale, 2.0)
+    width = min(max_width, int(round(bbox.width * scale)))
+    height = min(max_height, int(round(bbox.height * scale)))
+
+    bbox_center_x = bbox.x + (bbox.width / 2)
+    if bbox_center_x < image_width / 2:
+        x = image_width - width - margin
+    else:
+        x = margin
+
+    target_center_y = bbox.y + (bbox.height / 2)
+    y = int(round(target_center_y - (height / 2)))
+    y = max(margin, min(y, image_height - height - margin))
+
+    return BBox(x=x, y=y, width=width, height=height)
+
+
 def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
     try:
         from PIL import Image, ImageDraw, ImageEnhance
@@ -310,6 +334,30 @@ def annotate_frame(image_path: Path, bbox: BBox, output_path: Path) -> None:
         stroke_width = max(4, min(image.width, image.height) // 180)
         draw.rectangle(rect, outline=(255, 255, 255, 255), width=stroke_width + 4)
         draw.rectangle(rect, outline=(255, 45, 45, 255), width=stroke_width)
+
+        inset = zoom_inset_bounds(clamped, image.width, image.height)
+        resized_target = target.resize((inset.width, inset.height))
+        shadow = Image.new("RGBA", (inset.width + 16, inset.height + 16), (0, 0, 0, 75))
+        focused.alpha_composite(shadow, (inset.x + 8, inset.y + 8))
+        focused.paste(resized_target, (inset.x, inset.y))
+
+        inset_rect = [
+            inset.x,
+            inset.y,
+            inset.x + inset.width,
+            inset.y + inset.height,
+        ]
+        draw.rectangle(inset_rect, outline=(255, 255, 255, 255), width=stroke_width + 6)
+        draw.rectangle(inset_rect, outline=(16, 185, 129, 255), width=stroke_width)
+
+        source_center = (
+            clamped.x + (clamped.width / 2),
+            clamped.y + (clamped.height / 2),
+        )
+        inset_anchor_x = inset.x if inset.x > source_center[0] else inset.x + inset.width
+        inset_anchor = (inset_anchor_x, inset.y + (inset.height / 2))
+        draw.line([source_center, inset_anchor], fill=(255, 255, 255, 230), width=stroke_width + 3)
+        draw.line([source_center, inset_anchor], fill=(16, 185, 129, 255), width=stroke_width)
         focused.convert("RGB").save(output_path)
 
 

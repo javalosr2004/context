@@ -1,10 +1,12 @@
 import AppKit
+import Dispatch
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct InstructionInput {
     let text: String
     let referenceImageData: Data?
+    let submittedAtUptimeNanoseconds: UInt64
 }
 
 struct ChatPopupView: View {
@@ -177,7 +179,11 @@ struct ChatPopupView: View {
         isSendingInstruction = true
         appendMessage("Instruction: \(trimmedInstruction)")
 
-        let input = InstructionInput(text: trimmedInstruction, referenceImageData: referenceImageData)
+        let input = InstructionInput(
+            text: trimmedInstruction,
+            referenceImageData: referenceImageData,
+            submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
+        )
         Task {
             let result = await onInputInstruction(input)
             await MainActor.run {

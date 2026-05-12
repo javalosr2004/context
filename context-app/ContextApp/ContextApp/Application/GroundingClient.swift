@@ -11,6 +11,7 @@ typealias PlatformImage = NSImage
 struct GroundingInstruction {
     let text: String
     let referenceImageData: Data?
+    let submittedAtUptimeNanoseconds: UInt64?
 }
 
 enum GroundingClientError: LocalizedError {

@@ -45,7 +45,8 @@ final class OverlayCoordinator {
             input in
             await screenGroundingController.submit(GroundingInstruction(
                 text: input.text,
-                referenceImageData: input.referenceImageData
+                referenceImageData: input.referenceImageData,
+                submittedAtUptimeNanoseconds: input.submittedAtUptimeNanoseconds
             ))
         } onMinify: {
             popupController.minify()

@@ -43,6 +43,8 @@ final class StatusBarController {
         }))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(CallbackMenuItem(title: "Test green bbox", actionHandler: onTestBbox))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(CallbackMenuItem(title: "Quit Context", actionHandler: quitApplication))
         statusItem.menu = menu
     }
 
@@ -92,5 +94,9 @@ final class StatusBarController {
         alert.informativeText = "Enter an absolute URL with a scheme, such as https://example.com/ground."
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func quitApplication() {
+        NSApplication.shared.terminate(nil)
     }
 }

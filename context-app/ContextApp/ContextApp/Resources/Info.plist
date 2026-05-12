@@ -26,6 +26,8 @@
 	<string>Copyright © 2026 Context. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSCaptureDevicesUsageDescription</key>
+	<string>Context uses screen recording and capture devices to record workflows and guide tutorial overlays.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Context captures the current screen to locate tutorial targets.</string>
 </dict>

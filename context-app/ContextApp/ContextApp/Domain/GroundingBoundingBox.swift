@@ -9,7 +9,9 @@ struct GroundingBoundingBox: Equatable {
     init?(values: [Double]) {
         guard values.count == 4 else { return nil }
         guard values.allSatisfy(\.isFinite) else { return nil }
+        guard values[0] >= 0, values[1] >= 0 else { return nil }
         guard values[2] > 0, values[3] > 0 else { return nil }
+        guard values[0] + values[2] <= 1, values[1] + values[3] <= 1 else { return nil }
 
         x = CGFloat(values[0])
         y = CGFloat(values[1])
@@ -20,12 +22,10 @@ struct GroundingBoundingBox: Equatable {
     func screenRect(captureSize: CGSize, screenFrame: CGRect) -> CGRect? {
         guard captureSize.width > 0, captureSize.height > 0 else { return nil }
 
-        let scaleX = screenFrame.width / captureSize.width
-        let scaleY = screenFrame.height / captureSize.height
-        let rectWidth = width * scaleX
-        let rectHeight = height * scaleY
-        let originX = screenFrame.minX + (x * scaleX)
-        let originY = screenFrame.maxY - ((y + height) * scaleY)
+        let rectWidth = width * screenFrame.width
+        let rectHeight = height * screenFrame.height
+        let originX = screenFrame.minX + (x * screenFrame.width)
+        let originY = screenFrame.maxY - ((y + height) * screenFrame.height)
 
         return CGRect(x: originX, y: originY, width: rectWidth, height: rectHeight)
     }
@@ -45,7 +45,7 @@ struct GroundingResponse: Decodable {
             throw DecodingError.dataCorruptedError(
                 forKey: .boundingBox,
                 in: container,
-                debugDescription: "Expected [x, y, width, height] with positive width and height."
+                debugDescription: "Expected normalized [x, y, width, height] within [0, 1]."
             )
         }
 

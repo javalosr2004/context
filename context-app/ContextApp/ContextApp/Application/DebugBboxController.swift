@@ -44,13 +44,21 @@ final class DebugBboxController {
         panel.orderOut(nil)
     }
 
+    func show(rect: CGRect) {
+        state.replace(with: DebugBoundingBox(origin: rect.origin))
+        render(rect)
+    }
+
     private func render(_ bbox: DebugBoundingBox) {
-        panel.contentView = NSHostingView(rootView: DebugBboxView())
+        render(CGRect(origin: bbox.origin, size: DebugBoundingBox.size))
+    }
+
+    private func render(_ rect: CGRect) {
+        panel.contentView = NSHostingView(rootView: DebugBboxView(size: rect.size))
         panel.setFrame(
-            CGRect(origin: bbox.origin, size: DebugBoundingBox.size),
+            rect,
             display: true
         )
         panel.orderFrontRegardless()
     }
 }
-

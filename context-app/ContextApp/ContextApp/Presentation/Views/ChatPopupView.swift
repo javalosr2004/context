@@ -1,14 +1,32 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+struct InstructionInput {
+    let text: String
+    let referenceImageData: Data?
+}
 
 struct ChatPopupView: View {
     let messageStore: ChatMessageStore
+    let onInputInstruction: (InstructionInput) async -> String
     let onMinify: () -> Void
 
     @State private var draft = ""
+    @State private var instructionDraft = ""
+    @State private var isInstructionInputVisible = false
+    @State private var isSendingInstruction = false
     @State private var messages: [ChatMessage]
+    @State private var referenceImageData: Data?
+    @State private var referenceImageName: String?
 
-    init(messageStore: ChatMessageStore, onMinify: @escaping () -> Void) {
+    init(
+        messageStore: ChatMessageStore,
+        onInputInstruction: @escaping (InstructionInput) async -> String,
+        onMinify: @escaping () -> Void
+    ) {
         self.messageStore = messageStore
+        self.onInputInstruction = onInputInstruction
         self.onMinify = onMinify
         self._messages = State(initialValue: messageStore.messages)
     }
@@ -17,9 +35,10 @@ struct ChatPopupView: View {
         VStack(spacing: 0) {
             header
             messageList
+            instructionInput
             composer
         }
-        .frame(width: 360, height: 440)
+        .frame(width: 360, height: isInstructionInputVisible ? 560 : 440)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
@@ -74,22 +93,105 @@ struct ChatPopupView: View {
     }
 
     private var composer: some View {
-        HStack(spacing: 8) {
-            TextField("Message", text: $draft)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(submitDraft)
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("Message", text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(submitDraft)
 
-            Button("Send", action: submitDraft)
-                .keyboardShortcut(.return, modifiers: [])
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Send", action: submitDraft)
+                    .keyboardShortcut(.return, modifiers: [])
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            Button("Input instruction") {
+                isInstructionInputVisible.toggle()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .background(Color.black.opacity(0.04))
+    }
+
+    private var instructionInput: some View {
+        Group {
+            if isInstructionInputVisible {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Instruction", text: $instructionDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(isSendingInstruction)
+
+                    HStack(spacing: 8) {
+                        Button("Upload reference image", action: chooseReferenceImage)
+                            .disabled(isSendingInstruction)
+
+                        Text(referenceImageName ?? "No image selected")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Button("Send instruction", action: submitInstruction)
+                            .disabled(isSendingInstruction || instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if isSendingInstruction {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(Color.black.opacity(0.025))
+            }
+        }
     }
 
     private func submitDraft() {
         guard messageStore.append(draft) != nil else { return }
         messages = messageStore.messages
         draft = ""
+    }
+
+    private func chooseReferenceImage() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.image]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            referenceImageData = try Data(contentsOf: url)
+            referenceImageName = url.lastPathComponent
+        } catch {
+            appendMessage("Could not load reference image: \(error.localizedDescription)")
+        }
+    }
+
+    private func submitInstruction() {
+        let trimmedInstruction = instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInstruction.isEmpty else { return }
+
+        isSendingInstruction = true
+        appendMessage("Instruction: \(trimmedInstruction)")
+
+        let input = InstructionInput(text: trimmedInstruction, referenceImageData: referenceImageData)
+        Task {
+            let result = await onInputInstruction(input)
+            await MainActor.run {
+                appendMessage(result)
+                instructionDraft = ""
+                referenceImageData = nil
+                referenceImageName = nil
+                isSendingInstruction = false
+            }
+        }
+    }
+
+    private func appendMessage(_ text: String) {
+        guard messageStore.append(text) != nil else { return }
+        messages = messageStore.messages
     }
 }

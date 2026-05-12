@@ -26,5 +26,7 @@
 	<string>Copyright © 2026 Context. All rights reserved.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Context captures the current screen to locate tutorial targets.</string>
 </dict>
 </plist>

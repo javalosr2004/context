@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class OverlayCoordinator {
     private let messageStore = ChatMessageStore()
     private let screenProvider: () -> NSScreen?
@@ -8,6 +9,7 @@ final class OverlayCoordinator {
     private var debugBboxController: DebugBboxController?
     private var iconMenuController: IconMenuController?
     private var popupController: PopupController?
+    private var screenGroundingController: ScreenGroundingController?
     private var screenObserver: NSObjectProtocol?
 
     init(screenProvider: @escaping () -> NSScreen?) {
@@ -22,6 +24,10 @@ final class OverlayCoordinator {
         let bboxPanel = DebugBboxPanel(frame: CGRect(origin: .zero, size: DebugBoundingBox.size))
 
         let debugController = DebugBboxController(panel: bboxPanel, screenProvider: screenProvider)
+        let screenGroundingController = ScreenGroundingController(
+            bboxController: debugController,
+            screenProvider: screenProvider
+        )
         let menuController = IconMenuController(debugBboxController: debugController)
         let popupController = PopupController(
             popupPanel: popupPanel,
@@ -30,6 +36,12 @@ final class OverlayCoordinator {
         )
 
         popupPanel.contentView = NSHostingView(rootView: ChatPopupView(messageStore: messageStore) {
+            input in
+            await screenGroundingController.submit(GroundingInstruction(
+                text: input.text,
+                referenceImageData: input.referenceImageData
+            ))
+        } onMinify: {
             popupController.minify()
         })
         iconPanel.contentView = NSHostingView(rootView: IconView(
@@ -40,6 +52,7 @@ final class OverlayCoordinator {
         self.debugBboxController = debugController
         self.iconMenuController = menuController
         self.popupController = popupController
+        self.screenGroundingController = screenGroundingController
 
         popupController.showPopup()
         observeScreenChanges()
@@ -52,6 +65,7 @@ final class OverlayCoordinator {
         popupController = nil
         iconMenuController = nil
         debugBboxController = nil
+        screenGroundingController = nil
     }
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {
@@ -68,7 +82,9 @@ final class OverlayCoordinator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.reclampPanels()
+            Task { @MainActor in
+                self?.reclampPanels()
+            }
         }
     }
 

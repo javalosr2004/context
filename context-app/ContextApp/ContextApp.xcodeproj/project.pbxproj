@@ -40,6 +40,11 @@
 		A20000000000000000000015 /* BboxPositionGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* BboxPositionGeneratorTests.swift */; };
 		A20000000000000000000016 /* DebugBboxStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000046 /* DebugBboxStateTests.swift */; };
 		A20000000000000000000017 /* ChatMessageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000047 /* ChatMessageStoreTests.swift */; };
+		A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000048 /* GroundingBoundingBox.swift */; };
+		A20000000000000000000019 /* GroundingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000049 /* GroundingClient.swift */; };
+		A2000000000000000000001A /* ScreenFrameCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004A /* ScreenFrameCapture.swift */; };
+		A2000000000000000000001B /* ScreenGroundingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004B /* ScreenGroundingController.swift */; };
+		A2000000000000000000001C /* GroundingBoundingBoxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004C /* GroundingBoundingBoxTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +75,11 @@
 		A20000000000000000000045 /* BboxPositionGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BboxPositionGeneratorTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000046 /* DebugBboxStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxStateTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000047 /* ChatMessageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageStoreTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000048 /* GroundingBoundingBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingBoundingBox.swift; sourceTree = "<group>"; };
+		A20000000000000000000049 /* GroundingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingClient.swift; sourceTree = "<group>"; };
+		A2000000000000000000004A /* ScreenFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameCapture.swift; sourceTree = "<group>"; };
+		A2000000000000000000004B /* ScreenGroundingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGroundingController.swift; sourceTree = "<group>"; };
+		A2000000000000000000004C /* GroundingBoundingBoxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingBoundingBoxTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,6 +129,7 @@
 				A20000000000000000000045 /* BboxPositionGeneratorTests.swift */,
 				A20000000000000000000046 /* DebugBboxStateTests.swift */,
 				A20000000000000000000047 /* ChatMessageStoreTests.swift */,
+				A2000000000000000000004C /* GroundingBoundingBoxTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -149,6 +160,7 @@
 				A20000000000000000000035 /* BboxPositionGenerator.swift */,
 				A20000000000000000000036 /* DebugBboxState.swift */,
 				A20000000000000000000037 /* ChatMessageStore.swift */,
+				A20000000000000000000048 /* GroundingBoundingBox.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -160,6 +172,9 @@
 				A20000000000000000000039 /* PopupController.swift */,
 				A2000000000000000000003A /* IconMenuController.swift */,
 				A2000000000000000000003B /* DebugBboxController.swift */,
+				A20000000000000000000049 /* GroundingClient.swift */,
+				A2000000000000000000004A /* ScreenFrameCapture.swift */,
+				A2000000000000000000004B /* ScreenGroundingController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -327,6 +342,10 @@
 				A20000000000000000000010 /* IconView.swift in Sources */,
 				A20000000000000000000011 /* DebugBboxView.swift in Sources */,
 				A20000000000000000000012 /* IconContextMenu.swift in Sources */,
+				A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */,
+				A20000000000000000000019 /* GroundingClient.swift in Sources */,
+				A2000000000000000000001A /* ScreenFrameCapture.swift in Sources */,
+				A2000000000000000000001B /* ScreenGroundingController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -339,6 +358,7 @@
 				A20000000000000000000015 /* BboxPositionGeneratorTests.swift in Sources */,
 				A20000000000000000000016 /* DebugBboxStateTests.swift in Sources */,
 				A20000000000000000000017 /* ChatMessageStoreTests.swift in Sources */,
+				A2000000000000000000001C /* GroundingBoundingBoxTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

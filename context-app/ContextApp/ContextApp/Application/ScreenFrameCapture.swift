@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import CoreImage
 import CoreMedia
 import CoreVideo
@@ -16,6 +17,7 @@ enum ScreenFrameCaptureError: LocalizedError {
     case noDisplay
     case noDisplayForScreen(CGDirectDisplayID)
     case imageConversionFailed
+    case screenCapturePermissionDenied
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +29,8 @@ enum ScreenFrameCaptureError: LocalizedError {
             return "No ScreenCaptureKit display matched screen \(displayID)."
         case .imageConversionFailed:
             return "Could not convert the captured frame to JPEG."
+        case .screenCapturePermissionDenied:
+            return "Screen recording permission is required before Context can capture the screen."
         }
     }
 }
@@ -40,6 +44,10 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
     private var stream: SCStream?
 
     func captureFrame(on screen: NSScreen) async throws -> CapturedScreenFrame {
+        guard requestScreenCaptureAccessIfNeeded() else {
+            throw ScreenFrameCaptureError.screenCapturePermissionDenied
+        }
+
         let displayID = try displayID(for: screen)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -111,6 +119,14 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
         self.stream = stream
         try await stream.startCapture()
+    }
+
+    private func requestScreenCaptureAccessIfNeeded() -> Bool {
+        if CGPreflightScreenCaptureAccess() {
+            return true
+        }
+
+        return CGRequestScreenCaptureAccess()
     }
 
     private func capturedFrame(from pixelBuffer: CVPixelBuffer) throws -> CapturedScreenFrame {

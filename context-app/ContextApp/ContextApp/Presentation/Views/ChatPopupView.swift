@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct InstructionInput {
     let text: String
     let referenceImageData: Data?
+    let imageEncodingConfig: ScreenFrameEncodingConfig
     let submittedAtUptimeNanoseconds: UInt64
 }
 
@@ -18,6 +19,8 @@ struct ChatPopupView: View {
     @State private var instructionDraft = ""
     @State private var isInstructionInputVisible = false
     @State private var isSendingInstruction = false
+    @State private var jpegQuality = 70
+    @State private var maxImageWidth = 1280
     @State private var messages: [ChatMessage]
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
@@ -40,7 +43,7 @@ struct ChatPopupView: View {
             instructionInput
             composer
         }
-        .frame(width: 360, height: isInstructionInputVisible ? 560 : 440)
+        .frame(width: 360, height: isInstructionInputVisible ? 620 : 440)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
@@ -133,6 +136,16 @@ struct ChatPopupView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    VStack(alignment: .leading, spacing: 6) {
+                        Stepper("JPEG quality: \(jpegQuality)", value: $jpegQuality, in: 10...100, step: 5)
+                            .disabled(isSendingInstruction)
+
+                        Stepper("Max width: \(maxImageWidth) px", value: $maxImageWidth, in: 320...4096, step: 160)
+                            .disabled(isSendingInstruction)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                     HStack {
                         Button("Send instruction", action: submitInstruction)
                             .disabled(isSendingInstruction || instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -182,6 +195,10 @@ struct ChatPopupView: View {
         let input = InstructionInput(
             text: trimmedInstruction,
             referenceImageData: referenceImageData,
+            imageEncodingConfig: ScreenFrameEncodingConfig(
+                jpegCompressionQuality: CGFloat(jpegQuality) / 100,
+                maxPixelWidth: maxImageWidth
+            ),
             submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
         )
         Task {

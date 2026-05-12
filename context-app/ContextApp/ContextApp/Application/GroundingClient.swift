@@ -11,6 +11,7 @@ typealias PlatformImage = NSImage
 struct GroundingInstruction {
     let text: String
     let referenceImageData: Data?
+    let imageEncodingConfig: ScreenFrameEncodingConfig
     let submittedAtUptimeNanoseconds: UInt64?
 }
 
@@ -278,7 +279,11 @@ final class GroundingClient {
 
     private func referenceJPEGData(from instruction: GroundingInstruction) throws -> Data? {
         guard let referenceImageData = instruction.referenceImageData else { return nil }
-        guard let jpegData = GuiActorImageEncoder.jpegData(from: referenceImageData) else {
+        guard let jpegData = GuiActorImageEncoder.jpegData(
+            from: referenceImageData,
+            compressionQuality: instruction.imageEncodingConfig.jpegCompressionQuality,
+            maxPixelWidth: instruction.imageEncodingConfig.maxPixelWidth
+        ) else {
             throw GroundingClientError.encodingFailed
         }
 

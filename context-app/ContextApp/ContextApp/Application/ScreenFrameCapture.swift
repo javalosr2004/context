@@ -57,19 +57,18 @@ enum ScreenFrameCaptureError: LocalizedError {
 }
 
 final class ScreenFrameCapture: NSObject, SCStreamOutput {
-    private let encodingConfig: ScreenFrameEncodingConfig
     private let imageContext = CIContext()
     private let sampleQueue = DispatchQueue(label: "context.screen.frame.queue")
     private let stateLock = NSLock()
+    private var activeEncodingConfig: ScreenFrameEncodingConfig?
     private var continuation: CheckedContinuation<CapturedScreenFrame, Error>?
     private var targetDisplayID: CGDirectDisplayID?
     private var stream: SCStream?
 
-    init(encodingConfig: ScreenFrameEncodingConfig = .groundingRequest) {
-        self.encodingConfig = encodingConfig
-    }
-
-    func captureFrame(on screen: NSScreen) async throws -> CapturedScreenFrame {
+    func captureFrame(
+        on screen: NSScreen,
+        encodingConfig: ScreenFrameEncodingConfig = .groundingRequest
+    ) async throws -> CapturedScreenFrame {
         guard requestScreenCaptureAccessIfNeeded() else {
             throw ScreenFrameCaptureError.screenCapturePermissionDenied
         }
@@ -86,6 +85,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
 
                 self.continuation = continuation
                 self.targetDisplayID = displayID
+                self.activeEncodingConfig = encodingConfig
                 stateLock.unlock()
 
                 Task {
@@ -135,7 +135,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
 
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
-        let captureSize = encodingConfig.scaledPixelSize(
+        let captureSize = activeCaptureEncodingConfig().scaledPixelSize(
             for: CGSize(width: display.width, height: display.height)
         )
         config.width = Int(captureSize.width)
@@ -171,7 +171,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
         let rep = NSBitmapImageRep(cgImage: cgImage)
         guard let jpegData = rep.representation(
             using: .jpeg,
-            properties: [.compressionFactor: encodingConfig.jpegCompressionQuality]
+            properties: [.compressionFactor: activeCaptureEncodingConfig().jpegCompressionQuality]
         ) else {
             throw ScreenFrameCaptureError.imageConversionFailed
         }
@@ -201,6 +201,12 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
         return targetDisplayID
     }
 
+    private func activeCaptureEncodingConfig() -> ScreenFrameEncodingConfig {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return activeEncodingConfig ?? .groundingRequest
+    }
+
     private func displayID(for screen: NSScreen) throws -> CGDirectDisplayID {
         guard let value = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
             throw ScreenFrameCaptureError.noDisplay
@@ -217,6 +223,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
         }
         self.continuation = nil
         self.targetDisplayID = nil
+        self.activeEncodingConfig = nil
         stateLock.unlock()
         continuation.resume(returning: frame)
         Task { try? await stop() }
@@ -230,6 +237,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
         }
         self.continuation = nil
         self.targetDisplayID = nil
+        self.activeEncodingConfig = nil
         stateLock.unlock()
         continuation.resume(throwing: error)
         Task { try? await stop() }

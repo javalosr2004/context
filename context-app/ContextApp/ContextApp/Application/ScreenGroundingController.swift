@@ -37,10 +37,13 @@ final class ScreenGroundingController {
 
             let client = try GroundingClient.fromEndpointStore(endpointStore)
             let captureStartedAt = DispatchTime.now().uptimeNanoseconds
-            let frame = try await capture.captureFrame(on: screen)
+            let frame = try await capture.captureFrame(
+                on: screen,
+                encodingConfig: instruction.imageEncodingConfig
+            )
             let captureEndedAt = DispatchTime.now().uptimeNanoseconds
             logger.info(
-                "Captured display \(frame.displayID, privacy: .public) size \(Int(frame.pixelSize.width), privacy: .public)x\(Int(frame.pixelSize.height), privacy: .public) for screen frame \(String(describing: screen.frame), privacy: .public)"
+                "Captured display \(frame.displayID, privacy: .public) size \(Int(frame.pixelSize.width), privacy: .public)x\(Int(frame.pixelSize.height), privacy: .public) quality=\(instruction.imageEncodingConfig.jpegCompressionQuality, privacy: .public) maxWidth=\(instruction.imageEncodingConfig.maxPixelWidth, privacy: .public) for screen frame \(String(describing: screen.frame), privacy: .public)"
             )
 
             let maskingStartedAt = DispatchTime.now().uptimeNanoseconds
@@ -50,7 +53,8 @@ final class ScreenGroundingController {
             let screenshotJPEGData = try ScreenFrameMasker.mask(
                 jpegData: frame.jpegData,
                 screenFrame: screen.frame,
-                ignoredWindowFrames: ignoredWindowFrames
+                ignoredWindowFrames: ignoredWindowFrames,
+                encodingConfig: instruction.imageEncodingConfig
             )
             let maskingEndedAt = DispatchTime.now().uptimeNanoseconds
             logger.info("Masked \(ignoredWindowFrames.count, privacy: .public) app windows before grounding request.")

@@ -46,6 +46,7 @@ final class OverlayCoordinator {
             await screenGroundingController.submit(GroundingInstruction(
                 text: input.text,
                 referenceImageData: input.referenceImageData,
+                imageEncodingConfig: input.imageEncodingConfig,
                 submittedAtUptimeNanoseconds: input.submittedAtUptimeNanoseconds
             ))
         } onMinify: {

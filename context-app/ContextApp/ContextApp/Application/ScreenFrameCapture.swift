@@ -6,7 +6,7 @@ import Foundation
 import ScreenCaptureKit
 
 struct CapturedScreenFrame {
-    let pngData: Data
+    let jpegData: Data
     let pixelSize: CGSize
 }
 
@@ -22,7 +22,7 @@ enum ScreenFrameCaptureError: LocalizedError {
         case .noDisplay:
             return "No display was available for capture."
         case .imageConversionFailed:
-            return "Could not convert the captured frame to PNG."
+            return "Could not convert the captured frame to JPEG."
         }
     }
 }
@@ -112,12 +112,12 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
         }
 
         let rep = NSBitmapImageRep(cgImage: cgImage)
-        guard let pngData = rep.representation(using: .png, properties: [:]) else {
+        guard let jpegData = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.86]) else {
             throw ScreenFrameCaptureError.imageConversionFailed
         }
 
         return CapturedScreenFrame(
-            pngData: pngData,
+            jpegData: jpegData,
             pixelSize: CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
         )
     }

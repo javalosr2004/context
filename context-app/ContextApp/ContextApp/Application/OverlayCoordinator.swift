@@ -3,6 +3,7 @@ import SwiftUI
 
 @MainActor
 final class OverlayCoordinator {
+    private let endpointStore = GroundingEndpointStore()
     private let messageStore = ChatMessageStore()
     private let screenProvider: () -> NSScreen?
 
@@ -11,6 +12,7 @@ final class OverlayCoordinator {
     private var popupController: PopupController?
     private var screenGroundingController: ScreenGroundingController?
     private var screenObserver: NSObjectProtocol?
+    private var statusBarController: StatusBarController?
 
     init(screenProvider: @escaping () -> NSScreen?) {
         self.screenProvider = screenProvider
@@ -26,6 +28,7 @@ final class OverlayCoordinator {
         let debugController = DebugBboxController(panel: bboxPanel, screenProvider: screenProvider)
         let screenGroundingController = ScreenGroundingController(
             bboxController: debugController,
+            endpointStore: endpointStore,
             screenProvider: screenProvider
         )
         let menuController = IconMenuController(debugBboxController: debugController)
@@ -53,6 +56,10 @@ final class OverlayCoordinator {
         self.iconMenuController = menuController
         self.popupController = popupController
         self.screenGroundingController = screenGroundingController
+        self.statusBarController = StatusBarController(
+            endpointStore: endpointStore,
+            onTestBbox: { debugController.showReplacementBbox() }
+        )
 
         popupController.showPopup()
         observeScreenChanges()
@@ -61,11 +68,13 @@ final class OverlayCoordinator {
     func stop() {
         screenObserver.map(NotificationCenter.default.removeObserver)
         screenObserver = nil
+        statusBarController?.stop()
         debugBboxController?.hide()
         popupController = nil
         iconMenuController = nil
         debugBboxController = nil
         screenGroundingController = nil
+        statusBarController = nil
     }
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {

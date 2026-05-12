@@ -8,17 +8,20 @@ final class ScreenGroundingController {
     private let bboxController: DebugBboxController
     private let capture: ScreenFrameCapture
     private let endpointStore: GroundingEndpointStore
+    private let ignoredWindowProvider: () -> [NSWindow]
     private let screenProvider: () -> NSScreen?
 
     init(
         bboxController: DebugBboxController,
         capture: ScreenFrameCapture = ScreenFrameCapture(),
         endpointStore: GroundingEndpointStore,
+        ignoredWindowProvider: @escaping () -> [NSWindow] = { [] },
         screenProvider: @escaping () -> NSScreen?
     ) {
         self.bboxController = bboxController
         self.capture = capture
         self.endpointStore = endpointStore
+        self.ignoredWindowProvider = ignoredWindowProvider
         self.screenProvider = screenProvider
     }
 
@@ -34,7 +37,17 @@ final class ScreenGroundingController {
                 "Captured display \(frame.displayID, privacy: .public) size \(Int(frame.pixelSize.width), privacy: .public)x\(Int(frame.pixelSize.height), privacy: .public) for screen frame \(String(describing: screen.frame), privacy: .public)"
             )
 
-            let bbox = try await client.locate(instruction: instruction, screenshotJPEGData: frame.jpegData)
+            let ignoredWindowFrames = ignoredWindowProvider()
+                .filter(\.isVisible)
+                .map(\.frame)
+            let screenshotJPEGData = try ScreenFrameMasker.mask(
+                jpegData: frame.jpegData,
+                screenFrame: screen.frame,
+                ignoredWindowFrames: ignoredWindowFrames
+            )
+            logger.info("Masked \(ignoredWindowFrames.count, privacy: .public) app windows before grounding request.")
+
+            let bbox = try await client.locate(instruction: instruction, screenshotJPEGData: screenshotJPEGData)
             guard let rect = bbox.screenRect(captureSize: frame.pixelSize, screenFrame: screen.frame) else {
                 return "Could not map the returned bounding box to the current screen."
             }

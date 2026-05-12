@@ -29,6 +29,9 @@ final class OverlayCoordinator {
         let screenGroundingController = ScreenGroundingController(
             bboxController: debugController,
             endpointStore: endpointStore,
+            ignoredWindowProvider: {
+                [popupPanel, iconPanel, bboxPanel]
+            },
             screenProvider: screenProvider
         )
         let menuController = IconMenuController(debugBboxController: debugController)

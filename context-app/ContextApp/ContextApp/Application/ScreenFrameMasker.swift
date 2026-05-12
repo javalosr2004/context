@@ -23,7 +23,8 @@ struct ScreenFrameMasker {
         jpegData: Data,
         screenFrame: CGRect,
         ignoredWindowFrames: [CGRect],
-        padding: CGFloat = 12
+        padding: CGFloat = 12,
+        encodingConfig: ScreenFrameEncodingConfig = .groundingRequest
     ) throws -> Data {
         guard !ignoredWindowFrames.isEmpty else { return jpegData }
         guard let image = CIImage(data: jpegData) else {
@@ -54,7 +55,10 @@ struct ScreenFrameMasker {
         }
 
         let bitmap = NSBitmapImageRep(cgImage: cgImage)
-        guard let maskedData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.86]) else {
+        guard let maskedData = bitmap.representation(
+            using: .jpeg,
+            properties: [.compressionFactor: encodingConfig.jpegCompressionQuality]
+        ) else {
             throw ScreenFrameMaskerError.imageEncodingFailed
         }
 

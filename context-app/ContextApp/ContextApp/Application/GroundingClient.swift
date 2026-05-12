@@ -82,20 +82,76 @@ struct GuiActorResponse: Decodable {
 }
 
 enum GuiActorImageEncoder {
-    static func jpegData(from imageData: Data, compressionQuality: CGFloat = 0.86) -> Data? {
+    static func jpegData(
+        from imageData: Data,
+        compressionQuality: CGFloat = ScreenFrameEncodingConfig.groundingRequest.jpegCompressionQuality,
+        maxPixelWidth: Int = ScreenFrameEncodingConfig.groundingRequest.maxPixelWidth
+    ) -> Data? {
         guard let image = PlatformImage(data: imageData) else { return nil }
-        return jpegData(from: image, compressionQuality: compressionQuality)
+        return jpegData(
+            from: image,
+            compressionQuality: compressionQuality,
+            maxPixelWidth: maxPixelWidth
+        )
     }
 
-    static func jpegData(from image: PlatformImage, compressionQuality: CGFloat = 0.86) -> Data? {
+    static func jpegData(
+        from image: PlatformImage,
+        compressionQuality: CGFloat = ScreenFrameEncodingConfig.groundingRequest.jpegCompressionQuality,
+        maxPixelWidth: Int = ScreenFrameEncodingConfig.groundingRequest.maxPixelWidth
+    ) -> Data? {
         #if canImport(UIKit)
-        return image.jpegData(compressionQuality: compressionQuality)
+        let targetSize = ScreenFrameEncodingConfig(
+            jpegCompressionQuality: compressionQuality,
+            maxPixelWidth: maxPixelWidth
+        ).scaledPixelSize(for: image.size)
+        let outputImage: UIImage
+        if targetSize == image.size {
+            outputImage = image
+        } else {
+            let renderer = UIGraphicsImageRenderer(size: targetSize)
+            outputImage = renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
+        }
+        return outputImage.jpegData(compressionQuality: compressionQuality)
         #else
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        let targetSize = ScreenFrameEncodingConfig(
+            jpegCompressionQuality: compressionQuality,
+            maxPixelWidth: maxPixelWidth
+        ).scaledPixelSize(for: CGSize(width: cgImage.width, height: cgImage.height))
+        let outputImage = resizedImage(cgImage, to: targetSize) ?? cgImage
+        let bitmap = NSBitmapImageRep(cgImage: outputImage)
         return bitmap.representation(using: .jpeg, properties: [.compressionFactor: compressionQuality])
         #endif
     }
+
+    #if !canImport(UIKit)
+    private static func resizedImage(_ image: CGImage, to size: CGSize) -> CGImage? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        guard Int(size.width) != image.width || Int(size.height) != image.height else {
+            return image
+        }
+
+        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else {
+            return nil
+        }
+
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(origin: .zero, size: size))
+        return context.makeImage()
+    }
+    #endif
 }
 
 final class GroundingClient {

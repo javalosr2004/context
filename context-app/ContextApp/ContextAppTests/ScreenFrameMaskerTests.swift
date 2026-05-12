@@ -2,6 +2,30 @@ import XCTest
 @testable import ContextApp
 
 final class ScreenFrameMaskerTests: XCTestCase {
+    func testEncodingConfigCapsWideFramesToMaxWidth() {
+        let config = ScreenFrameEncodingConfig(
+            jpegCompressionQuality: 0.70,
+            maxPixelWidth: 1280
+        )
+
+        let size = config.scaledPixelSize(for: CGSize(width: 2560, height: 1440))
+
+        XCTAssertEqual(size.width, 1280)
+        XCTAssertEqual(size.height, 720)
+    }
+
+    func testEncodingConfigDoesNotUpscaleSmallFrames() {
+        let config = ScreenFrameEncodingConfig(
+            jpegCompressionQuality: 0.70,
+            maxPixelWidth: 1280
+        )
+
+        let size = config.scaledPixelSize(for: CGSize(width: 1024, height: 768))
+
+        XCTAssertEqual(size.width, 1024)
+        XCTAssertEqual(size.height, 768)
+    }
+
     func testPixelRectConvertsWindowFrameIntoImageCoordinates() {
         let rect = ScreenFrameMasker.pixelRect(
             for: CGRect(x: 100, y: 200, width: 300, height: 100),

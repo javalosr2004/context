@@ -12,6 +12,27 @@ struct CapturedScreenFrame {
     let pixelSize: CGSize
 }
 
+struct ScreenFrameEncodingConfig {
+    static let groundingRequest = ScreenFrameEncodingConfig(
+        jpegCompressionQuality: 0.70,
+        maxPixelWidth: 1280
+    )
+
+    let jpegCompressionQuality: CGFloat
+    let maxPixelWidth: Int
+
+    func scaledPixelSize(for size: CGSize) -> CGSize {
+        guard size.width > 0, size.height > 0 else { return size }
+        guard size.width > CGFloat(maxPixelWidth) else { return size }
+
+        let scale = CGFloat(maxPixelWidth) / size.width
+        return CGSize(
+            width: CGFloat(maxPixelWidth),
+            height: max(1, (size.height * scale).rounded())
+        )
+    }
+}
+
 enum ScreenFrameCaptureError: LocalizedError {
     case alreadyCapturing
     case noDisplay
@@ -36,12 +57,17 @@ enum ScreenFrameCaptureError: LocalizedError {
 }
 
 final class ScreenFrameCapture: NSObject, SCStreamOutput {
+    private let encodingConfig: ScreenFrameEncodingConfig
     private let imageContext = CIContext()
     private let sampleQueue = DispatchQueue(label: "context.screen.frame.queue")
     private let stateLock = NSLock()
     private var continuation: CheckedContinuation<CapturedScreenFrame, Error>?
     private var targetDisplayID: CGDirectDisplayID?
     private var stream: SCStream?
+
+    init(encodingConfig: ScreenFrameEncodingConfig = .groundingRequest) {
+        self.encodingConfig = encodingConfig
+    }
 
     func captureFrame(on screen: NSScreen) async throws -> CapturedScreenFrame {
         guard requestScreenCaptureAccessIfNeeded() else {
@@ -109,8 +135,11 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
 
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
-        config.width = display.width
-        config.height = display.height
+        let captureSize = encodingConfig.scaledPixelSize(
+            for: CGSize(width: display.width, height: display.height)
+        )
+        config.width = Int(captureSize.width)
+        config.height = Int(captureSize.height)
         config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         config.queueDepth = 2
         config.showsCursor = true
@@ -140,7 +169,10 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
         }
 
         let rep = NSBitmapImageRep(cgImage: cgImage)
-        guard let jpegData = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.86]) else {
+        guard let jpegData = rep.representation(
+            using: .jpeg,
+            properties: [.compressionFactor: encodingConfig.jpegCompressionQuality]
+        ) else {
             throw ScreenFrameCaptureError.imageConversionFailed
         }
 

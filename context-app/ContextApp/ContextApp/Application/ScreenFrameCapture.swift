@@ -7,12 +7,14 @@ import ScreenCaptureKit
 
 struct CapturedScreenFrame {
     let jpegData: Data
+    let displayID: CGDirectDisplayID
     let pixelSize: CGSize
 }
 
 enum ScreenFrameCaptureError: LocalizedError {
     case alreadyCapturing
     case noDisplay
+    case noDisplayForScreen(CGDirectDisplayID)
     case imageConversionFailed
 
     var errorDescription: String? {
@@ -21,6 +23,8 @@ enum ScreenFrameCaptureError: LocalizedError {
             return "A screen capture is already in progress."
         case .noDisplay:
             return "No display was available for capture."
+        case .noDisplayForScreen(let displayID):
+            return "No ScreenCaptureKit display matched screen \(displayID)."
         case .imageConversionFailed:
             return "Could not convert the captured frame to JPEG."
         }
@@ -32,9 +36,11 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
     private let sampleQueue = DispatchQueue(label: "context.screen.frame.queue")
     private let stateLock = NSLock()
     private var continuation: CheckedContinuation<CapturedScreenFrame, Error>?
+    private var targetDisplayID: CGDirectDisplayID?
     private var stream: SCStream?
 
-    func captureFrame() async throws -> CapturedScreenFrame {
+    func captureFrame(on screen: NSScreen) async throws -> CapturedScreenFrame {
+        let displayID = try displayID(for: screen)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 stateLock.lock()
@@ -45,6 +51,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
                 }
 
                 self.continuation = continuation
+                self.targetDisplayID = displayID
                 stateLock.unlock()
 
                 Task {
@@ -87,7 +94,8 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
             onScreenWindowsOnly: true
         )
 
-        guard let display = content.displays.first else {
+        let display = try selectedDisplay(from: content.displays)
+        guard let display else {
             throw ScreenFrameCaptureError.noDisplay
         }
 
@@ -106,6 +114,10 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
     }
 
     private func capturedFrame(from pixelBuffer: CVPixelBuffer) throws -> CapturedScreenFrame {
+        guard let displayID = activeTargetDisplayID() else {
+            throw ScreenFrameCaptureError.noDisplay
+        }
+
         let image = CIImage(cvPixelBuffer: pixelBuffer)
         guard let cgImage = imageContext.createCGImage(image, from: image.extent) else {
             throw ScreenFrameCaptureError.imageConversionFailed
@@ -118,8 +130,35 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
 
         return CapturedScreenFrame(
             jpegData: jpegData,
+            displayID: displayID,
             pixelSize: CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
         )
+    }
+
+    private func selectedDisplay(from displays: [SCDisplay]) throws -> SCDisplay? {
+        guard let targetDisplayID = activeTargetDisplayID() else {
+            return displays.first
+        }
+
+        guard let display = displays.first(where: { $0.displayID == targetDisplayID }) else {
+            throw ScreenFrameCaptureError.noDisplayForScreen(targetDisplayID)
+        }
+
+        return display
+    }
+
+    private func activeTargetDisplayID() -> CGDirectDisplayID? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return targetDisplayID
+    }
+
+    private func displayID(for screen: NSScreen) throws -> CGDirectDisplayID {
+        guard let value = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            throw ScreenFrameCaptureError.noDisplay
+        }
+
+        return CGDirectDisplayID(value.uint32Value)
     }
 
     private func finish(returning frame: CapturedScreenFrame) {
@@ -129,6 +168,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
             return
         }
         self.continuation = nil
+        self.targetDisplayID = nil
         stateLock.unlock()
         continuation.resume(returning: frame)
         Task { try? await stop() }
@@ -141,6 +181,7 @@ final class ScreenFrameCapture: NSObject, SCStreamOutput {
             return
         }
         self.continuation = nil
+        self.targetDisplayID = nil
         stateLock.unlock()
         continuation.resume(throwing: error)
         Task { try? await stop() }

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 #if canImport(UIKit)
 import UIKit
 typealias PlatformImage = UIImage
@@ -97,6 +98,7 @@ enum GuiActorImageEncoder {
 }
 
 final class GroundingClient {
+    private let logger = Logger(subsystem: "ContextApp", category: "GuiActor")
     private let endpoint: URL
     private let session: URLSession
 
@@ -171,7 +173,8 @@ final class GroundingClient {
         scoreThreshold: Double = 0.3
     ) async throws -> GuiActorResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(url: predictionURL(from: endpoint))
+        let requestURL = predictionURL(from: endpoint)
+        var request = URLRequest(url: requestURL)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -183,6 +186,9 @@ final class GroundingClient {
             instruction: instruction,
             scoreThreshold: scoreThreshold
         )
+        logger.info(
+            "Calling GUI actor predict at \(requestURL.absoluteString, privacy: .public) inputBytes=\(inputImageJPEGData.count, privacy: .public) referenceBytes=\(referenceImageJPEGData?.count ?? 0, privacy: .public)"
+        )
         let (data, response) = try await session.upload(for: request, from: requestBody)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -191,9 +197,16 @@ final class GroundingClient {
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             let message = String(data: data, encoding: .utf8) ?? ""
+            logger.error(
+                "GUI actor predict failed status=\(httpResponse.statusCode, privacy: .public) response=\(message, privacy: .public)"
+            )
             throw GroundingClientError.requestFailed(httpResponse.statusCode, message)
         }
 
+        let responseBody = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+        logger.info(
+            "GUI actor predict response status=\(httpResponse.statusCode, privacy: .public) body=\(responseBody, privacy: .public)"
+        )
         return try JSONDecoder().decode(GuiActorResponse.self, from: data)
     }
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
+from json import dumps
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -72,14 +74,62 @@ def get_gemini_client() -> GeminiClient:
 
 
 def stream_as_server_sent_events(tokens: Iterator[str]) -> Iterator[str]:
+    started_at = time.perf_counter()
+    first_token_ms: float | None = None
+    token_count = 0
+
     try:
         for token in tokens:
             if token:
+                token_count += 1
+                if first_token_ms is None:
+                    first_token_ms = elapsed_ms_since(started_at)
+                    logger.info(
+                        "Received first stream token",
+                        extra={"first_token_ms": round(first_token_ms, 2)},
+                    )
                 yield f"data: {token}\n\n"
+
+        total_ms = elapsed_ms_since(started_at)
+        metrics = build_stream_metrics(
+            first_token_ms=first_token_ms,
+            total_ms=total_ms,
+            token_count=token_count,
+        )
+        logger.info(
+            "Completed stream",
+            extra=metrics,
+        )
+        yield format_sse_event("metrics", metrics)
         yield "event: done\ndata: {}\n\n"
     except Exception:
-        logger.exception("Gemini stream failed")
+        logger.exception(
+            "Gemini stream failed",
+            extra={"total_ms": round(elapsed_ms_since(started_at), 2)},
+        )
         yield 'event: error\ndata: {"message":"stream_failed"}\n\n'
+
+
+def elapsed_ms_since(started_at: float, now: Callable[[], float] = time.perf_counter) -> float:
+    return (now() - started_at) * 1000
+
+
+def build_stream_metrics(
+    first_token_ms: float | None,
+    total_ms: float,
+    token_count: int,
+) -> dict[str, float | int | None]:
+    return {
+        "first_token_ms": round(first_token_ms, 2)
+        if first_token_ms is not None
+        else None,
+        "total_ms": round(total_ms, 2),
+        "token_count": token_count,
+    }
+
+
+def format_sse_event(event: str, data: object) -> str:
+    return f"event: {event}\ndata: {dumps(data, separators=(',', ':'))}\n\n"
 
 
 app = create_app()

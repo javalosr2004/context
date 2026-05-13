@@ -49,6 +49,10 @@
 		A50000000000000000000004 /* FocusMaskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000014 /* FocusMaskView.swift */; };
 		A50000000000000000000005 /* FocusExitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000015 /* FocusExitView.swift */; };
 		A50000000000000000000006 /* FocusMaskLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000016 /* FocusMaskLayoutTests.swift */; };
+		A60000000000000000000001 /* TutorialPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000011 /* TutorialPlan.swift */; };
+		A60000000000000000000002 /* TutorialPlanAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000012 /* TutorialPlanAPIClient.swift */; };
+		A60000000000000000000003 /* TutorialActionConsumer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000013 /* TutorialActionConsumer.swift */; };
+		A60000000000000000000004 /* TutorialPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000014 /* TutorialPlanTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +112,10 @@
 		A50000000000000000000014 /* FocusMaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskView.swift; sourceTree = "<group>"; };
 		A50000000000000000000015 /* FocusExitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusExitView.swift; sourceTree = "<group>"; };
 		A50000000000000000000016 /* FocusMaskLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskLayoutTests.swift; sourceTree = "<group>"; };
+		A60000000000000000000011 /* TutorialPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPlan.swift; sourceTree = "<group>"; };
+		A60000000000000000000012 /* TutorialPlanAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPlanAPIClient.swift; sourceTree = "<group>"; };
+		A60000000000000000000013 /* TutorialActionConsumer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialActionConsumer.swift; sourceTree = "<group>"; };
+		A60000000000000000000014 /* TutorialPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPlanTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -161,6 +169,7 @@
 				A20000000000000000000050 /* GroundingEndpointStoreTests.swift */,
 				A20000000000000000000052 /* ScreenFrameMaskerTests.swift */,
 				A50000000000000000000016 /* FocusMaskLayoutTests.swift */,
+				A60000000000000000000014 /* TutorialPlanTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -194,6 +203,7 @@
 				A20000000000000000000048 /* GroundingBoundingBox.swift */,
 				A2000000000000000000004D /* GroundingEndpointStore.swift */,
 				A50000000000000000000011 /* FocusMaskLayout.swift */,
+				A60000000000000000000011 /* TutorialPlan.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -211,6 +221,8 @@
 				A2000000000000000000004B /* ScreenGroundingController.swift */,
 				A2000000000000000000004F /* StatusBarController.swift */,
 				A50000000000000000000012 /* FocusMaskController.swift */,
+				A60000000000000000000012 /* TutorialPlanAPIClient.swift */,
+				A60000000000000000000013 /* TutorialActionConsumer.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -407,6 +419,9 @@
 				A50000000000000000000003 /* FocusMaskPanel.swift in Sources */,
 				A50000000000000000000004 /* FocusMaskView.swift in Sources */,
 				A50000000000000000000005 /* FocusExitView.swift in Sources */,
+				A60000000000000000000001 /* TutorialPlan.swift in Sources */,
+				A60000000000000000000002 /* TutorialPlanAPIClient.swift in Sources */,
+				A60000000000000000000003 /* TutorialActionConsumer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -423,6 +438,7 @@
 				A20000000000000000000020 /* GroundingEndpointStoreTests.swift in Sources */,
 				A30000000000000000000002 /* ScreenFrameMaskerTests.swift in Sources */,
 				A50000000000000000000006 /* FocusMaskLayoutTests.swift in Sources */,
+				A60000000000000000000004 /* TutorialPlanTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

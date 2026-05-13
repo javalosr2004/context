@@ -1,0 +1,17 @@
+[project]
+name = "context-backend"
+version = "0.1.0"
+description = "Streaming multimodal backend for Context."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "google-genai>=1.0.0",
+    "python-multipart>=0.0.9",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.uv]
+package = false

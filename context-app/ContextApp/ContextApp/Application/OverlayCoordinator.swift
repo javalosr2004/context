@@ -98,6 +98,7 @@ final class OverlayCoordinator {
         self.screenGroundingController = screenGroundingController
         self.statusBarController = StatusBarController(
             endpointStore: endpointStore,
+            tutorialEndpointStore: tutorialEndpointStore,
             onTestBbox: { debugController.showReplacementBbox() }
         )
         self.tutorialActionConsumer = tutorialActionConsumer

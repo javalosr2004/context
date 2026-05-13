@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Callable, Iterator
 from json import dumps
@@ -11,9 +10,9 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from backend.conversations import ConversationRepository, InMemoryConversationRepository
-from backend.gemini_client import GeminiClient
 from backend.images import read_uploaded_images
 from backend.llm import MultimodalLLM
+from backend.llm_provider import LLMProvider, LLMProviderConfigurationError
 from backend.tutorial_guide import TutorialGuide, TutorialStreamRequest
 
 logger = logging.getLogger(__name__)
@@ -64,35 +63,16 @@ def get_conversation_repository() -> ConversationRepository:
 
 
 def get_multimodal_llm() -> MultimodalLLM:
-    provider = os.getenv("LLM_PROVIDER", "gemini").lower()
-    if provider == "gemini":
-        return get_gemini_client()
-
-    raise HTTPException(
-        status_code=500,
-        detail=f"Unsupported LLM_PROVIDER: {provider}",
-    )
+    try:
+        return LLMProvider.from_environment().create_multimodal_llm()
+    except LLMProviderConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
 
 
 def get_tutorial_guide(
     llm: MultimodalLLM = Depends(get_multimodal_llm),
 ) -> TutorialGuide:
     return TutorialGuide(llm)
-
-
-def get_gemini_client() -> GeminiClient:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="GEMINI_API_KEY is required to stream Gemini responses.",
-        )
-
-    model = os.getenv("LLM_MODEL") or os.getenv(
-        "GEMINI_MODEL",
-        "gemini-3-flash-preview",
-    )
-    return GeminiClient(api_key=api_key, model=model)
 
 
 def stream_as_server_sent_events(tokens: Iterator[str]) -> Iterator[str]:

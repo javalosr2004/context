@@ -1,7 +1,9 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class DebugBboxController {
+    private let focusMaskController: FocusMaskController?
     private let panel: DebugBboxPanel
     private let positionGenerator: BboxPositionGenerator
     private let screenProvider: () -> NSScreen?
@@ -9,10 +11,12 @@ final class DebugBboxController {
 
     init(
         panel: DebugBboxPanel,
+        focusMaskController: FocusMaskController? = nil,
         state: DebugBboxState = DebugBboxState(),
         positionGenerator: BboxPositionGenerator = BboxPositionGenerator(),
         screenProvider: @escaping () -> NSScreen?
     ) {
+        self.focusMaskController = focusMaskController
         self.panel = panel
         self.state = state
         self.positionGenerator = positionGenerator
@@ -41,6 +45,7 @@ final class DebugBboxController {
 
     func hide() {
         state.replace(with: nil)
+        focusMaskController?.hide()
         panel.orderOut(nil)
     }
 
@@ -59,6 +64,7 @@ final class DebugBboxController {
             rect,
             display: true
         )
+        focusMaskController?.show(cutoutFrame: rect)
         panel.orderFrontRegardless()
     }
 }

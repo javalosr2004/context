@@ -8,6 +8,7 @@ final class OverlayCoordinator {
     private let screenProvider: () -> NSScreen?
 
     private var debugBboxController: DebugBboxController?
+    private var focusMaskController: FocusMaskController?
     private var iconMenuController: IconMenuController?
     private var popupController: PopupController?
     private var screenGroundingController: ScreenGroundingController?
@@ -25,7 +26,17 @@ final class OverlayCoordinator {
         let iconPanel = IconPanel(frame: initialIconFrame(on: screen.frame))
         let bboxPanel = DebugBboxPanel(frame: CGRect(origin: .zero, size: DebugBoundingBox.size))
 
-        let debugController = DebugBboxController(panel: bboxPanel, screenProvider: screenProvider)
+        let focusMaskController = FocusMaskController(
+            screenProvider: screenProvider,
+            onExit: { [weak bboxPanel] in
+                bboxPanel?.orderOut(nil)
+            }
+        )
+        let debugController = DebugBboxController(
+            panel: bboxPanel,
+            focusMaskController: focusMaskController,
+            screenProvider: screenProvider
+        )
         let screenGroundingController = ScreenGroundingController(
             bboxController: debugController,
             endpointStore: endpointStore,
@@ -59,6 +70,7 @@ final class OverlayCoordinator {
         ))
 
         self.debugBboxController = debugController
+        self.focusMaskController = focusMaskController
         self.iconMenuController = menuController
         self.popupController = popupController
         self.screenGroundingController = screenGroundingController
@@ -76,9 +88,11 @@ final class OverlayCoordinator {
         screenObserver = nil
         statusBarController?.stop()
         debugBboxController?.hide()
+        focusMaskController?.hide()
         popupController = nil
         iconMenuController = nil
         debugBboxController = nil
+        focusMaskController = nil
         screenGroundingController = nil
         statusBarController = nil
     }

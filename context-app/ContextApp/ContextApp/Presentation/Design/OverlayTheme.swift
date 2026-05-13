@@ -13,5 +13,5 @@ enum OverlayTheme {
     static let userBubble = Color.accentColor.opacity(0.12)
     static let highlightStroke = Color.accentColor.opacity(0.88)
     static let highlightGlow = Color.accentColor.opacity(0.22)
+    static let focusDim = Color.black.opacity(0.48)
 }
-

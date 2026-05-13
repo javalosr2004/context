@@ -6,16 +6,6 @@
 	objectVersion = 56;
 	objects = {
 
-/* Begin PBXContainerItemProxy section */
-		A10000000000000000000001 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A10000000000000000000002 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A10000000000000000000003;
-			remoteInfo = ContextApp;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXBuildFile section */
 		A20000000000000000000001 /* ContextAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ContextAppApp.swift */; };
 		A20000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* AppDelegate.swift */; };
@@ -51,7 +41,25 @@
 		A20000000000000000000020 /* GroundingEndpointStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000050 /* GroundingEndpointStoreTests.swift */; };
 		A30000000000000000000001 /* ScreenFrameMasker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000051 /* ScreenFrameMasker.swift */; };
 		A30000000000000000000002 /* ScreenFrameMaskerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000052 /* ScreenFrameMaskerTests.swift */; };
+		A40000000000000000000001 /* OverlayTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000003 /* OverlayTheme.swift */; };
+		A40000000000000000000002 /* ContextIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000004 /* ContextIcon.png */; };
+		A50000000000000000000001 /* FocusMaskLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000011 /* FocusMaskLayout.swift */; };
+		A50000000000000000000002 /* FocusMaskController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000012 /* FocusMaskController.swift */; };
+		A50000000000000000000003 /* FocusMaskPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000013 /* FocusMaskPanel.swift */; };
+		A50000000000000000000004 /* FocusMaskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000014 /* FocusMaskView.swift */; };
+		A50000000000000000000005 /* FocusExitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000015 /* FocusExitView.swift */; };
+		A50000000000000000000006 /* FocusMaskLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000016 /* FocusMaskLayoutTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A10000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000002 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000003;
+			remoteInfo = ContextApp;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		A10000000000000000000004 /* ContextApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ContextApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -92,6 +100,14 @@
 		A20000000000000000000050 /* GroundingEndpointStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingEndpointStoreTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000051 /* ScreenFrameMasker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameMasker.swift; sourceTree = "<group>"; };
 		A20000000000000000000052 /* ScreenFrameMaskerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameMaskerTests.swift; sourceTree = "<group>"; };
+		A40000000000000000000003 /* OverlayTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayTheme.swift; sourceTree = "<group>"; };
+		A40000000000000000000004 /* ContextIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = ContextIcon.png; sourceTree = "<group>"; };
+		A50000000000000000000011 /* FocusMaskLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskLayout.swift; sourceTree = "<group>"; };
+		A50000000000000000000012 /* FocusMaskController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskController.swift; sourceTree = "<group>"; };
+		A50000000000000000000013 /* FocusMaskPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskPanel.swift; sourceTree = "<group>"; };
+		A50000000000000000000014 /* FocusMaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskView.swift; sourceTree = "<group>"; };
+		A50000000000000000000015 /* FocusExitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusExitView.swift; sourceTree = "<group>"; };
+		A50000000000000000000016 /* FocusMaskLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskLayoutTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -144,6 +160,7 @@
 				A2000000000000000000004C /* GroundingBoundingBoxTests.swift */,
 				A20000000000000000000050 /* GroundingEndpointStoreTests.swift */,
 				A20000000000000000000052 /* ScreenFrameMaskerTests.swift */,
+				A50000000000000000000016 /* FocusMaskLayoutTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -176,6 +193,7 @@
 				A20000000000000000000037 /* ChatMessageStore.swift */,
 				A20000000000000000000048 /* GroundingBoundingBox.swift */,
 				A2000000000000000000004D /* GroundingEndpointStore.swift */,
+				A50000000000000000000011 /* FocusMaskLayout.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -192,6 +210,7 @@
 				A20000000000000000000051 /* ScreenFrameMasker.swift */,
 				A2000000000000000000004B /* ScreenGroundingController.swift */,
 				A2000000000000000000004F /* StatusBarController.swift */,
+				A50000000000000000000012 /* FocusMaskController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -199,11 +218,30 @@
 		A10000000000000000000011 /* Presentation */ = {
 			isa = PBXGroup;
 			children = (
+				A40000000000000000000005 /* Design */,
 				A20000000000000000000021 /* Panels */,
 				A20000000000000000000022 /* Views */,
 				A20000000000000000000023 /* Menu */,
 			);
 			path = Presentation;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000012 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000006 /* Info.plist */,
+				A10000000000000000000007 /* ContextApp.entitlements */,
+				A40000000000000000000004 /* ContextIcon.png */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000003 /* OverlayTheme.swift */,
+			);
+			path = Design;
 			sourceTree = "<group>";
 		};
 		A20000000000000000000021 /* Panels */ = {
@@ -212,6 +250,7 @@
 				A2000000000000000000003C /* PopupPanel.swift */,
 				A2000000000000000000003D /* IconPanel.swift */,
 				A2000000000000000000003E /* DebugBboxPanel.swift */,
+				A50000000000000000000013 /* FocusMaskPanel.swift */,
 			);
 			path = Panels;
 			sourceTree = "<group>";
@@ -222,6 +261,8 @@
 				A2000000000000000000003F /* ChatPopupView.swift */,
 				A20000000000000000000040 /* IconView.swift */,
 				A20000000000000000000041 /* DebugBboxView.swift */,
+				A50000000000000000000014 /* FocusMaskView.swift */,
+				A50000000000000000000015 /* FocusExitView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -233,15 +274,6 @@
 				A2000000000000000000004E /* CallbackMenuItem.swift */,
 			);
 			path = Menu;
-			sourceTree = "<group>";
-		};
-		A10000000000000000000012 /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-				A10000000000000000000006 /* Info.plist */,
-				A10000000000000000000007 /* ContextApp.entitlements */,
-			);
-			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -325,6 +357,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A40000000000000000000002 /* ContextIcon.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -360,6 +393,7 @@
 				A20000000000000000000010 /* IconView.swift in Sources */,
 				A20000000000000000000011 /* DebugBboxView.swift in Sources */,
 				A20000000000000000000012 /* IconContextMenu.swift in Sources */,
+				A40000000000000000000001 /* OverlayTheme.swift in Sources */,
 				A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */,
 				A20000000000000000000019 /* GroundingClient.swift in Sources */,
 				A2000000000000000000001A /* ScreenFrameCapture.swift in Sources */,
@@ -368,6 +402,11 @@
 				A2000000000000000000001D /* GroundingEndpointStore.swift in Sources */,
 				A2000000000000000000001E /* CallbackMenuItem.swift in Sources */,
 				A2000000000000000000001F /* StatusBarController.swift in Sources */,
+				A50000000000000000000001 /* FocusMaskLayout.swift in Sources */,
+				A50000000000000000000002 /* FocusMaskController.swift in Sources */,
+				A50000000000000000000003 /* FocusMaskPanel.swift in Sources */,
+				A50000000000000000000004 /* FocusMaskView.swift in Sources */,
+				A50000000000000000000005 /* FocusExitView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -383,6 +422,7 @@
 				A2000000000000000000001C /* GroundingBoundingBoxTests.swift in Sources */,
 				A20000000000000000000020 /* GroundingEndpointStoreTests.swift in Sources */,
 				A30000000000000000000002 /* ScreenFrameMaskerTests.swift in Sources */,
+				A50000000000000000000006 /* FocusMaskLayoutTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -518,11 +558,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ContextApp/Resources/ContextApp.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JLFN9SLALB;
 				ENABLE_APP_SANDBOX = YES;
-				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_DEBUG_DYLIB = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ContextApp/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -543,10 +585,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ContextApp/Resources/ContextApp.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JLFN9SLALB;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ContextApp/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -614,15 +659,6 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A1000000000000000000001B /* Build configuration list for PBXProject "ContextApp" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A1000000000000000000001C /* Debug */,
-				A1000000000000000000001D /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		A10000000000000000000013 /* Build configuration list for PBXNativeTarget "ContextApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -637,6 +673,15 @@
 			buildConfigurations = (
 				A10000000000000000000020 /* Debug */,
 				A10000000000000000000021 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000001B /* Build configuration list for PBXProject "ContextApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000001C /* Debug */,
+				A1000000000000000000001D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

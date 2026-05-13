@@ -1,5 +1,6 @@
 import AppKit
 
+@MainActor
 final class IconMenuController {
     private let debugBboxController: DebugBboxController
 
@@ -15,4 +16,3 @@ final class IconMenuController {
         debugBboxController.showReplacementBbox()
     }
 }
-

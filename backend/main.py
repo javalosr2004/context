@@ -90,7 +90,7 @@ def stream_as_server_sent_events(tokens: Iterator[str]) -> Iterator[str]:
                         "Received first stream token",
                         extra={"first_token_ms": round(first_token_ms, 2)},
                     )
-                yield f"data: {token}\n\n"
+                yield format_sse_event("token", {"text": token})
 
         total_ms = elapsed_ms_since(started_at)
         metrics = build_stream_metrics(
@@ -103,13 +103,13 @@ def stream_as_server_sent_events(tokens: Iterator[str]) -> Iterator[str]:
             extra=metrics,
         )
         yield format_sse_event("metrics", metrics)
-        yield "event: done\ndata: {}\n\n"
+        yield format_sse_event("done", {})
     except Exception:
         logger.exception(
             "LLM stream failed",
             extra={"total_ms": round(elapsed_ms_since(started_at), 2)},
         )
-        yield 'event: error\ndata: {"message":"stream_failed"}\n\n'
+        yield format_sse_event("error", {"message": "stream_failed"})
 
 
 def elapsed_ms_since(started_at: float, now: Callable[[], float] = time.perf_counter) -> float:

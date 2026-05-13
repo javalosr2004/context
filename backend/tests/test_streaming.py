@@ -10,14 +10,22 @@ class StreamingTests(unittest.TestCase):
     def test_stream_tokens_are_encoded_as_sse(self) -> None:
         events = list(stream_as_server_sent_events(iter(["hello", " world"])))
 
-        self.assertEqual(events[0], "data: hello\n\n")
-        self.assertEqual(events[1], "data:  world\n\n")
+        self.assertEqual(events[0], 'event: token\ndata: {"text":"hello"}\n\n')
+        self.assertEqual(events[1], 'event: token\ndata: {"text":" world"}\n\n')
         self.assertTrue(events[2].startswith("event: metrics\ndata: "))
         metrics = loads(events[2].split("data: ", 1)[1])
         self.assertEqual(metrics["token_count"], 2)
         self.assertIn("first_token_ms", metrics)
         self.assertIn("total_ms", metrics)
         self.assertEqual(events[3], "event: done\ndata: {}\n\n")
+
+    def test_stream_tokens_are_json_encoded(self) -> None:
+        events = list(stream_as_server_sent_events(iter(['hello\n"world"'])))
+
+        self.assertEqual(
+            events[0],
+            'event: token\ndata: {"text":"hello\\n\\"world\\""}\n\n',
+        )
 
     def test_elapsed_ms_since_uses_perf_counter_delta(self) -> None:
         self.assertEqual(elapsed_ms_since(1.0, now=lambda: 1.25), 250.0)

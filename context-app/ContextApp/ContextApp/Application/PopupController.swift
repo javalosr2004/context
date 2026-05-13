@@ -44,6 +44,14 @@ final class PopupController {
         state = state.expanded(at: popupFrame)
     }
 
+    func moveIcon(by delta: CGSize) {
+        guard iconPanel.isVisible else { return }
+
+        let frame = iconPanel.frame.offsetBy(dx: delta.width, dy: delta.height)
+        iconPanel.setFrame(frame, display: true)
+        state = state.minified(at: frame.origin)
+    }
+
     func reclamp(to screenFrame: CGRect) {
         if popupPanel.isVisible {
             let frame = boundsKeeper.clamp(frame: popupPanel.frame, into: screenFrame, minimumVisible: minimumVisible)
@@ -71,4 +79,3 @@ final class PopupController {
         }
     }
 }
-

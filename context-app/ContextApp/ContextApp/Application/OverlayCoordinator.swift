@@ -54,7 +54,8 @@ final class OverlayCoordinator {
         })
         iconPanel.contentView = NSHostingView(rootView: IconView(
             onRestore: { popupController.restore() },
-            onContextMenu: { menuController.handleTestBbox() }
+            onContextMenu: { menuController.handleTestBbox() },
+            onDrag: { delta in popupController.moveIcon(by: delta) }
         ))
 
         self.debugBboxController = debugController

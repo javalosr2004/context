@@ -24,6 +24,7 @@ struct ChatPopupView: View {
     @State private var messages: [ChatMessage]
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
+    @FocusState private var isMessageFieldFocused: Bool
 
     init(
         messageStore: ChatMessageStore,
@@ -44,52 +45,74 @@ struct ChatPopupView: View {
             composer
         }
         .frame(width: 360, height: isInstructionInputVisible ? 620 : 440)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.18), radius: 24, y: 12)
     }
 
     private var header: some View {
-        HStack {
-            Text("Context")
-                .font(.headline)
+        HStack(spacing: 10) {
+            contextIcon(size: 24)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Context")
+                    .font(.system(size: 13, weight: .semibold))
+
+                Text(statusText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             Spacer()
+
             Button(action: onMinify) {
                 Image(systemName: "minus")
-                    .frame(width: 24, height: 24)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .help("Minify")
         }
-        .padding(.horizontal, 12)
-        .frame(height: 44)
-        .background(Color.black.opacity(0.06))
+        .padding(.horizontal, 14)
+        .frame(height: 52)
+        .background(OverlayTheme.quietFill)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(OverlayTheme.separator)
+                .frame(height: 1)
+        }
     }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
+                LazyVStack(alignment: .leading, spacing: 10) {
                     if messages.isEmpty {
-                        Text("Ready.")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Ready when you are.")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
+
+                            Text("Send a note or provide a screen instruction.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     ForEach(messages) { message in
-                        Text(message.text)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(Color.accentColor.opacity(0.14))
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .id(message.id)
+                        messageRow(message)
                     }
                 }
-                .padding(12)
+                .padding(14)
             }
+            .scrollContentBackground(.hidden)
             .onChange(of: messages.count) { _ in
                 guard let last = messages.last else { return }
                 proxy.scrollTo(last.id, anchor: .bottom)
@@ -98,37 +121,84 @@ struct ChatPopupView: View {
     }
 
     private var composer: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             HStack(spacing: 8) {
                 TextField("Message", text: $draft)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .focused($isMessageFieldFocused)
                     .onSubmit(submitDraft)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(OverlayTheme.strongerFill)
+                    .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous)
+                            .stroke(isMessageFieldFocused ? Color.accentColor.opacity(0.45) : OverlayTheme.hairline, lineWidth: 1)
+                    )
 
-                Button("Send", action: submitDraft)
-                    .keyboardShortcut(.return, modifiers: [])
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button(action: submitDraft) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(canSubmitDraft ? Color.accentColor.opacity(0.92) : OverlayTheme.strongerFill)
+                .foregroundStyle(canSubmitDraft ? Color.white : Color.secondary)
+                .clipShape(Circle())
+                .help("Send")
+                .keyboardShortcut(.return, modifiers: [])
+                .disabled(!canSubmitDraft)
             }
 
-            Button("Input instruction") {
+            Button {
                 isInstructionInputVisible.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isInstructionInputVisible ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+
+                    Text("Screen instruction")
+                        .font(.caption)
+
+                    Spacer()
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
-        .padding(12)
-        .background(Color.black.opacity(0.04))
+        .padding(14)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(OverlayTheme.separator)
+                .frame(height: 1)
+        }
     }
 
     private var instructionInput: some View {
         Group {
             if isInstructionInputVisible {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     TextField("Instruction", text: $instructionDraft)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
                         .disabled(isSendingInstruction)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(OverlayTheme.strongerFill)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous)
+                                .stroke(OverlayTheme.hairline, lineWidth: 1)
+                        )
 
                     HStack(spacing: 8) {
-                        Button("Upload reference image", action: chooseReferenceImage)
-                            .disabled(isSendingInstruction)
+                        Button(action: chooseReferenceImage) {
+                            Label("Reference", systemImage: "photo")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isSendingInstruction)
 
                         Text(referenceImageName ?? "No image selected")
                             .lineLimit(1)
@@ -136,7 +206,7 @@ struct ChatPopupView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 7) {
                         Stepper("JPEG quality: \(jpegQuality)", value: $jpegQuality, in: 10...100, step: 5)
                             .disabled(isSendingInstruction)
 
@@ -146,9 +216,14 @@ struct ChatPopupView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                    HStack {
-                        Button("Send instruction", action: submitInstruction)
-                            .disabled(isSendingInstruction || instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    HStack(spacing: 8) {
+                        Button(action: submitInstruction) {
+                            Label("Send instruction", systemImage: "scope")
+                                .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(isSendingInstruction || !canSubmitInstruction)
 
                         if isSendingInstruction {
                             ProgressView()
@@ -156,10 +231,90 @@ struct ChatPopupView: View {
                         }
                     }
                 }
-                .padding(12)
-                .background(Color.black.opacity(0.025))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(OverlayTheme.quietFill)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(OverlayTheme.separator)
+                        .frame(height: 1)
+                }
             }
         }
+    }
+
+    private var statusText: String {
+        isSendingInstruction ? "Reading screen" : "Ready"
+    }
+
+    private var canSubmitDraft: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canSubmitInstruction: Bool {
+        !instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func messageRow(_ message: ChatMessage) -> some View {
+        let style = messageStyle(for: message.text)
+
+        return HStack {
+            if style.isUserAuthored {
+                Spacer(minLength: 28)
+            }
+
+            Text(style.displayText)
+                .font(.system(size: 13))
+                .lineSpacing(2)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(style.fill)
+                .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                        .stroke(OverlayTheme.hairline, lineWidth: 1)
+                )
+                .id(message.id)
+
+            if !style.isUserAuthored {
+                Spacer(minLength: 28)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: style.isUserAuthored ? .trailing : .leading)
+    }
+
+    private func messageStyle(for text: String) -> MessageStyle {
+        let instructionPrefix = "Instruction: "
+        if text.hasPrefix(instructionPrefix) {
+            return MessageStyle(
+                displayText: String(text.dropFirst(instructionPrefix.count)),
+                fill: OverlayTheme.userBubble,
+                isUserAuthored: true
+            )
+        }
+
+        return MessageStyle(
+            displayText: text,
+            fill: OverlayTheme.assistantBubble,
+            isUserAuthored: false
+        )
+    }
+
+    private func contextIcon(size: CGFloat) -> some View {
+        Group {
+            if let image = NSImage(named: "ContextIcon") {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: size * 0.62, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
     }
 
     private func submitDraft() {
@@ -217,4 +372,10 @@ struct ChatPopupView: View {
         guard messageStore.append(text) != nil else { return }
         messages = messageStore.messages
     }
+}
+
+private struct MessageStyle {
+    let displayText: String
+    let fill: Color
+    let isUserAuthored: Bool
 }

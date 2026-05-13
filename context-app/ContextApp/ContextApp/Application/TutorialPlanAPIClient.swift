@@ -17,9 +17,22 @@ enum TutorialPlanAPIClientError: LocalizedError {
     }
 }
 
+struct TutorialPlanSubmission {
+    let conversationID: String
+    let text: String
+    let screenJPEGData: Data
+}
+
 final class TutorialPlanAPIClient {
-    func fetchTutorialPlan(from url: URL) async throws -> TutorialPlan {
-        let (data, response) = try await URLSession.shared.data(from: url)
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func createTutorialPlan(baseURL: URL, submission: TutorialPlanSubmission) async throws -> TutorialPlan {
+        let requestData = Self.planRequestData(baseURL: baseURL, submission: submission)
+        let (data, response) = try await session.upload(for: requestData.request, from: requestData.body)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw TutorialPlanAPIClientError.invalidResponse
@@ -36,17 +49,74 @@ final class TutorialPlanAPIClient {
             throw TutorialPlanAPIClientError.decodingFailed(error)
         }
     }
-}
 
-enum TutorialPlanUsageExample {
-    static func run() async throws {
-        let url = URL(string: "https://example.com/tutorial-plan")!
-        let client = TutorialPlanAPIClient()
-        let consumer = TutorialActionConsumer()
-        let plan = try await client.fetchTutorialPlan(from: url)
+    static func planURL(from baseURL: URL) -> URL {
+        baseURL.appendingPathComponent("tutorials/plan")
+    }
 
-        for step in plan.steps {
-            consumer.consume(step: step)
+    static func planRequestData(
+        baseURL: URL,
+        submission: TutorialPlanSubmission,
+        boundary: String = "Boundary-\(UUID().uuidString)"
+    ) -> (request: URLRequest, body: Data) {
+        var request = URLRequest(url: planURL(from: baseURL))
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let body = multipartBody(
+            boundary: boundary,
+            submission: submission
+        )
+        return (request, body)
+    }
+
+    private static func multipartBody(
+        boundary: String,
+        submission: TutorialPlanSubmission
+    ) -> Data {
+        var body = Data()
+        appendField("conversation_id", submission.conversationID, boundary: boundary, body: &body)
+        appendField("text", submission.text, boundary: boundary, body: &body)
+        appendFile(
+            name: "images",
+            filename: "screen.jpg",
+            data: submission.screenJPEGData,
+            boundary: boundary,
+            body: &body
+        )
+        append("--\(boundary)--\r\n", to: &body)
+        return body
+    }
+
+    private static func appendField(
+        _ name: String,
+        _ value: String,
+        boundary: String,
+        body: inout Data
+    ) {
+        append("--\(boundary)\r\n", to: &body)
+        append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n", to: &body)
+        append("\(value)\r\n", to: &body)
+    }
+
+    private static func appendFile(
+        name: String,
+        filename: String,
+        data: Data,
+        boundary: String,
+        body: inout Data
+    ) {
+        append("--\(boundary)\r\n", to: &body)
+        append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n", to: &body)
+        append("Content-Type: image/jpeg\r\n\r\n", to: &body)
+        body.append(data)
+        append("\r\n", to: &body)
+    }
+
+    private static func append(_ string: String, to data: inout Data) {
+        if let encoded = string.data(using: .utf8) {
+            data.append(encoded)
         }
     }
 }

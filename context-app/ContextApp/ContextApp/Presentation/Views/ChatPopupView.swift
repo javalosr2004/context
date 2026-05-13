@@ -12,26 +12,38 @@ struct InstructionInput {
 
 struct ChatPopupView: View {
     let messageStore: ChatMessageStore
+    let onCreateTutorialPlan: (String) async throws -> TutorialPlan
+    let onTutorialStepSelected: (TutorialStep) async -> String
     let onInputInstruction: (InstructionInput) async -> String
     let onMinify: () -> Void
 
+    @State private var activeStepID: String?
     @State private var draft = ""
     @State private var instructionDraft = ""
+    @State private var isFetchingTutorialPlan = false
     @State private var isInstructionInputVisible = false
     @State private var isSendingInstruction = false
     @State private var jpegQuality = 70
+    @State private var loadingWordIndex = 0
     @State private var maxImageWidth = 1280
     @State private var messages: [ChatMessage]
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
     @FocusState private var isMessageFieldFocused: Bool
 
+    private static let loadingRowID = "tutorial-plan-loading-row"
+    private static let loadingWords = ["waggling", "researching", "formulating"]
+
     init(
         messageStore: ChatMessageStore,
+        onCreateTutorialPlan: @escaping (String) async throws -> TutorialPlan,
+        onTutorialStepSelected: @escaping (TutorialStep) async -> String,
         onInputInstruction: @escaping (InstructionInput) async -> String,
         onMinify: @escaping () -> Void
     ) {
         self.messageStore = messageStore
+        self.onCreateTutorialPlan = onCreateTutorialPlan
+        self.onTutorialStepSelected = onTutorialStepSelected
         self.onInputInstruction = onInputInstruction
         self.onMinify = onMinify
         self._messages = State(initialValue: messageStore.messages)
@@ -52,6 +64,10 @@ struct ChatPopupView: View {
                 .stroke(OverlayTheme.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.18), radius: 24, y: 12)
+        .onReceive(Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()) { _ in
+            guard isFetchingTutorialPlan else { return }
+            loadingWordIndex = (loadingWordIndex + 1) % Self.loadingWords.count
+        }
     }
 
     private var header: some View {
@@ -92,32 +108,67 @@ struct ChatPopupView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if messages.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Ready when you are.")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.primary)
-
-                            Text("Send a note or provide a screen instruction.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if messages.isEmpty && !isFetchingTutorialPlan {
+                        emptyState
                     }
 
                     ForEach(messages) { message in
                         messageRow(message)
+                    }
+
+                    if isFetchingTutorialPlan {
+                        loadingRow
+                            .id(Self.loadingRowID)
                     }
                 }
                 .padding(14)
             }
             .scrollContentBackground(.hidden)
             .onChange(of: messages.count) { _ in
-                guard let last = messages.last else { return }
-                proxy.scrollTo(last.id, anchor: .bottom)
+                scrollToBottom(proxy)
+            }
+            .onChange(of: isFetchingTutorialPlan) { _ in
+                scrollToBottom(proxy)
             }
         }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Ready when you are.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+
+            Text("Send a note or provide a screen instruction.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var loadingRow: some View {
+        HStack {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+
+                Text(Self.loadingWords[loadingWordIndex])
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(OverlayTheme.assistantBubble)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                    .stroke(OverlayTheme.hairline, lineWidth: 1)
+            )
+
+            Spacer(minLength: 28)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var composer: some View {
@@ -126,6 +177,7 @@ struct ChatPopupView: View {
                 TextField("Message", text: $draft)
                     .textFieldStyle(.plain)
                     .focused($isMessageFieldFocused)
+                    .disabled(isFetchingTutorialPlan)
                     .onSubmit(submitDraft)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
@@ -244,61 +296,160 @@ struct ChatPopupView: View {
     }
 
     private var statusText: String {
-        isSendingInstruction ? "Reading screen" : "Ready"
+        if isSendingInstruction {
+            return "Reading screen"
+        }
+
+        if isFetchingTutorialPlan {
+            return Self.loadingWords[loadingWordIndex]
+        }
+
+        return "Ready"
     }
 
     private var canSubmitDraft: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isFetchingTutorialPlan && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var canSubmitInstruction: Bool {
         !instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    @ViewBuilder
     private func messageRow(_ message: ChatMessage) -> some View {
-        let style = messageStyle(for: message.text)
+        switch message.content {
+        case .text(let text):
+            textMessageRow(text, role: message.role)
+                .id(message.id)
+        case .tutorialPlan(let plan):
+            tutorialPlanRow(plan)
+                .id(message.id)
+        }
+    }
 
-        return HStack {
-            if style.isUserAuthored {
+    private func textMessageRow(_ text: String, role: ChatMessageRole) -> some View {
+        HStack {
+            if role == .user {
                 Spacer(minLength: 28)
             }
 
-            Text(style.displayText)
+            Text(text)
                 .font(.system(size: 13))
                 .lineSpacing(2)
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(style.fill)
+                .frame(maxWidth: role == .user ? 270 : .infinity, alignment: .leading)
+                .background(role == .user ? OverlayTheme.userBubble : OverlayTheme.assistantBubble)
                 .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
                         .stroke(OverlayTheme.hairline, lineWidth: 1)
                 )
-                .id(message.id)
 
-            if !style.isUserAuthored {
+            if role == .tutorial {
                 Spacer(minLength: 28)
             }
         }
-        .frame(maxWidth: .infinity, alignment: style.isUserAuthored ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
     }
 
-    private func messageStyle(for text: String) -> MessageStyle {
-        let instructionPrefix = "Instruction: "
-        if text.hasPrefix(instructionPrefix) {
-            return MessageStyle(
-                displayText: String(text.dropFirst(instructionPrefix.count)),
-                fill: OverlayTheme.userBubble,
-                isUserAuthored: true
+    private func tutorialPlanRow(_ plan: TutorialPlan) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(plan.summary)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineSpacing(2)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(spacing: 8) {
+                    ForEach(plan.steps, id: \.stepId) { step in
+                        tutorialStepButton(step)
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(OverlayTheme.assistantBubble)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                    .stroke(OverlayTheme.hairline, lineWidth: 1)
+            )
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tutorialStepButton(_ step: TutorialStep) -> some View {
+        let isActive = activeStepID == step.stepId
+
+        return Button {
+            selectTutorialStep(step)
+        } label: {
+            HStack(alignment: .center, spacing: 9) {
+                Image(systemName: iconName(for: step.action))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 20, height: 20)
+
+                Text(step.instruction)
+                    .font(.system(size: 13))
+                    .lineSpacing(2)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
+
+                if isActive {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(OverlayTheme.strongerFill)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                    .stroke(isActive ? Color.accentColor.opacity(0.45) : OverlayTheme.hairline, lineWidth: 1)
             )
         }
+        .buttonStyle(.plain)
+        .disabled(activeStepID != nil)
+        .help("Show on screen")
+    }
 
-        return MessageStyle(
-            displayText: text,
-            fill: OverlayTheme.assistantBubble,
-            isUserAuthored: false
-        )
+    private func iconName(for action: TutorialAction) -> String {
+        switch action {
+        case .click, .doubleClick, .rightClick:
+            return "cursorarrow.click"
+        case .hover:
+            return "cursorarrow"
+        case .type:
+            return "keyboard"
+        case .pressKey:
+            return "command"
+        case .scroll(let action):
+            switch action.direction {
+            case .up:
+                return "arrow.up"
+            case .down:
+                return "arrow.down"
+            case .left:
+                return "arrow.left"
+            case .right:
+                return "arrow.right"
+            }
+        case .drag:
+            return "hand.point.up.left"
+        case .wait:
+            return "clock"
+        case .confirm:
+            return "checkmark.circle"
+        }
     }
 
     private func contextIcon(size: CGFloat) -> some View {
@@ -318,9 +469,42 @@ struct ChatPopupView: View {
     }
 
     private func submitDraft() {
-        guard messageStore.append(draft) != nil else { return }
+        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDraft.isEmpty, !isFetchingTutorialPlan else { return }
+        guard messageStore.appendUserText(trimmedDraft) != nil else { return }
+
         messages = messageStore.messages
         draft = ""
+        isFetchingTutorialPlan = true
+        loadingWordIndex = 0
+
+        Task {
+            do {
+                let plan = try await onCreateTutorialPlan(trimmedDraft)
+                await MainActor.run {
+                    appendTutorialPlan(plan)
+                    isFetchingTutorialPlan = false
+                }
+            } catch {
+                await MainActor.run {
+                    appendTutorialText("Tutorial plan failed: \(error.localizedDescription)")
+                    isFetchingTutorialPlan = false
+                }
+            }
+        }
+    }
+
+    private func selectTutorialStep(_ step: TutorialStep) {
+        guard activeStepID == nil else { return }
+        activeStepID = step.stepId
+
+        Task {
+            let result = await onTutorialStepSelected(step)
+            await MainActor.run {
+                appendTutorialText(result)
+                activeStepID = nil
+            }
+        }
     }
 
     private func chooseReferenceImage() {
@@ -336,7 +520,7 @@ struct ChatPopupView: View {
             referenceImageData = try Data(contentsOf: url)
             referenceImageName = url.lastPathComponent
         } catch {
-            appendMessage("Could not load reference image: \(error.localizedDescription)")
+            appendTutorialText("Could not load reference image: \(error.localizedDescription)")
         }
     }
 
@@ -345,7 +529,7 @@ struct ChatPopupView: View {
         guard !trimmedInstruction.isEmpty else { return }
 
         isSendingInstruction = true
-        appendMessage("Instruction: \(trimmedInstruction)")
+        appendUserText(trimmedInstruction)
 
         let input = InstructionInput(
             text: trimmedInstruction,
@@ -359,7 +543,7 @@ struct ChatPopupView: View {
         Task {
             let result = await onInputInstruction(input)
             await MainActor.run {
-                appendMessage(result)
+                appendTutorialText(result)
                 instructionDraft = ""
                 referenceImageData = nil
                 referenceImageName = nil
@@ -368,14 +552,28 @@ struct ChatPopupView: View {
         }
     }
 
-    private func appendMessage(_ text: String) {
-        guard messageStore.append(text) != nil else { return }
+    private func appendUserText(_ text: String) {
+        guard messageStore.appendUserText(text) != nil else { return }
         messages = messageStore.messages
     }
-}
 
-private struct MessageStyle {
-    let displayText: String
-    let fill: Color
-    let isUserAuthored: Bool
+    private func appendTutorialText(_ text: String) {
+        guard messageStore.appendTutorialText(text) != nil else { return }
+        messages = messageStore.messages
+    }
+
+    private func appendTutorialPlan(_ plan: TutorialPlan) {
+        guard messageStore.appendTutorialPlan(plan) != nil else { return }
+        messages = messageStore.messages
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        if isFetchingTutorialPlan {
+            proxy.scrollTo(Self.loadingRowID, anchor: .bottom)
+            return
+        }
+
+        guard let last = messages.last else { return }
+        proxy.scrollTo(last.id, anchor: .bottom)
+    }
 }

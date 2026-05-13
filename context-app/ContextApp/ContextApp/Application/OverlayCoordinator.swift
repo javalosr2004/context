@@ -6,6 +6,7 @@ final class OverlayCoordinator {
     private let endpointStore = GroundingEndpointStore()
     private let messageStore = ChatMessageStore()
     private let screenProvider: () -> NSScreen?
+    private let tutorialEndpointStore = TutorialAPIEndpointStore()
 
     private var debugBboxController: DebugBboxController?
     private var focusMaskController: FocusMaskController?
@@ -14,6 +15,8 @@ final class OverlayCoordinator {
     private var screenGroundingController: ScreenGroundingController?
     private var screenObserver: NSObjectProtocol?
     private var statusBarController: StatusBarController?
+    private var tutorialActionConsumer: TutorialActionConsumer?
+    private var tutorialPlanController: TutorialPlanController?
 
     init(screenProvider: @escaping () -> NSScreen?) {
         self.screenProvider = screenProvider
@@ -51,18 +54,37 @@ final class OverlayCoordinator {
             iconPanel: iconPanel,
             initialFrame: popupPanel.frame
         )
+        let tutorialPlanController = TutorialPlanController(
+            endpointStore: tutorialEndpointStore,
+            ignoredWindowProvider: {
+                [popupPanel, iconPanel, bboxPanel]
+            },
+            screenProvider: screenProvider
+        )
+        let tutorialActionConsumer = TutorialActionConsumer { instruction in
+            await screenGroundingController.submit(instruction)
+        }
 
-        popupPanel.contentView = NSHostingView(rootView: ChatPopupView(messageStore: messageStore) {
-            input in
-            await screenGroundingController.submit(GroundingInstruction(
-                text: input.text,
-                referenceImageData: input.referenceImageData,
-                imageEncodingConfig: input.imageEncodingConfig,
-                submittedAtUptimeNanoseconds: input.submittedAtUptimeNanoseconds
-            ))
-        } onMinify: {
-            popupController.minify()
-        })
+        popupPanel.contentView = NSHostingView(rootView: ChatPopupView(
+            messageStore: messageStore,
+            onCreateTutorialPlan: { text in
+                try await tutorialPlanController.submit(text)
+            },
+            onTutorialStepSelected: { step in
+                await tutorialActionConsumer.consume(step: step)
+            },
+            onInputInstruction: { input in
+                await screenGroundingController.submit(GroundingInstruction(
+                    text: input.text,
+                    referenceImageData: input.referenceImageData,
+                    imageEncodingConfig: input.imageEncodingConfig,
+                    submittedAtUptimeNanoseconds: input.submittedAtUptimeNanoseconds
+                ))
+            },
+            onMinify: {
+                popupController.minify()
+            }
+        ))
         iconPanel.contentView = NSHostingView(rootView: IconView(
             onRestore: { popupController.restore() },
             onContextMenu: { menuController.handleTestBbox() },
@@ -78,6 +100,8 @@ final class OverlayCoordinator {
             endpointStore: endpointStore,
             onTestBbox: { debugController.showReplacementBbox() }
         )
+        self.tutorialActionConsumer = tutorialActionConsumer
+        self.tutorialPlanController = tutorialPlanController
 
         popupController.showPopup()
         observeScreenChanges()
@@ -95,6 +119,8 @@ final class OverlayCoordinator {
         focusMaskController = nil
         screenGroundingController = nil
         statusBarController = nil
+        tutorialActionConsumer = nil
+        tutorialPlanController = nil
     }
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {

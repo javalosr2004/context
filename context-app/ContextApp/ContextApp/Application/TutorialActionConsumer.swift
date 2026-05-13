@@ -1,68 +1,83 @@
+import Dispatch
 import Foundation
 
 final class TutorialActionConsumer {
-    func consume(step: TutorialStep) {
-        switch step.action {
+    private let groundInstruction: (GroundingInstruction) async -> String
+
+    init(groundInstruction: @escaping (GroundingInstruction) async -> String) {
+        self.groundInstruction = groundInstruction
+    }
+
+    func consume(step: TutorialStep) async -> String {
+        let instruction = GroundingInstruction(
+            text: Self.groundingInstructionText(for: step),
+            referenceImageData: nil,
+            imageEncodingConfig: .groundingRequest,
+            submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
+        )
+        return await groundInstruction(instruction)
+    }
+
+    static func groundingInstructionText(for step: TutorialStep) -> String {
+        var lines = [step.instruction]
+        lines.append(contentsOf: metadataLines(for: step.action))
+        return lines.joined(separator: "\n")
+    }
+
+    private static func metadataLines(for action: TutorialAction) -> [String] {
+        switch action {
         case .click(let action):
-            handleClick(action)
+            return targetLines(action.target)
         case .doubleClick(let action):
-            handleDoubleClick(action)
+            return targetLines(action.target)
         case .rightClick(let action):
-            handleRightClick(action)
+            return targetLines(action.target)
         case .hover(let action):
-            handleHover(action)
+            return targetLines(action.target)
         case .type(let action):
-            handleType(action)
+            return targetLines(action.target) + ["Text to type: \(action.text)"]
         case .pressKey(let action):
-            handlePressKey(action)
+            return ["Keys: \(action.keys.joined(separator: " + "))"]
         case .scroll(let action):
-            handleScroll(action)
+            var lines = action.target.map(targetLines) ?? []
+            lines.append("Scroll direction: \(action.direction.rawValue)")
+            lines.append("Scroll amount: \(action.amount.rawValue)")
+            if let until = action.until {
+                lines.append("Scroll until: \(until)")
+            }
+            return lines
         case .drag(let action):
-            handleDrag(action)
+            return targetLines(action.target) + [
+                "Drag direction: \(action.direction.rawValue)",
+                "Drag amount: \(action.amount.rawValue)"
+            ]
         case .wait(let action):
-            handleWait(action)
+            var lines = ["Wait until: \(action.until)"]
+            if let timeoutMs = action.timeoutMs {
+                lines.append("Timeout milliseconds: \(timeoutMs)")
+            }
+            return lines
         case .confirm(let action):
-            handleConfirm(action)
+            return [
+                "Confirmation question: \(action.question)",
+                "Expected screen: \(action.expectedScreen)"
+            ]
         }
     }
 
-    private func handleClick(_ action: ClickAction) {
-        // TODO: Connect target resolution to the overlay highlighter and accessibility click flow.
+    private static func targetLines(_ target: ActionTarget) -> [String] {
+        var lines: [String] = ["Target kind: \(target.kind.rawValue)"]
+        append("Target label", target.label, to: &lines)
+        append("Target role", target.role, to: &lines)
+        append("Target description", target.description, to: &lines)
+        if let textNearby = target.textNearby, !textNearby.isEmpty {
+            lines.append("Nearby text: \(textNearby.joined(separator: ", "))")
+        }
+        return lines
     }
 
-    private func handleDoubleClick(_ action: DoubleClickAction) {
-        // TODO: Connect target resolution to the overlay highlighter and double-click event flow.
-    }
-
-    private func handleRightClick(_ action: RightClickAction) {
-        // TODO: Connect target resolution to the overlay highlighter and contextual-click event flow.
-    }
-
-    private func handleHover(_ action: HoverAction) {
-        // TODO: Connect target resolution to pointer positioning and hover preview UI.
-    }
-
-    private func handleType(_ action: TypeAction) {
-        // TODO: Route text entry through the keyboard event system after confirming the target focus.
-    }
-
-    private func handlePressKey(_ action: PressKeyAction) {
-        // TODO: Map key names to the app keyboard event system and surface unsupported combinations.
-    }
-
-    private func handleScroll(_ action: ScrollAction) {
-        // TODO: Connect scroll direction and amount to the overlay guidance or accessibility scroll flow.
-    }
-
-    private func handleDrag(_ action: DragAction) {
-        // TODO: Resolve the drag target and route direction and amount to pointer gesture handling.
-    }
-
-    private func handleWait(_ action: WaitAction) {
-        // TODO: Connect wait conditions to screen observation, timeout handling, and progress UI.
-    }
-
-    private func handleConfirm(_ action: ConfirmAction) {
-        // TODO: Present the confirmation question in the chat or overlay before continuing playback.
+    private static func append(_ label: String, _ value: String?, to lines: inout [String]) {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        lines.append("\(label): \(value)")
     }
 }

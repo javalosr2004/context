@@ -6,8 +6,7 @@ struct ContextAppApp: App {
 
     var body: some Scene {
         Settings {
-            EmptyView()
+            TutorialAPISettingsView()
         }
     }
 }
-

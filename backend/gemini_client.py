@@ -1,29 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
 
 from google import genai
 from google.genai import types
 
 from backend.images import UploadedImage
-
-
-TUTORIAL_CREATOR_SYSTEM_PROMPT = (
-    "Your task is to be an agentic tutorial creator. You will create verbose "
-    "tutorials that describe what action to perform - click, hover, scroll. "
-    "When useful, look for tutorials, official documentation, or other helpful "
-    "current information with Google Search. Prefer concrete, step-by-step "
-    "instructions over generic advice. If the screen or user intent is unclear, "
-    "state the uncertainty and ask for confirmation before continuing."
-)
-
-
-@dataclass(frozen=True)
-class GeminiStreamRequest:
-    conversation_id: str
-    text: str
-    images: list[UploadedImage]
+from backend.llm import LLMRequest
 
 
 class GeminiClient:
@@ -31,12 +14,15 @@ class GeminiClient:
         self._client = genai.Client(api_key=api_key)
         self._model = model
 
-    def stream_response(self, request: GeminiStreamRequest) -> Iterator[str]:
-        parts = build_user_parts(request.text, request.images)
+    def stream_text(self, request: LLMRequest) -> Iterator[str]:
+        parts = build_user_parts(request.user_text, request.images)
         stream = self._client.models.generate_content_stream(
             model=self._model,
             contents=[types.Content(role="user", parts=parts)],
-            config=build_generate_content_config(),
+            config=build_generate_content_config(
+                system_prompt=request.system_prompt,
+                enable_search_grounding=request.enable_search_grounding,
+            ),
         )
 
         for chunk in stream:
@@ -59,10 +45,13 @@ def build_image_part(image: UploadedImage) -> types.Part:
     )
 
 
-def build_generate_content_config() -> types.GenerateContentConfig:
+def build_generate_content_config(
+    system_prompt: str,
+    enable_search_grounding: bool,
+) -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
-        system_instruction=TUTORIAL_CREATOR_SYSTEM_PROMPT,
-        tools=[build_google_search_tool()],
+        system_instruction=system_prompt,
+        tools=[build_google_search_tool()] if enable_search_grounding else [],
     )
 
 

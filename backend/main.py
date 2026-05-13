@@ -13,7 +13,12 @@ from backend.conversations import ConversationRepository, InMemoryConversationRe
 from backend.images import read_uploaded_images
 from backend.llm import MultimodalLLM
 from backend.llm_provider import LLMProvider, LLMProviderConfigurationError
-from backend.tutorial_guide import TutorialGuide, TutorialStreamRequest
+from backend.tutorial_guide import (
+    TutorialGuide,
+    TutorialPlanRequest,
+    TutorialStreamRequest,
+)
+from backend.tutorial_schema import TutorialPlan, TutorialPlanValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +59,39 @@ def create_app() -> FastAPI:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @app.post("/tutorials/plan")
+    async def create_tutorial_plan(
+        conversation_id: Annotated[str, Form()],
+        text: Annotated[str, Form()],
+        images: Annotated[list[UploadFile] | None, File()] = None,
+        conversations: ConversationRepository = Depends(get_conversation_repository),
+        tutorial_guide: TutorialGuide = Depends(get_tutorial_guide),
+    ) -> TutorialPlan:
+        conversation = conversations.get_conversation(conversation_id)
+        logger.info(
+            "Creating tutorial plan",
+            extra={
+                "conversation_id": conversation.id,
+                "image_count": len(images or []),
+            },
+        )
+
+        uploaded_images = await read_uploaded_images(images or [])
+        request = TutorialPlanRequest(
+            conversation_id=conversation.id,
+            text=text,
+            images=uploaded_images,
+        )
+
+        try:
+            return tutorial_guide.create_plan(request)
+        except TutorialPlanValidationError as error:
+            logger.exception(
+                "Tutorial plan validation failed",
+                extra={"conversation_id": conversation.id},
+            )
+            raise HTTPException(status_code=502, detail=str(error)) from error
 
     return app
 

@@ -9,6 +9,16 @@ from google.genai import types
 from backend.images import UploadedImage
 
 
+TUTORIAL_CREATOR_SYSTEM_PROMPT = (
+    "Your task is to be an agentic tutorial creator. You will create verbose "
+    "tutorials that describe what action to perform - click, hover, scroll. "
+    "When useful, look for tutorials, official documentation, or other helpful "
+    "current information with Google Search. Prefer concrete, step-by-step "
+    "instructions over generic advice. If the screen or user intent is unclear, "
+    "state the uncertainty and ask for confirmation before continuing."
+)
+
+
 @dataclass(frozen=True)
 class GeminiStreamRequest:
     conversation_id: str
@@ -26,6 +36,7 @@ class GeminiClient:
         stream = self._client.models.generate_content_stream(
             model=self._model,
             contents=[types.Content(role="user", parts=parts)],
+            config=build_generate_content_config(),
         )
 
         for chunk in stream:
@@ -46,3 +57,14 @@ def build_image_part(image: UploadedImage) -> types.Part:
             data=image.data,
         )
     )
+
+
+def build_generate_content_config() -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
+        system_instruction=TUTORIAL_CREATOR_SYSTEM_PROMPT,
+        tools=[build_google_search_tool()],
+    )
+
+
+def build_google_search_tool() -> types.Tool:
+    return types.Tool(google_search=types.GoogleSearch())

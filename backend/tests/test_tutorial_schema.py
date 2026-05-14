@@ -90,11 +90,31 @@ class TutorialSchemaTests(unittest.TestCase):
                 )
             )
 
-    def test_requires_confirmation_for_low_confidence_steps(self) -> None:
-        with self.assertRaises(TutorialPlanValidationError):
-            parse_tutorial_plan(
-                build_plan_json(
-                    """
+    def test_normalizes_confirmation_for_confirm_actions(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Confirm the page looks correct.",
+  "action": {
+    "type": "confirm",
+    "question": "Do you see the repository form?",
+    "expected_screen": "The repository form is visible."
+  },
+  "confidence": 0.86,
+  "requires_confirmation": false
+}
+""".strip()
+            )
+        )
+
+        self.assertTrue(plan.steps[0].requires_confirmation)
+
+    def test_normalizes_confirmation_for_low_confidence_steps(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
 {
   "step_id": "step_001",
   "instruction": "Click the likely matching button.",
@@ -109,8 +129,10 @@ class TutorialSchemaTests(unittest.TestCase):
   "requires_confirmation": false
 }
 """.strip()
-                )
             )
+        )
+
+        self.assertTrue(plan.steps[0].requires_confirmation)
 
 
 if __name__ == "__main__":

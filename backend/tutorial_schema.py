@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -101,6 +101,20 @@ class TutorialStep(TutorialSchemaModel):
     confidence: float = Field(ge=0.0, le=1.0)
     requires_confirmation: bool
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_requires_confirmation(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        action = data.get("action")
+        action_type = action.get("type") if isinstance(action, dict) else None
+        confidence = data.get("confidence")
+        if action_type == "confirm" or is_low_confidence(confidence):
+            return {**data, "requires_confirmation": True}
+
+        return data
+
     @model_validator(mode="after")
     def require_confirmation_for_uncertainty(self) -> TutorialStep:
         if self.action.type == "confirm" and not self.requires_confirmation:
@@ -124,3 +138,11 @@ def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
         raise TutorialPlanValidationError(
             "LLM returned an invalid tutorial plan."
         ) from error
+
+
+def is_low_confidence(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and value < 0.7
+    )

@@ -10,6 +10,12 @@ struct InstructionInput {
     let submittedAtUptimeNanoseconds: UInt64
 }
 
+private struct GroundingPayloadPreview: Identifiable {
+    let id = UUID()
+    let stepID: String
+    let json: String
+}
+
 struct ChatPopupView: View {
     let messageStore: ChatMessageStore
     let onCreateTutorialPlan: (String) async throws -> TutorialPlan
@@ -19,6 +25,7 @@ struct ChatPopupView: View {
 
     @State private var activeStepID: String?
     @State private var draft = ""
+    @State private var groundingPayloadPreview: GroundingPayloadPreview?
     @State private var instructionDraft = ""
     @State private var isFetchingTutorialPlan = false
     @State private var isInstructionInputVisible = false
@@ -67,6 +74,9 @@ struct ChatPopupView: View {
         .onReceive(Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()) { _ in
             guard isFetchingTutorialPlan else { return }
             loadingWordIndex = (loadingWordIndex + 1) % Self.loadingWords.count
+        }
+        .sheet(item: $groundingPayloadPreview) { preview in
+            GroundingPayloadPreviewSheet(preview: preview)
         }
     }
 
@@ -418,6 +428,13 @@ struct ChatPopupView: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                showGroundingPayloadPreview(for: step)
+            } label: {
+                Label("Show grounding JSON", systemImage: "curlybraces")
+            }
+        }
         .disabled(activeStepID != nil)
         .help("Show on screen")
     }
@@ -507,6 +524,13 @@ struct ChatPopupView: View {
         }
     }
 
+    private func showGroundingPayloadPreview(for step: TutorialStep) {
+        groundingPayloadPreview = GroundingPayloadPreview(
+            stepID: step.stepId,
+            json: TutorialActionConsumer.groundingPayloadJSONString(for: step)
+        )
+    }
+
     private func chooseReferenceImage() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -575,5 +599,65 @@ struct ChatPopupView: View {
 
         guard let last = messages.last else { return }
         proxy.scrollTo(last.id, anchor: .bottom)
+    }
+}
+
+private struct GroundingPayloadPreviewSheet: View {
+    let preview: GroundingPayloadPreview
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Grounding JSON")
+                        .font(.system(size: 14, weight: .semibold))
+
+                    Text(preview.stepID)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            ScrollView {
+                Text(preview.json)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(width: 420, height: 260)
+            .background(OverlayTheme.strongerFill)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                    .stroke(OverlayTheme.hairline, lineWidth: 1)
+            )
+
+            HStack {
+                Spacer()
+
+                Button {
+                    copyJSONToPasteboard()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 452)
+    }
+
+    private func copyJSONToPasteboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(preview.json, forType: .string)
     }
 }

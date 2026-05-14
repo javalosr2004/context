@@ -2,7 +2,7 @@ import XCTest
 @testable import ContextApp
 
 final class TutorialActionConsumerTests: XCTestCase {
-    func testGroundingInstructionTextIncludesTargetMetadata() {
+    func testGroundingInstructionTextUsesOnlyStepInstruction() {
         let step = TutorialStep(
             stepId: "step-1",
             instruction: "Click the New repository button.",
@@ -19,18 +19,11 @@ final class TutorialActionConsumerTests: XCTestCase {
 
         XCTAssertEqual(
             TutorialActionConsumer.groundingInstructionText(for: step),
-            """
-            Click the New repository button.
-            Target kind: element
-            Target label: New repository
-            Target role: button
-            Target description: Starts repository creation
-            Nearby text: Repositories, Import
-            """
+            "Click the New repository button."
         )
     }
 
-    func testGroundingInstructionTextIncludesScrollMetadata() {
+    func testGroundingPayloadJSONIncludesOnlyInstruction() throws {
         let step = TutorialStep(
             stepId: "step-2",
             instruction: "Scroll down to the billing section.",
@@ -50,18 +43,11 @@ final class TutorialActionConsumerTests: XCTestCase {
             requiresConfirmation: false
         )
 
-        XCTAssertEqual(
-            TutorialActionConsumer.groundingInstructionText(for: step),
-            """
-            Scroll down to the billing section.
-            Target kind: window
-            Target label: Settings
-            Target description: The app settings window
-            Scroll direction: down
-            Scroll amount: medium
-            Scroll until: Billing appears
-            """
-        )
+        let json = TutorialActionConsumer.groundingPayloadJSONString(for: step)
+        let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+
+        XCTAssertEqual(object?.keys.sorted(), ["instruction"])
+        XCTAssertEqual(object?["instruction"] as? String, "Scroll down to the billing section.")
     }
 
     func testConsumeDispatchesGroundingInstruction() async {
@@ -81,12 +67,6 @@ final class TutorialActionConsumerTests: XCTestCase {
         let result = await consumer.consume(step: step)
 
         XCTAssertEqual(result, "highlighted")
-        XCTAssertEqual(
-            receivedText,
-            """
-            Press Command K.
-            Keys: Command + K
-            """
-        )
+        XCTAssertEqual(receivedText, "Press Command K.")
     }
 }

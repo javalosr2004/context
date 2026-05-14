@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Iterator
-from json import dumps
+from json import dumps, loads
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket
@@ -146,20 +146,26 @@ def create_app() -> FastAPI:
 
         try:
             while True:
-                raw_event = await websocket.receive_json()
                 try:
+                    raw_event = await receive_websocket_json(websocket)
                     event = client_session_event_adapter.validate_python(raw_event)
                     server_events = await run_in_threadpool(
                         sessions.handle_client_event,
                         session_id,
                         event,
                     )
+                except WebSocketDisconnect:
+                    raise
                 except ValidationError as error:
                     server_events = [
                         ErrorEvent(
                             code="invalid_event",
                             message=error.errors()[0]["msg"],
                         )
+                    ]
+                except ValueError as error:
+                    server_events = [
+                        ErrorEvent(code="invalid_event", message=str(error))
                     ]
                 except TutorialSessionError as error:
                     server_events = [
@@ -213,6 +219,22 @@ def get_tutorial_session_manager(
         manager = TutorialSessionManager(tutorial_guide)
         connection.app.state.tutorial_session_manager = manager
     return manager
+
+
+async def receive_websocket_json(websocket: WebSocket) -> object:
+    message = await websocket.receive()
+    if message["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", 1000))
+
+    text = message.get("text")
+    if text is not None:
+        return loads(text)
+
+    data = message.get("bytes")
+    if data is not None:
+        return loads(data.decode("utf-8"))
+
+    raise ValueError("Expected a text or binary JSON WebSocket message.")
 
 
 async def send_server_events(

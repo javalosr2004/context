@@ -131,6 +131,32 @@ class TutorialSessionTests(unittest.TestCase):
         self.assertEqual(events[3]["type"], "assistant_question")
         self.assertEqual(events[3]["question_id"], "question_002")
 
+    def test_user_message_accepts_binary_json_websocket_frame(self) -> None:
+        client = client_with_manager(
+            TutorialSessionManager(
+                StubTutorialGuide([ready_reply(VALID_PLAN_JSON)]),
+                session_id_factory=lambda: "session-1",
+            )
+        )
+        session_id = client.post("/tutorial-sessions").json()["session_id"]
+
+        with client.websocket_connect(f"/tutorial-sessions/{session_id}/socket") as websocket:
+            websocket.receive_json()
+            websocket.send_json(
+                {"type": "user_message", "text": "Show me how to create a repo."},
+                mode="binary",
+            )
+            events = [websocket.receive_json() for _ in range(5)]
+
+        self.assertEqual(events[0]["type"], "request_received")
+        self.assertEqual(events[1]["status"], "planning")
+        self.assertEqual(events[2]["type"], "plan_ready")
+        self.assertEqual(events[3], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(
+            events[4],
+            {"type": "awaiting_confirmation", "step_id": "step_001"},
+        )
+
     def test_user_answer_resumes_context_interrupt(self) -> None:
         client = client_with_manager(
             TutorialSessionManager(

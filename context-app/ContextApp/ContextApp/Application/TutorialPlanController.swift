@@ -12,6 +12,7 @@ final class TutorialPlanController {
     private let ignoredWindowProvider: () -> [NSWindow]
     private let logger = Logger(subsystem: "ContextApp", category: "TutorialPlan")
     private let screenProvider: () -> NSScreen?
+    private let screenCaptureTimeoutNanoseconds: UInt64
 
     init(
         endpointStore: TutorialAPIEndpointStore,
@@ -19,7 +20,8 @@ final class TutorialPlanController {
         capture: ScreenFrameCapture = ScreenFrameCapture(),
         conversationID: String = UUID().uuidString,
         ignoredWindowProvider: @escaping () -> [NSWindow] = { [] },
-        screenProvider: @escaping () -> NSScreen?
+        screenProvider: @escaping () -> NSScreen?,
+        screenCaptureTimeoutNanoseconds: UInt64 = 5_000_000_000
     ) {
         self.capture = capture
         self.client = client
@@ -27,6 +29,7 @@ final class TutorialPlanController {
         self.endpointStore = endpointStore
         self.ignoredWindowProvider = ignoredWindowProvider
         self.screenProvider = screenProvider
+        self.screenCaptureTimeoutNanoseconds = screenCaptureTimeoutNanoseconds
     }
 
     func submit(_ text: String) async throws -> TutorialPlan {
@@ -41,8 +44,11 @@ final class TutorialPlanController {
                 throw TutorialPlanControllerError.noScreen
             }
 
+            logger.info(
+                "Starting tutorial plan submission conversation_id=\(self.conversationID, privacy: .public) endpoint=\(planURL.absoluteString, privacy: .public) text_chars=\(text.count, privacy: .public)"
+            )
             let captureStartedAt = DispatchTime.now().uptimeNanoseconds
-            let frame = try await capture.captureFrame(on: screen)
+            let frame = try await captureFrameWithTimeout(on: screen)
             let captureEndedAt = DispatchTime.now().uptimeNanoseconds
             let ignoredWindowFrames = ignoredWindowProvider()
                 .filter(\.isVisible)
@@ -81,15 +87,38 @@ final class TutorialPlanController {
         guard end >= start else { return 0 }
         return Int((end - start) / 1_000_000)
     }
+
+    private func captureFrameWithTimeout(on screen: NSScreen) async throws -> CapturedScreenFrame {
+        let captureTask = Task {
+            try await capture.captureFrame(on: screen)
+        }
+        let timeoutTask = Task {
+            try await Task.sleep(nanoseconds: screenCaptureTimeoutNanoseconds)
+            captureTask.cancel()
+        }
+
+        defer {
+            timeoutTask.cancel()
+        }
+
+        do {
+            return try await captureTask.value
+        } catch is CancellationError {
+            throw TutorialPlanControllerError.screenCaptureTimedOut
+        }
+    }
 }
 
 enum TutorialPlanControllerError: LocalizedError {
     case noScreen
+    case screenCaptureTimedOut
 
     var errorDescription: String? {
         switch self {
         case .noScreen:
             return "No screen was available for tutorial planning."
+        case .screenCaptureTimedOut:
+            return "Screen capture timed out before the tutorial plan request could be sent."
         }
     }
 }

@@ -7,8 +7,10 @@ from backend.llm import LLMRequest
 from backend.tutorial_guide import (
     TUTORIAL_CREATOR_SYSTEM_PROMPT,
     TUTORIAL_PLAN_SYSTEM_PROMPT,
+    TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
     TutorialGuide,
     TutorialPlanRequest,
+    TutorialSessionPlanRequest,
     TutorialStreamRequest,
     plan_generation_prompt,
 )
@@ -34,6 +36,20 @@ VALID_PLAN_JSON = """
       "requires_confirmation": false
     }
   ]
+}
+""".strip()
+
+VALID_READY_REPLY_JSON = f"""
+{{
+  "type": "ready",
+  "plan": {VALID_PLAN_JSON}
+}}
+""".strip()
+
+VALID_NEEDS_CONTEXT_REPLY_JSON = """
+{
+  "type": "needs_context",
+  "question": "Which repository should I use?"
 }
 """.strip()
 
@@ -117,6 +133,45 @@ class TutorialGuideTests(unittest.TestCase):
         self.assertIn("not-json", llm.requests[1].user_text)
         self.assertIn("Invalid JSON", llm.requests[1].user_text)
         self.assertIsNotNone(llm.requests[1].response_schema)
+
+    def test_create_session_planner_reply_accepts_ready_reply(self) -> None:
+        llm = FakeLLM(complete_responses=[VALID_READY_REPLY_JSON])
+        guide = TutorialGuide(llm)
+
+        reply = guide.create_session_planner_reply(
+            TutorialSessionPlanRequest(
+                session_id="session-1",
+                goal="Show me how to create a repo.",
+                messages=[{"role": "user", "content": "Show me how to create a repo."}],
+                latest_screen=None,
+            )
+        )
+
+        self.assertEqual(reply.type, "ready")
+        self.assertEqual(len(llm.requests), 1)
+        self.assertEqual(
+            llm.requests[0].system_prompt,
+            TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
+        )
+        self.assertIn("Show me how to create a repo.", llm.requests[0].user_text)
+        self.assertEqual(llm.requests[0].response_mime_type, "application/json")
+        self.assertIsNotNone(llm.requests[0].response_schema)
+
+    def test_create_session_planner_reply_accepts_context_question(self) -> None:
+        llm = FakeLLM(complete_responses=[VALID_NEEDS_CONTEXT_REPLY_JSON])
+        guide = TutorialGuide(llm)
+
+        reply = guide.create_session_planner_reply(
+            TutorialSessionPlanRequest(
+                session_id="session-1",
+                goal="Show me how to create a repo.",
+                messages=[],
+                latest_screen=None,
+            )
+        )
+
+        self.assertEqual(reply.type, "needs_context")
+        self.assertEqual(reply.question, "Which repository should I use?")
 
     def test_plan_generation_prompt_does_not_duplicate_json_schema(self) -> None:
         prompt = plan_generation_prompt(

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 INVALID_TUTORIAL_PLAN_MESSAGE = "LLM returned an invalid tutorial plan."
+INVALID_TUTORIAL_PLANNER_REPLY_MESSAGE = "LLM returned an invalid tutorial planner reply."
 LOW_CONFIDENCE_THRESHOLD = 0.7
 GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
     {
@@ -17,6 +18,10 @@ GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
 
 
 class TutorialPlanValidationError(ValueError):
+    pass
+
+
+class TutorialPlannerReplyValidationError(ValueError):
     pass
 
 
@@ -113,6 +118,37 @@ class TutorialPlan(TutorialSchemaModel):
     )
 
 
+class PlannerReady(TutorialSchemaModel):
+    type: Literal["ready"]
+    plan: TutorialPlan
+
+
+class PlannerNeedsContext(TutorialSchemaModel):
+    type: Literal["needs_context"]
+    question: str = Field(
+        min_length=1,
+        description="One concrete user-facing question needed before planning.",
+    )
+
+
+PlannerReply = PlannerReady | PlannerNeedsContext
+
+
+class TutorialPlannerReplyPayload(TutorialSchemaModel):
+    type: Literal["ready", "needs_context"] = Field(
+        description="Use ready only when a runnable TutorialPlan is valid."
+    )
+    plan: TutorialPlan | None = Field(
+        default=None,
+        description="Required when type is ready. Omit when needs_context.",
+    )
+    question: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Required when type is needs_context. Omit when ready.",
+    )
+
+
 def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
     try:
         plan = TutorialPlan.model_validate_json(raw_json)
@@ -124,8 +160,24 @@ def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
         ) from error
 
 
+def parse_tutorial_planner_reply(raw_json: str) -> PlannerReply:
+    try:
+        payload = TutorialPlannerReplyPayload.model_validate_json(raw_json)
+        return validate_tutorial_planner_reply(payload)
+    except (ValidationError, ValueError) as error:
+        raise TutorialPlannerReplyValidationError(
+            INVALID_TUTORIAL_PLANNER_REPLY_MESSAGE
+        ) from error
+
+
 def tutorial_plan_response_schema() -> dict[str, Any]:
     return remove_gemini_unsupported_schema_keys(TutorialPlan.model_json_schema())
+
+
+def tutorial_planner_reply_response_schema() -> dict[str, Any]:
+    return remove_gemini_unsupported_schema_keys(
+        TutorialPlannerReplyPayload.model_json_schema()
+    )
 
 
 def remove_gemini_unsupported_schema_keys(value: Any) -> Any:
@@ -145,6 +197,24 @@ def remove_gemini_unsupported_schema_keys(value: Any) -> Any:
 def validate_tutorial_plan_semantics(plan: TutorialPlan) -> None:
     for step in plan.steps:
         validate_step_semantics(step)
+
+
+def validate_tutorial_planner_reply(
+    payload: TutorialPlannerReplyPayload,
+) -> PlannerReply:
+    if payload.type == "ready":
+        if payload.plan is None:
+            raise ValueError("ready planner replies require plan")
+        if payload.question is not None:
+            raise ValueError("ready planner replies must not include question")
+        validate_tutorial_plan_semantics(payload.plan)
+        return PlannerReady(type="ready", plan=payload.plan)
+
+    if payload.question is None or not payload.question.strip():
+        raise ValueError("needs_context planner replies require question")
+    if payload.plan is not None:
+        raise ValueError("needs_context planner replies must not include plan")
+    return PlannerNeedsContext(type="needs_context", question=payload.question.strip())
 
 
 def validate_step_semantics(step: TutorialStep) -> None:

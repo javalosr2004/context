@@ -59,6 +59,9 @@
 		A70000000000000000000004 /* TutorialAPIEndpointStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000000000000000000014 /* TutorialAPIEndpointStoreTests.swift */; };
 		A70000000000000000000005 /* TutorialPlanAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000000000000000000015 /* TutorialPlanAPIClientTests.swift */; };
 		A70000000000000000000006 /* TutorialActionConsumerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000000000000000000016 /* TutorialActionConsumerTests.swift */; };
+		A80000000000000000000001 /* TutorialSessionAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000011 /* TutorialSessionAPIClient.swift */; };
+		A80000000000000000000002 /* TutorialSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000012 /* TutorialSessionController.swift */; };
+		A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -128,6 +131,9 @@
 		A70000000000000000000014 /* TutorialAPIEndpointStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialAPIEndpointStoreTests.swift; sourceTree = "<group>"; };
 		A70000000000000000000015 /* TutorialPlanAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPlanAPIClientTests.swift; sourceTree = "<group>"; };
 		A70000000000000000000016 /* TutorialActionConsumerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialActionConsumerTests.swift; sourceTree = "<group>"; };
+		A80000000000000000000011 /* TutorialSessionAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionAPIClient.swift; sourceTree = "<group>"; };
+		A80000000000000000000012 /* TutorialSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionController.swift; sourceTree = "<group>"; };
+		A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionAPIClientTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -185,6 +191,7 @@
 				A70000000000000000000014 /* TutorialAPIEndpointStoreTests.swift */,
 				A70000000000000000000015 /* TutorialPlanAPIClientTests.swift */,
 				A70000000000000000000016 /* TutorialActionConsumerTests.swift */,
+				A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -238,8 +245,10 @@
 				A2000000000000000000004F /* StatusBarController.swift */,
 				A50000000000000000000012 /* FocusMaskController.swift */,
 				A60000000000000000000012 /* TutorialPlanAPIClient.swift */,
+				A80000000000000000000011 /* TutorialSessionAPIClient.swift */,
 				A60000000000000000000013 /* TutorialActionConsumer.swift */,
 				A70000000000000000000012 /* TutorialPlanController.swift */,
+				A80000000000000000000012 /* TutorialSessionController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -439,9 +448,11 @@
 				A50000000000000000000005 /* FocusExitView.swift in Sources */,
 				A60000000000000000000001 /* TutorialPlan.swift in Sources */,
 				A60000000000000000000002 /* TutorialPlanAPIClient.swift in Sources */,
+				A80000000000000000000001 /* TutorialSessionAPIClient.swift in Sources */,
 				A60000000000000000000003 /* TutorialActionConsumer.swift in Sources */,
 				A70000000000000000000001 /* TutorialAPIEndpointStore.swift in Sources */,
 				A70000000000000000000002 /* TutorialPlanController.swift in Sources */,
+				A80000000000000000000002 /* TutorialSessionController.swift in Sources */,
 				A70000000000000000000003 /* TutorialAPISettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -463,6 +474,7 @@
 				A70000000000000000000004 /* TutorialAPIEndpointStoreTests.swift in Sources */,
 				A70000000000000000000005 /* TutorialPlanAPIClientTests.swift in Sources */,
 				A70000000000000000000006 /* TutorialActionConsumerTests.swift in Sources */,
+				A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

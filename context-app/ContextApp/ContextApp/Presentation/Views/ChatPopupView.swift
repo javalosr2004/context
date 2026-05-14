@@ -17,8 +17,7 @@ private struct StepJSONPreview: Identifiable {
 }
 
 struct ChatPopupView: View {
-    let messageStore: ChatMessageStore
-    let onCreateTutorialPlan: (String) async throws -> TutorialPlan
+    @ObservedObject var sessionController: TutorialSessionController
     let onTutorialStepSelected: (TutorialStep) async -> String
     let onInputInstruction: (InstructionInput) async -> String
     let onMinify: () -> Void
@@ -27,39 +26,37 @@ struct ChatPopupView: View {
     @State private var draft = ""
     @State private var stepJSONPreview: StepJSONPreview?
     @State private var instructionDraft = ""
-    @State private var isFetchingTutorialPlan = false
     @State private var isInstructionInputVisible = false
     @State private var isSendingInstruction = false
     @State private var jpegQuality = 70
     @State private var loadingWordIndex = 0
     @State private var maxImageWidth = 1280
-    @State private var messages: [ChatMessage]
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
+    @State private var rejectionNote = ""
+    @State private var selectedConfirmationStepID: String?
     @FocusState private var isMessageFieldFocused: Bool
 
     private static let loadingRowID = "tutorial-plan-loading-row"
-    private static let loadingWords = ["waggling", "researching", "formulating"]
+    private static let loadingWords = ["preparing", "sending", "planning"]
 
     init(
-        messageStore: ChatMessageStore,
-        onCreateTutorialPlan: @escaping (String) async throws -> TutorialPlan,
+        sessionController: TutorialSessionController,
         onTutorialStepSelected: @escaping (TutorialStep) async -> String,
         onInputInstruction: @escaping (InstructionInput) async -> String,
         onMinify: @escaping () -> Void
     ) {
-        self.messageStore = messageStore
-        self.onCreateTutorialPlan = onCreateTutorialPlan
+        self.sessionController = sessionController
         self.onTutorialStepSelected = onTutorialStepSelected
         self.onInputInstruction = onInputInstruction
         self.onMinify = onMinify
-        self._messages = State(initialValue: messageStore.messages)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             messageList
+            confirmationControls
             instructionInput
             composer
         }
@@ -72,7 +69,7 @@ struct ChatPopupView: View {
         )
         .shadow(color: .black.opacity(0.18), radius: 24, y: 12)
         .onReceive(Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()) { _ in
-            guard isFetchingTutorialPlan else { return }
+            guard sessionController.status.isBusy else { return }
             loadingWordIndex = (loadingWordIndex + 1) % Self.loadingWords.count
         }
         .sheet(item: $stepJSONPreview) { preview in
@@ -118,15 +115,15 @@ struct ChatPopupView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    if messages.isEmpty && !isFetchingTutorialPlan {
+                    if sessionController.messages.isEmpty && !sessionController.status.isBusy {
                         emptyState
                     }
 
-                    ForEach(messages) { message in
+                    ForEach(sessionController.messages) { message in
                         messageRow(message)
                     }
 
-                    if isFetchingTutorialPlan {
+                    if sessionController.status.isBusy {
                         loadingRow
                             .id(Self.loadingRowID)
                     }
@@ -134,10 +131,10 @@ struct ChatPopupView: View {
                 .padding(14)
             }
             .scrollContentBackground(.hidden)
-            .onChange(of: messages.count) { _ in
+            .onChange(of: sessionController.messages.count) { _ in
                 scrollToBottom(proxy)
             }
-            .onChange(of: isFetchingTutorialPlan) { _ in
+            .onChange(of: sessionController.status.isBusy) { _ in
                 scrollToBottom(proxy)
             }
         }
@@ -163,7 +160,7 @@ struct ChatPopupView: View {
                 ProgressView()
                     .controlSize(.small)
 
-                Text(Self.loadingWords[loadingWordIndex])
+                Text(loadingText)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -181,13 +178,22 @@ struct ChatPopupView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var loadingText: String {
+        switch sessionController.status {
+        case .preparingScreen, .sending, .requestReceived, .planning:
+            return sessionController.status.label
+        case .ready, .needsContext, .awaitingConfirmation, .completed, .failed:
+            return Self.loadingWords[loadingWordIndex]
+        }
+    }
+
     private var composer: some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
-                TextField("Message", text: $draft)
+                TextField(composerPlaceholder, text: $draft)
                     .textFieldStyle(.plain)
                     .focused($isMessageFieldFocused)
-                    .disabled(isFetchingTutorialPlan)
+                    .disabled(sessionController.status.isBusy)
                     .onSubmit(submitDraft)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
@@ -305,20 +311,70 @@ struct ChatPopupView: View {
         }
     }
 
+    private var confirmationControls: some View {
+        Group {
+            if let selectedConfirmationStepID {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Does the highlight look right?")
+                        .font(.system(size: 13, weight: .medium))
+
+                    TextField("Optional note for Not right", text: $rejectionNote)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(OverlayTheme.strongerFill)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous)
+                                .stroke(OverlayTheme.hairline, lineWidth: 1)
+                        )
+
+                    HStack(spacing: 8) {
+                        Button {
+                            submitConfirmation(stepID: selectedConfirmationStepID, confirmed: true)
+                        } label: {
+                            Label("Looks right", systemImage: "checkmark")
+                                .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button {
+                            submitConfirmation(stepID: selectedConfirmationStepID, confirmed: false)
+                        } label: {
+                            Label("Not right", systemImage: "xmark")
+                                .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(OverlayTheme.quietFill)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(OverlayTheme.separator)
+                        .frame(height: 1)
+                }
+            }
+        }
+    }
+
     private var statusText: String {
         if isSendingInstruction {
             return "Reading screen"
         }
 
-        if isFetchingTutorialPlan {
-            return Self.loadingWords[loadingWordIndex]
-        }
+        return sessionController.status.label
+    }
 
-        return "Ready"
+    private var composerPlaceholder: String {
+        sessionController.pendingQuestion == nil ? "Message" : "Answer"
     }
 
     private var canSubmitDraft: Bool {
-        !isFetchingTutorialPlan && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !sessionController.status.isBusy && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var canSubmitInstruction: Bool {
@@ -435,8 +491,14 @@ struct ChatPopupView: View {
                 Label("Show step JSON", systemImage: "curlybraces")
             }
         }
-        .disabled(activeStepID != nil)
+        .disabled(activeStepID != nil || !canSelectTutorialStep(step))
         .help("Show on screen")
+    }
+
+    private func canSelectTutorialStep(_ step: TutorialStep) -> Bool {
+        guard !sessionController.status.isBusy else { return false }
+        guard let currentStepID = sessionController.currentStepID else { return true }
+        return currentStepID == step.stepId
     }
 
     private func iconName(for action: TutorialAction) -> String {
@@ -487,40 +549,43 @@ struct ChatPopupView: View {
 
     private func submitDraft() {
         let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDraft.isEmpty, !isFetchingTutorialPlan else { return }
-        guard messageStore.appendUserText(trimmedDraft) != nil else { return }
+        guard !trimmedDraft.isEmpty, !sessionController.status.isBusy else { return }
 
-        messages = messageStore.messages
         draft = ""
-        isFetchingTutorialPlan = true
         loadingWordIndex = 0
 
         Task {
-            do {
-                let plan = try await onCreateTutorialPlan(trimmedDraft)
-                await MainActor.run {
-                    appendTutorialPlan(plan)
-                    isFetchingTutorialPlan = false
-                }
-            } catch {
-                await MainActor.run {
-                    appendTutorialText("Tutorial plan failed: \(error.localizedDescription)")
-                    isFetchingTutorialPlan = false
-                }
-            }
+            await sessionController.sendComposerText(trimmedDraft)
         }
     }
 
     private func selectTutorialStep(_ step: TutorialStep) {
-        guard activeStepID == nil else { return }
+        guard activeStepID == nil, canSelectTutorialStep(step) else { return }
         activeStepID = step.stepId
+        selectedConfirmationStepID = nil
 
         Task {
+            await sessionController.markStepStarted(stepID: step.stepId)
             let result = await onTutorialStepSelected(step)
             await MainActor.run {
-                appendTutorialText(result)
+                sessionController.appendTutorialText(result)
                 activeStepID = nil
+                selectedConfirmationStepID = step.stepId
             }
+        }
+    }
+
+    private func submitConfirmation(stepID: String, confirmed: Bool) {
+        let note = rejectionNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        selectedConfirmationStepID = nil
+        rejectionNote = ""
+
+        Task {
+            await sessionController.confirmStep(
+                stepID: stepID,
+                confirmed: confirmed,
+                note: note.isEmpty ? nil : note
+            )
         }
     }
 
@@ -544,7 +609,7 @@ struct ChatPopupView: View {
             referenceImageData = try Data(contentsOf: url)
             referenceImageName = url.lastPathComponent
         } catch {
-            appendTutorialText("Could not load reference image: \(error.localizedDescription)")
+            sessionController.appendTutorialText("Could not load reference image: \(error.localizedDescription)")
         }
     }
 
@@ -553,7 +618,7 @@ struct ChatPopupView: View {
         guard !trimmedInstruction.isEmpty else { return }
 
         isSendingInstruction = true
-        appendUserText(trimmedInstruction)
+        sessionController.appendUserText(trimmedInstruction)
 
         let input = InstructionInput(
             text: trimmedInstruction,
@@ -567,7 +632,7 @@ struct ChatPopupView: View {
         Task {
             let result = await onInputInstruction(input)
             await MainActor.run {
-                appendTutorialText(result)
+                sessionController.appendTutorialText(result)
                 instructionDraft = ""
                 referenceImageData = nil
                 referenceImageName = nil
@@ -576,28 +641,13 @@ struct ChatPopupView: View {
         }
     }
 
-    private func appendUserText(_ text: String) {
-        guard messageStore.appendUserText(text) != nil else { return }
-        messages = messageStore.messages
-    }
-
-    private func appendTutorialText(_ text: String) {
-        guard messageStore.appendTutorialText(text) != nil else { return }
-        messages = messageStore.messages
-    }
-
-    private func appendTutorialPlan(_ plan: TutorialPlan) {
-        guard messageStore.appendTutorialPlan(plan) != nil else { return }
-        messages = messageStore.messages
-    }
-
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        if isFetchingTutorialPlan {
+        if sessionController.status.isBusy {
             proxy.scrollTo(Self.loadingRowID, anchor: .bottom)
             return
         }
 
-        guard let last = messages.last else { return }
+        guard let last = sessionController.messages.last else { return }
         proxy.scrollTo(last.id, anchor: .bottom)
     }
 }

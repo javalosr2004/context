@@ -6,8 +6,12 @@ from collections.abc import Callable, Iterator
 from json import dumps
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
+from starlette.requests import HTTPConnection
+from starlette.websockets import WebSocketDisconnect
 
 from backend.conversations import ConversationRepository, InMemoryConversationRepository
 from backend.images import read_uploaded_images
@@ -19,6 +23,15 @@ from backend.tutorial_guide import (
     TutorialStreamRequest,
 )
 from backend.tutorial_schema import TutorialPlan, TutorialPlanValidationError
+from backend.tutorial_session_events import (
+    CreateTutorialSessionResponse,
+    ErrorEvent,
+    ServerSessionEvent,
+    SessionReadyEvent,
+    TutorialSessionResponse,
+    client_session_event_adapter,
+)
+from backend.tutorial_sessions import TutorialSessionError, TutorialSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +48,8 @@ def create_app() -> FastAPI:
         conversation_id: Annotated[str, Form()],
         text: Annotated[str, Form()],
         images: Annotated[list[UploadFile] | None, File()] = None,
-        conversations: ConversationRepository = Depends(get_conversation_repository),
+        conversations: ConversationRepository = Depends(
+            get_conversation_repository),
         tutorial_guide: TutorialGuide = Depends(get_tutorial_guide),
     ) -> StreamingResponse:
         conversation = conversations.get_conversation(conversation_id)
@@ -55,7 +69,8 @@ def create_app() -> FastAPI:
         )
 
         return StreamingResponse(
-            stream_as_server_sent_events(tutorial_guide.stream_tutorial(request)),
+            stream_as_server_sent_events(
+                tutorial_guide.stream_tutorial(request)),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -65,7 +80,8 @@ def create_app() -> FastAPI:
         conversation_id: Annotated[str, Form()],
         text: Annotated[str, Form()],
         images: Annotated[list[UploadFile] | None, File()] = None,
-        conversations: ConversationRepository = Depends(get_conversation_repository),
+        conversations: ConversationRepository = Depends(
+            get_conversation_repository),
         tutorial_guide: TutorialGuide = Depends(get_tutorial_guide),
     ) -> TutorialPlan:
         conversation = conversations.get_conversation(conversation_id)
@@ -93,6 +109,81 @@ def create_app() -> FastAPI:
             )
             raise HTTPException(status_code=502, detail=str(error)) from error
 
+    @app.post("/tutorial-sessions")
+    def create_tutorial_session(
+        sessions: TutorialSessionManager = Depends(get_tutorial_session_manager),
+    ) -> CreateTutorialSessionResponse:
+        return sessions.create_session()
+
+    @app.get("/tutorial-sessions/{session_id}")
+    def get_tutorial_session(
+        session_id: str,
+        sessions: TutorialSessionManager = Depends(get_tutorial_session_manager),
+    ) -> TutorialSessionResponse:
+        try:
+            return sessions.get_session(session_id)
+        except TutorialSessionError as error:
+            raise HTTPException(status_code=404, detail=error.message) from error
+
+    @app.websocket("/tutorial-sessions/{session_id}/socket")
+    async def tutorial_session_socket(
+        websocket: WebSocket,
+        session_id: str,
+        sessions: TutorialSessionManager = Depends(get_tutorial_session_manager),
+    ) -> None:
+        await websocket.accept()
+        try:
+            sessions.get_session(session_id)
+        except TutorialSessionError as error:
+            await send_server_event(
+                websocket,
+                ErrorEvent(code=error.code, message=error.message),
+            )
+            await websocket.close(code=1008)
+            return
+
+        await send_server_event(websocket, SessionReadyEvent(session_id=session_id))
+
+        try:
+            while True:
+                raw_event = await websocket.receive_json()
+                try:
+                    event = client_session_event_adapter.validate_python(raw_event)
+                    server_events = await run_in_threadpool(
+                        sessions.handle_client_event,
+                        session_id,
+                        event,
+                    )
+                except ValidationError as error:
+                    server_events = [
+                        ErrorEvent(
+                            code="invalid_event",
+                            message=error.errors()[0]["msg"],
+                        )
+                    ]
+                except TutorialSessionError as error:
+                    server_events = [
+                        ErrorEvent(code=error.code, message=error.message)
+                    ]
+                except Exception:
+                    logger.exception(
+                        "Tutorial session event failed",
+                        extra={"session_id": session_id},
+                    )
+                    server_events = [
+                        ErrorEvent(
+                            code="session_event_failed",
+                            message="The tutorial session could not process that event.",
+                        )
+                    ]
+
+                await send_server_events(websocket, server_events)
+        except WebSocketDisconnect:
+            logger.info(
+                "Tutorial session socket disconnected",
+                extra={"session_id": session_id},
+            )
+
     return app
 
 
@@ -111,6 +202,29 @@ def get_tutorial_guide(
     llm: MultimodalLLM = Depends(get_multimodal_llm),
 ) -> TutorialGuide:
     return TutorialGuide(llm)
+
+
+def get_tutorial_session_manager(
+    connection: HTTPConnection,
+    tutorial_guide: TutorialGuide = Depends(get_tutorial_guide),
+) -> TutorialSessionManager:
+    manager = getattr(connection.app.state, "tutorial_session_manager", None)
+    if manager is None:
+        manager = TutorialSessionManager(tutorial_guide)
+        connection.app.state.tutorial_session_manager = manager
+    return manager
+
+
+async def send_server_events(
+    websocket: WebSocket,
+    events: list[ServerSessionEvent],
+) -> None:
+    for event in events:
+        await send_server_event(websocket, event)
+
+
+async def send_server_event(websocket: WebSocket, event: ServerSessionEvent) -> None:
+    await websocket.send_json(event.model_dump(mode="json"))
 
 
 def stream_as_server_sent_events(tokens: Iterator[str]) -> Iterator[str]:

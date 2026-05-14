@@ -3,8 +3,11 @@ from __future__ import annotations
 import unittest
 
 from backend.tutorial_schema import (
+    TutorialPlannerReplyValidationError,
     TutorialPlanValidationError,
+    parse_tutorial_planner_reply,
     parse_tutorial_plan,
+    tutorial_planner_reply_response_schema,
     tutorial_plan_response_schema,
 )
 
@@ -167,6 +170,50 @@ class TutorialSchemaTests(unittest.TestCase):
 
     def test_response_schema_removes_gemini_unsupported_keywords(self) -> None:
         schema_text = str(tutorial_plan_response_schema())
+
+        self.assertNotIn("additionalProperties", schema_text)
+        self.assertNotIn("additional_properties", schema_text)
+        self.assertNotIn("'default'", schema_text)
+
+    def test_parses_ready_planner_reply(self) -> None:
+        reply = parse_tutorial_planner_reply(
+            f"""
+{{
+  "type": "ready",
+  "plan": {build_plan_json(valid_click_step_json())}
+}}
+""".strip()
+        )
+
+        self.assertEqual(reply.type, "ready")
+        self.assertEqual(reply.plan.schema_version, "tutorial_plan.v1")
+
+    def test_parses_needs_context_planner_reply(self) -> None:
+        reply = parse_tutorial_planner_reply(
+            """
+{
+  "type": "needs_context",
+  "question": "Which repository should I use?"
+}
+""".strip()
+        )
+
+        self.assertEqual(reply.type, "needs_context")
+        self.assertEqual(reply.question, "Which repository should I use?")
+
+    def test_rejects_invalid_planner_reply(self) -> None:
+        with self.assertRaises(TutorialPlannerReplyValidationError):
+            parse_tutorial_planner_reply(
+                """
+{
+  "type": "ready",
+  "question": "Which repository should I use?"
+}
+""".strip()
+            )
+
+    def test_planner_reply_response_schema_removes_gemini_unsupported_keywords(self) -> None:
+        schema_text = str(tutorial_planner_reply_response_schema())
 
         self.assertNotIn("additionalProperties", schema_text)
         self.assertNotIn("additional_properties", schema_text)

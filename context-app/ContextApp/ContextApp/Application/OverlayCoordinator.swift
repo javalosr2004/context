@@ -17,6 +17,7 @@ final class OverlayCoordinator {
     private var statusBarController: StatusBarController?
     private var tutorialActionConsumer: TutorialActionConsumer?
     private var tutorialPlanController: TutorialPlanController?
+    private var tutorialSessionController: TutorialSessionController?
 
     init(screenProvider: @escaping () -> NSScreen?) {
         self.screenProvider = screenProvider
@@ -61,15 +62,21 @@ final class OverlayCoordinator {
             },
             screenProvider: screenProvider
         )
+        let tutorialSessionController = TutorialSessionController(
+            messageStore: messageStore,
+            endpointStore: tutorialEndpointStore,
+            fallbackPlanController: tutorialPlanController,
+            ignoredWindowProvider: {
+                [popupPanel, iconPanel, bboxPanel]
+            },
+            screenProvider: screenProvider
+        )
         let tutorialActionConsumer = TutorialActionConsumer { instruction in
             await screenGroundingController.submit(instruction)
         }
 
         popupPanel.contentView = NSHostingView(rootView: ChatPopupView(
-            messageStore: messageStore,
-            onCreateTutorialPlan: { text in
-                try await tutorialPlanController.submit(text)
-            },
+            sessionController: tutorialSessionController,
             onTutorialStepSelected: { step in
                 await tutorialActionConsumer.consume(step: step)
             },
@@ -103,6 +110,7 @@ final class OverlayCoordinator {
         )
         self.tutorialActionConsumer = tutorialActionConsumer
         self.tutorialPlanController = tutorialPlanController
+        self.tutorialSessionController = tutorialSessionController
 
         popupController.showPopup()
         observeScreenChanges()
@@ -114,6 +122,7 @@ final class OverlayCoordinator {
         statusBarController?.stop()
         debugBboxController?.hide()
         focusMaskController?.hide()
+        tutorialSessionController?.stop()
         popupController = nil
         iconMenuController = nil
         debugBboxController = nil
@@ -122,6 +131,7 @@ final class OverlayCoordinator {
         statusBarController = nil
         tutorialActionConsumer = nil
         tutorialPlanController = nil
+        tutorialSessionController = nil
     }
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {

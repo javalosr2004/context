@@ -7,9 +7,13 @@ from dataclasses import dataclass
 from backend.images import UploadedImage
 from backend.llm import LLMRequest, MultimodalLLM
 from backend.tutorial_schema import (
+    PlannerReply,
     TutorialPlan,
+    TutorialPlannerReplyValidationError,
     TutorialPlanValidationError,
+    parse_tutorial_planner_reply,
     parse_tutorial_plan,
+    tutorial_planner_reply_response_schema,
     tutorial_plan_response_schema,
 )
 
@@ -36,6 +40,19 @@ Use confirmation when confidence is low, the target is ambiguous, or the
 screen may not match the expected state.
 """.strip()
 
+TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT = """
+You are a tutorial planner for a macOS overlay teaching system.
+Return exactly one planner reply matching the provided response schema.
+If the current screen, user goal, or previous context is insufficient to
+produce concrete runnable tutorial steps, return type "needs_context" with one
+specific user-facing question. Do not invent generic tutorial steps.
+When the context is sufficient, return type "ready" with a valid TutorialPlan.
+Keep each instruction short and readable for a human overlay.
+Use semantic targets, not coordinates, unless coordinates were provided.
+Use confirmation when confidence is low, the target is ambiguous, or the
+screen may not match the expected state.
+""".strip()
+
 MAX_TUTORIAL_PLAN_RETRIES = 2
 
 
@@ -53,6 +70,14 @@ class TutorialPlanRequest:
     images: list[UploadedImage]
 
 
+@dataclass(frozen=True)
+class TutorialSessionPlanRequest:
+    session_id: str
+    goal: str
+    messages: list[dict[str, str]]
+    latest_screen: UploadedImage | None
+
+
 class TutorialGuide:
     def __init__(self, llm: MultimodalLLM) -> None:
         self._llm = llm
@@ -62,6 +87,16 @@ class TutorialGuide:
             llm=self._llm,
             prompt=build_tutorial_plan_user_prompt(request.text),
             images=request.images,
+        )
+
+    def create_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+    ) -> PlannerReply:
+        return generate_tutorial_planner_reply(
+            llm=self._llm,
+            prompt=build_tutorial_session_user_prompt(request),
+            images=[request.latest_screen] if request.latest_screen is not None else [],
         )
 
     def stream_tutorial(self, request: TutorialStreamRequest) -> Iterator[str]:
@@ -124,6 +159,55 @@ def generate_tutorial_plan(
     ) from last_error
 
 
+def generate_tutorial_planner_reply(
+    llm: MultimodalLLM,
+    prompt: str,
+    images: list[UploadedImage] | None = None,
+    max_retries: int = MAX_TUTORIAL_PLAN_RETRIES,
+) -> PlannerReply:
+    last_text = ""
+    error_text = ""
+    last_error: TutorialPlannerReplyValidationError | None = None
+    request_images = images or []
+
+    for attempt in range(max_retries + 1):
+        raw_reply = llm.complete_text(
+            LLMRequest(
+                system_prompt=TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
+                user_text=plan_generation_prompt(
+                    prompt=prompt,
+                    attempt=attempt,
+                    error_text=error_text,
+                    last_text=last_text,
+                ),
+                images=request_images,
+                enable_search_grounding=False,
+                response_mime_type="application/json",
+                response_schema=tutorial_planner_reply_response_schema(),
+                temperature=0,
+            )
+        )
+        last_text = raw_reply
+
+        try:
+            return parse_tutorial_planner_reply(raw_reply)
+        except TutorialPlannerReplyValidationError as error:
+            last_error = error
+            error_text = format_validation_error(error)
+            logger.warning(
+                "Tutorial planner reply validation failed",
+                extra={
+                    "attempt": attempt + 1,
+                    "max_attempts": max_retries + 1,
+                    "error": error_text,
+                },
+            )
+
+    raise TutorialPlannerReplyValidationError(
+        "Could not generate valid tutorial planner reply"
+    ) from last_error
+
+
 def plan_generation_prompt(
     prompt: str,
     attempt: int,
@@ -149,6 +233,29 @@ def build_tutorial_plan_user_prompt(user_request: str) -> str:
     )
 
 
-def format_validation_error(error: TutorialPlanValidationError) -> str:
+def build_tutorial_session_user_prompt(request: TutorialSessionPlanRequest) -> str:
+    return (
+        "Plan the next tutorial steps from the current session state. "
+        "Use the attached screen image as the latest visual context.\n\n"
+        f"Session ID: {request.session_id}\n"
+        f"Goal: {request.goal}\n\n"
+        "Conversation context:\n"
+        f"{format_session_messages(request.messages)}"
+    )
+
+
+def format_session_messages(messages: list[dict[str, str]]) -> str:
+    if not messages:
+        return "- <none>"
+
+    lines = []
+    for message in messages[-8:]:
+        role = message.get("role", "unknown")
+        content = message.get("content", "")
+        lines.append(f"- {role}: {content}")
+    return "\n".join(lines)
+
+
+def format_validation_error(error: ValueError) -> str:
     cause = error.__cause__
     return str(cause) if cause is not None else str(error)

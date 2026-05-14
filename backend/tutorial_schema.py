@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+from json import JSONDecodeError
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+
+INVALID_TUTORIAL_PLAN_MESSAGE = "LLM returned an invalid tutorial plan."
 
 
 class TutorialPlanValidationError(ValueError):
@@ -135,9 +140,38 @@ def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
     try:
         return TutorialPlan.model_validate_json(raw_json)
     except ValidationError as error:
+        if not is_json_invalid_error(error):
+            raise TutorialPlanValidationError(
+                INVALID_TUTORIAL_PLAN_MESSAGE
+            ) from error
+
+    try:
+        return TutorialPlan.model_validate(extract_first_json_object(raw_json))
+    except (JSONDecodeError, TypeError, ValueError, ValidationError) as error:
         raise TutorialPlanValidationError(
-            "LLM returned an invalid tutorial plan."
+            INVALID_TUTORIAL_PLAN_MESSAGE
         ) from error
+
+
+def extract_first_json_object(raw_text: str) -> dict[str, Any]:
+    decoder = json.JSONDecoder()
+    for start_index, character in enumerate(raw_text):
+        if character != "{":
+            continue
+
+        try:
+            value, _ = decoder.raw_decode(raw_text, start_index)
+        except JSONDecodeError:
+            continue
+
+        if isinstance(value, dict):
+            return value
+
+    raise ValueError("No JSON object found in tutorial plan response.")
+
+
+def is_json_invalid_error(error: ValidationError) -> bool:
+    return any(detail.get("type") == "json_invalid" for detail in error.errors())
 
 
 def is_low_confidence(value: object) -> bool:

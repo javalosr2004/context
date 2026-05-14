@@ -20,26 +20,14 @@ def build_plan_json(step_json: str) -> str:
 
 class TutorialSchemaTests(unittest.TestCase):
     def test_accepts_valid_click_action(self) -> None:
-        plan = parse_tutorial_plan(
-            build_plan_json(
-                """
-{
-  "step_id": "step_001",
-  "instruction": "Click the New repository button.",
-  "action": {
-    "type": "click",
-    "target": {
-      "kind": "element",
-      "label": "New repository",
-      "role": "button"
-    }
-  },
-  "confidence": 0.86,
-  "requires_confirmation": false
-}
-""".strip()
-            )
-        )
+        plan = parse_tutorial_plan(build_plan_json(valid_click_step_json()))
+
+        self.assertEqual(plan.steps[0].action.type, "click")
+
+    def test_accepts_valid_plan_with_trailing_llm_text(self) -> None:
+        raw_plan = f"{build_plan_json(valid_click_step_json())}\n\n}}"
+
+        plan = parse_tutorial_plan(raw_plan)
 
         self.assertEqual(plan.steps[0].action.type, "click")
 
@@ -133,6 +121,25 @@ class TutorialSchemaTests(unittest.TestCase):
         )
 
         self.assertTrue(plan.steps[0].requires_confirmation)
+
+
+def valid_click_step_json() -> str:
+    return """
+{
+  "step_id": "step_001",
+  "instruction": "Click the New repository button.",
+  "action": {
+    "type": "click",
+    "target": {
+      "kind": "element",
+      "label": "New repository",
+      "role": "button"
+    }
+  },
+  "confidence": 0.86,
+  "requires_confirmation": false
+}
+""".strip()
 
 
 if __name__ == "__main__":

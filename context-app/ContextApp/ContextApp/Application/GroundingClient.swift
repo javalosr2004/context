@@ -13,6 +13,21 @@ struct GroundingInstruction {
     let referenceImageData: Data?
     let imageEncodingConfig: ScreenFrameEncodingConfig
     let submittedAtUptimeNanoseconds: UInt64?
+    let tooltip: String?
+
+    init(
+        text: String,
+        referenceImageData: Data?,
+        imageEncodingConfig: ScreenFrameEncodingConfig,
+        submittedAtUptimeNanoseconds: UInt64?,
+        tooltip: String? = nil
+    ) {
+        self.text = text
+        self.referenceImageData = referenceImageData
+        self.imageEncodingConfig = imageEncodingConfig
+        self.submittedAtUptimeNanoseconds = submittedAtUptimeNanoseconds
+        self.tooltip = tooltip
+    }
 }
 
 enum GroundingClientError: LocalizedError {

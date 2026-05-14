@@ -19,6 +19,7 @@ final class OverlayCoordinator {
     private var tutorialActionConsumer: TutorialActionConsumer?
     private var tutorialPlanController: TutorialPlanController?
     private var tutorialSessionController: TutorialSessionController?
+    private var tutorialTooltipController: TutorialTooltipController?
 
     init(screenProvider: @escaping () -> NSScreen?) {
         self.screenProvider = screenProvider
@@ -33,15 +34,18 @@ final class OverlayCoordinator {
 
         var sessionControllerRef: TutorialSessionController?
         var instructionCardControllerRef: InstructionCardController?
+        let tooltipController = TutorialTooltipController(screenProvider: screenProvider)
         let focusMaskController = FocusMaskController(
             screenProvider: screenProvider,
             onExit: { [weak bboxPanel] in
                 bboxPanel?.orderOut(nil)
                 instructionCardControllerRef?.hide()
+                tooltipController.hide()
             },
             onInsideClick: { [weak bboxPanel] in
                 bboxPanel?.orderOut(nil)
                 instructionCardControllerRef?.hide()
+                tooltipController.hide()
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID else { return }
                 Task { @MainActor in
@@ -51,6 +55,7 @@ final class OverlayCoordinator {
             onOutsideClick: { [weak bboxPanel] in
                 bboxPanel?.orderOut(nil)
                 instructionCardControllerRef?.hide()
+                tooltipController.hide()
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID else { return }
                 sessionController.presentContinuePrompt(stepID: stepID)
@@ -67,7 +72,8 @@ final class OverlayCoordinator {
             ignoredWindowProvider: {
                 [popupPanel, iconPanel, bboxPanel]
             },
-            screenProvider: screenProvider
+            screenProvider: screenProvider,
+            tooltipController: tooltipController
         )
         let menuController = IconMenuController(debugBboxController: debugController)
         let popupController = PopupController(
@@ -171,6 +177,7 @@ final class OverlayCoordinator {
         self.tutorialActionConsumer = tutorialActionConsumer
         self.tutorialPlanController = tutorialPlanController
         self.tutorialSessionController = tutorialSessionController
+        self.tutorialTooltipController = tooltipController
 
         popupController.showPopup()
         observeScreenChanges()
@@ -183,6 +190,7 @@ final class OverlayCoordinator {
         debugBboxController?.hide()
         focusMaskController?.hide()
         instructionCardController?.hide()
+        tutorialTooltipController?.hide()
         tutorialSessionController?.stop()
         popupController = nil
         iconMenuController = nil
@@ -194,6 +202,7 @@ final class OverlayCoordinator {
         tutorialActionConsumer = nil
         tutorialPlanController = nil
         tutorialSessionController = nil
+        tutorialTooltipController = nil
     }
 
     private static func instructionCardTitle(for action: TutorialAction) -> String {

@@ -26,7 +26,8 @@ final class TutorialActionConsumer {
             text: payload.instruction,
             referenceImageData: nil,
             imageEncodingConfig: .groundingRequest,
-            submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
+            submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds,
+            tooltip: step.instruction
         )
         return await groundInstruction(instruction)
     }

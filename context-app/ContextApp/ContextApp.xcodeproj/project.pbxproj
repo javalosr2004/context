@@ -62,6 +62,7 @@
 		A80000000000000000000001 /* TutorialSessionAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000011 /* TutorialSessionAPIClient.swift */; };
 		A80000000000000000000002 /* TutorialSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000012 /* TutorialSessionController.swift */; };
 		A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */; };
+		A90000000000000000000001 /* TutorialTooltipController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000011 /* TutorialTooltipController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -134,6 +135,7 @@
 		A80000000000000000000011 /* TutorialSessionAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionAPIClient.swift; sourceTree = "<group>"; };
 		A80000000000000000000012 /* TutorialSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionController.swift; sourceTree = "<group>"; };
 		A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionAPIClientTests.swift; sourceTree = "<group>"; };
+		A90000000000000000000011 /* TutorialTooltipController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialTooltipController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -249,6 +251,7 @@
 				A60000000000000000000013 /* TutorialActionConsumer.swift */,
 				A70000000000000000000012 /* TutorialPlanController.swift */,
 				A80000000000000000000012 /* TutorialSessionController.swift */,
+				A90000000000000000000011 /* TutorialTooltipController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -453,6 +456,7 @@
 				A70000000000000000000001 /* TutorialAPIEndpointStore.swift in Sources */,
 				A70000000000000000000002 /* TutorialPlanController.swift in Sources */,
 				A80000000000000000000002 /* TutorialSessionController.swift in Sources */,
+				A90000000000000000000001 /* TutorialTooltipController.swift in Sources */,
 				A70000000000000000000003 /* TutorialAPISettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

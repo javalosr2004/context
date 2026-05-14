@@ -11,19 +11,22 @@ final class ScreenGroundingController {
     private let endpointStore: GroundingEndpointStore
     private let ignoredWindowProvider: () -> [NSWindow]
     private let screenProvider: () -> NSScreen?
+    private let tooltipController: TutorialTooltipController?
 
     init(
         bboxController: DebugBboxController,
         capture: ScreenFrameCapture = ScreenFrameCapture(),
         endpointStore: GroundingEndpointStore,
         ignoredWindowProvider: @escaping () -> [NSWindow] = { [] },
-        screenProvider: @escaping () -> NSScreen?
+        screenProvider: @escaping () -> NSScreen?,
+        tooltipController: TutorialTooltipController? = nil
     ) {
         self.bboxController = bboxController
         self.capture = capture
         self.endpointStore = endpointStore
         self.ignoredWindowProvider = ignoredWindowProvider
         self.screenProvider = screenProvider
+        self.tooltipController = tooltipController
     }
 
     func submit(_ instruction: GroundingInstruction) async -> String {
@@ -73,6 +76,11 @@ final class ScreenGroundingController {
             )
             let overlayStartedAt = DispatchTime.now().uptimeNanoseconds
             bboxController.show(rect: rect)
+            if let tooltip = instruction.tooltip, !tooltip.isEmpty {
+                tooltipController?.show(beside: rect, message: tooltip)
+            } else {
+                tooltipController?.hide()
+            }
             let overlayEndedAt = DispatchTime.now().uptimeNanoseconds
             let timing = GroundingRoundTripTiming(
                 totalMilliseconds: milliseconds(from: roundTripStartedAt, to: overlayEndedAt),

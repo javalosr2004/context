@@ -41,6 +41,34 @@ final class TutorialActionConsumer {
     }
 
     static func groundingInstructionText(for step: TutorialStep) -> String {
-        step.instruction
+        guard
+            let description = targetDescription(for: step.action)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !description.isEmpty
+        else {
+            return step.instruction
+        }
+        return "\(step.instruction)\n\nTarget: \(description)"
+    }
+
+    private static func targetDescription(for action: TutorialAction) -> String? {
+        switch action {
+        case .click(let action):
+            return action.target.description
+        case .doubleClick(let action):
+            return action.target.description
+        case .rightClick(let action):
+            return action.target.description
+        case .hover(let action):
+            return action.target.description
+        case .type(let action):
+            return action.target?.description
+        case .scroll(let action):
+            return action.target?.description
+        case .drag(let action):
+            return action.target.description
+        case .pressKey, .wait, .confirm:
+            return nil
+        }
     }
 }

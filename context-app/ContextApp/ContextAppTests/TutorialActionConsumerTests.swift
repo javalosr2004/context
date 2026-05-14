@@ -2,7 +2,7 @@ import XCTest
 @testable import ContextApp
 
 final class TutorialActionConsumerTests: XCTestCase {
-    func testGroundingInstructionTextUsesOnlyStepInstruction() {
+    func testGroundingInstructionTextIncludesTargetDescription() {
         let step = TutorialStep(
             stepId: "step-1",
             instruction: "Click the New repository button.",
@@ -19,11 +19,32 @@ final class TutorialActionConsumerTests: XCTestCase {
 
         XCTAssertEqual(
             TutorialActionConsumer.groundingInstructionText(for: step),
-            "Click the New repository button."
+            "Click the New repository button.\n\nTarget: Starts repository creation"
         )
     }
 
-    func testGroundingPayloadJSONIncludesOnlyInstruction() throws {
+    func testGroundingInstructionTextOmitsMissingTargetDescription() {
+        let step = TutorialStep(
+            stepId: "step-1b",
+            instruction: "Click the icon.",
+            action: .click(ClickAction(target: ActionTarget(
+                kind: .element,
+                label: "Icon",
+                role: "button",
+                description: nil,
+                textNearby: nil
+            ))),
+            confidence: 0.6,
+            requiresConfirmation: false
+        )
+
+        XCTAssertEqual(
+            TutorialActionConsumer.groundingInstructionText(for: step),
+            "Click the icon."
+        )
+    }
+
+    func testGroundingPayloadJSONIncludesInstructionWithTargetDescription() throws {
         let step = TutorialStep(
             stepId: "step-2",
             instruction: "Scroll down to the billing section.",
@@ -45,7 +66,10 @@ final class TutorialActionConsumerTests: XCTestCase {
         let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
 
         XCTAssertEqual(object?.keys.sorted(), ["instruction"])
-        XCTAssertEqual(object?["instruction"] as? String, "Scroll down to the billing section.")
+        XCTAssertEqual(
+            object?["instruction"] as? String,
+            "Scroll down to the billing section.\n\nTarget: The app settings window"
+        )
     }
 
     func testConsumeDispatchesGroundingInstruction() async {

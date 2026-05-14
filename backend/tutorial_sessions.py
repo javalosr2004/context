@@ -26,7 +26,7 @@ from backend.tutorial_session_events import (
     UserConfirmationEvent,
     UserMessageEvent,
 )
-from backend.tutorial_session_graph import TutorialSessionGraph, TutorialSessionState
+from backend.tutorial_session_graph import EventSink, TutorialSessionGraph, TutorialSessionState
 
 
 SESSION_NOT_FOUND = "session_not_found"
@@ -74,24 +74,49 @@ class TutorialSessionManager:
         session = self._require_session(session_id)
         return response_from_session(session)
 
+    def pre_threadpool_events(
+        self,
+        event: ClientSessionEvent,
+    ) -> list[ServerSessionEvent]:
+        if isinstance(event, UserMessageEvent):
+            return [
+                RequestReceivedEvent(),
+                StatusChangedEvent(status="planning", label="Planning tutorial"),
+            ]
+        if isinstance(event, UserAnswerEvent):
+            return [StatusChangedEvent(status="planning", label="Planning tutorial")]
+        if isinstance(event, UserConfirmationEvent) and not event.confirmed:
+            return [
+                StatusChangedEvent(
+                    status="planning",
+                    label="Replanning from current screen",
+                )
+            ]
+        return []
+
     def handle_client_event(
         self,
         session_id: str,
         event: ClientSessionEvent,
-    ) -> list[ServerSessionEvent]:
+        event_sink: EventSink,
+    ) -> None:
         if isinstance(event, UserMessageEvent):
-            return self._handle_user_message(session_id, event)
+            self._handle_user_message(session_id, event, event_sink)
+            return
         if isinstance(event, UserAnswerEvent):
-            return self._handle_user_answer(session_id, event)
+            self._handle_user_answer(session_id, event, event_sink)
+            return
         if isinstance(event, UserConfirmationEvent):
-            return self._handle_user_confirmation(session_id, event)
-        return self._handle_step_started(session_id, event.step_id)
+            self._handle_user_confirmation(session_id, event, event_sink)
+            return
+        self._handle_step_started(session_id, event.step_id, event_sink)
 
     def _handle_user_message(
         self,
         session_id: str,
         event: UserMessageEvent,
-    ) -> list[ServerSessionEvent]:
+        event_sink: EventSink,
+    ) -> None:
         session = self._require_session(session_id)
         session.goal = event.text.strip()
         session.status = "planning"
@@ -109,19 +134,19 @@ class TutorialSessionManager:
                 pending_question=None,
                 status="planning",
                 last_error=None,
-            )
+            ),
+            event_sink=event_sink,
         )
-        return [
-            RequestReceivedEvent(),
-            StatusChangedEvent(status="planning", label="Planning tutorial"),
-            *self._events_after_graph_run(session_id, result, plan_was_rejected=False),
-        ]
+        self._emit_events_after_graph_run(
+            session_id, result, plan_was_rejected=False, event_sink=event_sink
+        )
 
     def _handle_user_answer(
         self,
         session_id: str,
         event: UserAnswerEvent,
-    ) -> list[ServerSessionEvent]:
+        event_sink: EventSink,
+    ) -> None:
         session = self._require_session(session_id)
         pending_question = session.pending_question or {}
         if event.question_id != pending_question.get("question_id"):
@@ -137,17 +162,18 @@ class TutorialSessionManager:
                 "text": event.text,
                 "screen": screen_to_state(event.screen),
             },
+            event_sink=event_sink,
         )
-        return [
-            StatusChangedEvent(status="planning", label="Planning tutorial"),
-            *self._events_after_graph_run(session_id, result, plan_was_rejected=False),
-        ]
+        self._emit_events_after_graph_run(
+            session_id, result, plan_was_rejected=False, event_sink=event_sink
+        )
 
     def _handle_user_confirmation(
         self,
         session_id: str,
         event: UserConfirmationEvent,
-    ) -> list[ServerSessionEvent]:
+        event_sink: EventSink,
+    ) -> None:
         session = self._require_session(session_id)
         if event.step_id != session.current_step_id:
             raise TutorialSessionError(
@@ -163,29 +189,21 @@ class TutorialSessionManager:
                 "note": event.note,
                 "screen": screen_to_state(event.screen),
             },
+            event_sink=event_sink,
         )
-        events: list[ServerSessionEvent] = []
-        if not event.confirmed:
-            events.append(
-                StatusChangedEvent(
-                    status="planning",
-                    label="Replanning from current screen",
-                )
-            )
-        events.extend(
-            self._events_after_graph_run(
-                session_id,
-                result,
-                plan_was_rejected=not event.confirmed,
-            )
+        self._emit_events_after_graph_run(
+            session_id,
+            result,
+            plan_was_rejected=not event.confirmed,
+            event_sink=event_sink,
         )
-        return events
 
     def _handle_step_started(
         self,
         session_id: str,
         step_id: str,
-    ) -> list[ServerSessionEvent]:
+        event_sink: EventSink,
+    ) -> None:
         session = self._require_session(session_id)
         if step_id != session.current_step_id:
             raise TutorialSessionError(
@@ -195,53 +213,52 @@ class TutorialSessionManager:
 
         session.status = "awaiting_confirmation"
         session.updated_at = datetime.now(UTC)
-        return [AwaitingConfirmationEvent(step_id=step_id)]
+        event_sink(AwaitingConfirmationEvent(step_id=step_id))
 
-    def _events_after_graph_run(
+    def _emit_events_after_graph_run(
         self,
         session_id: str,
         result: dict[str, Any],
         plan_was_rejected: bool,
-    ) -> list[ServerSessionEvent]:
+        event_sink: EventSink,
+    ) -> None:
         state = self._graph.state_for(session_id)
         session = self._require_session(session_id)
         update_session_from_state(session, state)
 
-        events: list[ServerSessionEvent] = []
         if session.status == "needs_context" and session.pending_question is not None:
-            events.append(StatusChangedEvent(status="needs_context", label="Needs context"))
-            events.append(
+            event_sink(StatusChangedEvent(status="needs_context", label="Needs context"))
+            event_sink(
                 AssistantQuestionEvent(
                     question_id=session.pending_question["question_id"],
                     prompt=session.pending_question["prompt"],
                 )
             )
-            return events
+            return
 
         if session.current_plan is not None and session.status == "awaiting_confirmation":
             if not session.plan_emitted:
-                events.append(PlanReadyEvent(plan=session.current_plan))
+                event_sink(PlanReadyEvent(plan=session.current_plan))
                 session.plan_emitted = True
             elif plan_was_rejected:
-                events.append(PlanUpdatedEvent(plan=session.current_plan))
+                event_sink(PlanUpdatedEvent(plan=session.current_plan))
 
         if session.status == "awaiting_confirmation" and session.current_step_id is not None:
-            events.append(StepReadyEvent(step_id=session.current_step_id))
-            events.append(AwaitingConfirmationEvent(step_id=session.current_step_id))
-            return events
+            event_sink(StepReadyEvent(step_id=session.current_step_id))
+            event_sink(AwaitingConfirmationEvent(step_id=session.current_step_id))
+            return
 
         if session.status == "completed":
-            events.append(SessionCompletedEvent())
-            return events
+            event_sink(SessionCompletedEvent())
+            return
 
         if "__interrupt__" in result:
-            events.append(
+            event_sink(
                 ErrorEvent(
                     code="unknown_interrupt",
                     message="The tutorial session paused without a recognized state.",
                 )
             )
-        return events
 
     def _require_session(self, session_id: str) -> TutorialSessionRecord:
         session = self._sessions.get(session_id)

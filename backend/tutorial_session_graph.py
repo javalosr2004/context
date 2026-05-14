@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -10,6 +12,19 @@ from langgraph.types import Command, interrupt
 from backend.images import UploadedImage
 from backend.tutorial_guide import TutorialGuide, TutorialSessionPlanRequest
 from backend.tutorial_schema import PlannerNeedsContext, PlannerReady, TutorialPlan
+from backend.tutorial_session_events import ServerSessionEvent, StatusChangedEvent
+
+EventSink = Callable[[ServerSessionEvent], None]
+
+_current_sink: ContextVar[EventSink | None] = ContextVar(
+    "tutorial_session_event_sink", default=None
+)
+
+
+def emit_event(event: ServerSessionEvent) -> None:
+    sink = _current_sink.get()
+    if sink is not None:
+        sink(event)
 
 
 class TutorialSessionState(TypedDict, total=False):
@@ -30,11 +45,30 @@ class TutorialSessionGraph:
         self._tutorial_guide = tutorial_guide
         self._graph = self._compile_graph()
 
-    def start(self, state: TutorialSessionState) -> dict[str, Any]:
-        return self._graph.invoke(state, config_for_session(state["session_id"]))
+    def start(
+        self,
+        state: TutorialSessionState,
+        event_sink: EventSink | None = None,
+    ) -> dict[str, Any]:
+        token = _current_sink.set(event_sink)
+        try:
+            return self._graph.invoke(state, config_for_session(state["session_id"]))
+        finally:
+            _current_sink.reset(token)
 
-    def resume(self, session_id: str, value: dict[str, Any]) -> dict[str, Any]:
-        return self._graph.invoke(Command(resume=value), config=config_for_session(session_id))
+    def resume(
+        self,
+        session_id: str,
+        value: dict[str, Any],
+        event_sink: EventSink | None = None,
+    ) -> dict[str, Any]:
+        token = _current_sink.set(event_sink)
+        try:
+            return self._graph.invoke(
+                Command(resume=value), config=config_for_session(session_id)
+            )
+        finally:
+            _current_sink.reset(token)
 
     def state_for(self, session_id: str) -> TutorialSessionState:
         snapshot = self._graph.get_state(config_for_session(session_id))
@@ -93,6 +127,7 @@ class TutorialSessionGraph:
         self,
         state: TutorialSessionState,
     ) -> TutorialSessionState:
+        emit_event(StatusChangedEvent(status="planning", label="Analyzing screen"))
         reply = self._tutorial_guide.create_session_planner_reply(
             TutorialSessionPlanRequest(
                 session_id=state["session_id"],
@@ -150,6 +185,7 @@ class TutorialSessionGraph:
         )
 
     def _emit_plan(self, state: TutorialSessionState) -> TutorialSessionState:
+        emit_event(StatusChangedEvent(status="planning", label="Validating targets"))
         plan = plan_from_state(state)
         current_step_id = next_uncompleted_step_id(
             plan=plan,

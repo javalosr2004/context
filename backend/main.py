@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterator
@@ -149,41 +150,28 @@ def create_app() -> FastAPI:
                 try:
                     raw_event = await receive_websocket_json(websocket)
                     event = client_session_event_adapter.validate_python(raw_event)
-                    server_events = await run_in_threadpool(
-                        sessions.handle_client_event,
-                        session_id,
-                        event,
-                    )
                 except WebSocketDisconnect:
                     raise
                 except ValidationError as error:
-                    server_events = [
+                    await send_server_event(
+                        websocket,
                         ErrorEvent(
                             code="invalid_event",
                             message=error.errors()[0]["msg"],
-                        )
-                    ]
-                except ValueError as error:
-                    server_events = [
-                        ErrorEvent(code="invalid_event", message=str(error))
-                    ]
-                except TutorialSessionError as error:
-                    server_events = [
-                        ErrorEvent(code=error.code, message=error.message)
-                    ]
-                except Exception:
-                    logger.exception(
-                        "Tutorial session event failed",
-                        extra={"session_id": session_id},
+                        ),
                     )
-                    server_events = [
-                        ErrorEvent(
-                            code="session_event_failed",
-                            message="The tutorial session could not process that event.",
-                        )
-                    ]
+                    continue
+                except ValueError as error:
+                    await send_server_event(
+                        websocket,
+                        ErrorEvent(code="invalid_event", message=str(error)),
+                    )
+                    continue
 
-                await send_server_events(websocket, server_events)
+                for evt in sessions.pre_threadpool_events(event):
+                    await send_server_event(websocket, evt)
+
+                await drain_session_events(websocket, sessions, session_id, event)
         except WebSocketDisconnect:
             logger.info(
                 "Tutorial session socket disconnected",
@@ -243,6 +231,51 @@ async def send_server_events(
 ) -> None:
     for event in events:
         await send_server_event(websocket, event)
+
+
+async def drain_session_events(
+    websocket: WebSocket,
+    sessions: TutorialSessionManager,
+    session_id: str,
+    event: object,
+) -> None:
+    queue: asyncio.Queue[ServerSessionEvent | None] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def sink(evt: ServerSessionEvent) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, evt)
+
+    async def run_handler() -> None:
+        try:
+            await run_in_threadpool(
+                sessions.handle_client_event,
+                session_id,
+                event,
+                sink,
+            )
+        except TutorialSessionError as error:
+            queue.put_nowait(ErrorEvent(code=error.code, message=error.message))
+        except Exception:
+            logger.exception(
+                "Tutorial session event failed",
+                extra={"session_id": session_id},
+            )
+            queue.put_nowait(
+                ErrorEvent(
+                    code="session_event_failed",
+                    message="The tutorial session could not process that event.",
+                )
+            )
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(run_handler())
+    while True:
+        evt = await queue.get()
+        if evt is None:
+            break
+        await send_server_event(websocket, evt)
+    await task
 
 
 async def send_server_event(websocket: WebSocket, event: ServerSessionEvent) -> None:

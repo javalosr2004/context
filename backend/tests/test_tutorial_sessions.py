@@ -122,14 +122,17 @@ class TutorialSessionTests(unittest.TestCase):
                 {"type": "user_message", "text": "Show me how to create a repo."}
             )
 
-            events = [websocket.receive_json() for _ in range(4)]
+            events = [websocket.receive_json() for _ in range(5)]
 
         self.assertEqual(events[0]["type"], "request_received")
         self.assertEqual(events[1]["type"], "status_changed")
         self.assertEqual(events[1]["status"], "planning")
-        self.assertEqual(events[2]["status"], "needs_context")
-        self.assertEqual(events[3]["type"], "assistant_question")
-        self.assertEqual(events[3]["question_id"], "question_002")
+        self.assertEqual(events[1]["label"], "Planning tutorial")
+        self.assertEqual(events[2]["type"], "status_changed")
+        self.assertEqual(events[2]["label"], "Analyzing screen")
+        self.assertEqual(events[3]["status"], "needs_context")
+        self.assertEqual(events[4]["type"], "assistant_question")
+        self.assertEqual(events[4]["question_id"], "question_002")
 
     def test_user_message_accepts_binary_json_websocket_frame(self) -> None:
         client = client_with_manager(
@@ -146,14 +149,17 @@ class TutorialSessionTests(unittest.TestCase):
                 {"type": "user_message", "text": "Show me how to create a repo."},
                 mode="binary",
             )
-            events = [websocket.receive_json() for _ in range(5)]
+            events = [websocket.receive_json() for _ in range(7)]
 
         self.assertEqual(events[0]["type"], "request_received")
         self.assertEqual(events[1]["status"], "planning")
-        self.assertEqual(events[2]["type"], "plan_ready")
-        self.assertEqual(events[3], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(events[1]["label"], "Planning tutorial")
+        self.assertEqual(events[2]["label"], "Analyzing screen")
+        self.assertEqual(events[3]["label"], "Validating targets")
+        self.assertEqual(events[4]["type"], "plan_ready")
+        self.assertEqual(events[5], {"type": "step_ready", "step_id": "step_001"})
         self.assertEqual(
-            events[4],
+            events[6],
             {"type": "awaiting_confirmation", "step_id": "step_001"},
         )
 
@@ -171,7 +177,7 @@ class TutorialSessionTests(unittest.TestCase):
             websocket.send_json(
                 {"type": "user_message", "text": "Show me how to create a repo."}
             )
-            for _ in range(4):
+            for _ in range(5):
                 websocket.receive_json()
 
             websocket.send_json(
@@ -181,13 +187,16 @@ class TutorialSessionTests(unittest.TestCase):
                     "text": "Use the context repo.",
                 }
             )
-            events = [websocket.receive_json() for _ in range(4)]
+            events = [websocket.receive_json() for _ in range(6)]
 
         self.assertEqual(events[0]["status"], "planning")
-        self.assertEqual(events[1]["type"], "plan_ready")
-        self.assertEqual(events[2], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(events[0]["label"], "Planning tutorial")
+        self.assertEqual(events[1]["label"], "Analyzing screen")
+        self.assertEqual(events[2]["label"], "Validating targets")
+        self.assertEqual(events[3]["type"], "plan_ready")
+        self.assertEqual(events[4], {"type": "step_ready", "step_id": "step_001"})
         self.assertEqual(
-            events[3],
+            events[5],
             {"type": "awaiting_confirmation", "step_id": "step_001"},
         )
 
@@ -205,7 +214,7 @@ class TutorialSessionTests(unittest.TestCase):
             websocket.send_json(
                 {"type": "user_message", "text": "Show me how to create a repo."}
             )
-            for _ in range(5):
+            for _ in range(7):
                 websocket.receive_json()
 
             websocket.send_json(
@@ -237,7 +246,7 @@ class TutorialSessionTests(unittest.TestCase):
             websocket.send_json(
                 {"type": "user_message", "text": "Show me how to create a repo."}
             )
-            for _ in range(5):
+            for _ in range(7):
                 websocket.receive_json()
 
             websocket.send_json(
@@ -249,14 +258,17 @@ class TutorialSessionTests(unittest.TestCase):
                     "screen": None,
                 }
             )
-            events = [websocket.receive_json() for _ in range(4)]
+            events = [websocket.receive_json() for _ in range(6)]
 
         self.assertEqual(events[0]["status"], "planning")
-        self.assertEqual(events[1]["type"], "plan_updated")
-        self.assertEqual(events[1]["plan"]["summary"], "Use the visible Create button instead.")
-        self.assertEqual(events[2], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(events[0]["label"], "Replanning from current screen")
+        self.assertEqual(events[1]["label"], "Analyzing screen")
+        self.assertEqual(events[2]["label"], "Validating targets")
+        self.assertEqual(events[3]["type"], "plan_updated")
+        self.assertEqual(events[3]["plan"]["summary"], "Use the visible Create button instead.")
+        self.assertEqual(events[4], {"type": "step_ready", "step_id": "step_001"})
         self.assertEqual(
-            events[3],
+            events[5],
             {"type": "awaiting_confirmation", "step_id": "step_001"},
         )
 

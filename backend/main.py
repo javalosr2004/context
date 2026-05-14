@@ -291,7 +291,7 @@ async def drain_session_events(
                 extra={
                     "session_id": session_id,
                     "code": error.code,
-                    "message": error.message,
+                    "detail": error.message,
                 },
             )
             queue.put_nowait(ErrorEvent(code=error.code, message=error.message))

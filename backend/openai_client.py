@@ -102,9 +102,33 @@ def build_text_format(
         return {
             "type": "json_schema",
             "name": "response",
-            "schema": response_schema,
+            "schema": build_strict_json_schema(response_schema),
             "strict": True,
         }
     if response_mime_type == "application/json":
         return {"type": "json_object"}
     return {"type": "text"}
+
+
+def build_strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    return add_strict_object_constraints(schema)
+
+
+def add_strict_object_constraints(value: Any) -> Any:
+    if isinstance(value, dict):
+        strict_value = {
+            key: add_strict_object_constraints(child)
+            for key, child in value.items()
+        }
+        properties = strict_value.get("properties")
+        if isinstance(properties, dict):
+            strict_value["required"] = list(properties.keys())
+            strict_value["additionalProperties"] = False
+        elif strict_value.get("type") == "object":
+            strict_value["additionalProperties"] = False
+        return strict_value
+
+    if isinstance(value, list):
+        return [add_strict_object_constraints(item) for item in value]
+
+    return value

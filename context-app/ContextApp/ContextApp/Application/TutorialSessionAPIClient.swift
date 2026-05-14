@@ -300,6 +300,9 @@ final class TutorialSessionAPIClient {
             throw TutorialSessionAPIClientError.unsupportedWebSocketMessage
         }
 
+        let rawPayload = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+        print("[TutorialSessionAPIClient] received: \(rawPayload)")
+
         do {
             return try decoder.decode(TutorialSessionServerEvent.self, from: data)
         } catch {

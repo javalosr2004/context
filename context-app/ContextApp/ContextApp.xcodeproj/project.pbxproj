@@ -49,6 +49,8 @@
 		A50000000000000000000004 /* FocusMaskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000014 /* FocusMaskView.swift */; };
 		A50000000000000000000005 /* FocusExitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000015 /* FocusExitView.swift */; };
 		A50000000000000000000006 /* FocusMaskLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000016 /* FocusMaskLayoutTests.swift */; };
+		A50000000000000000000007 /* FocusMaskClickClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000017 /* FocusMaskClickClassifier.swift */; };
+		A50000000000000000000008 /* FocusMaskClickClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000018 /* FocusMaskClickClassifierTests.swift */; };
 		A60000000000000000000001 /* TutorialPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000011 /* TutorialPlan.swift */; };
 		A60000000000000000000002 /* TutorialPlanAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000012 /* TutorialPlanAPIClient.swift */; };
 		A60000000000000000000003 /* TutorialActionConsumer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60000000000000000000013 /* TutorialActionConsumer.swift */; };
@@ -122,6 +124,8 @@
 		A50000000000000000000014 /* FocusMaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskView.swift; sourceTree = "<group>"; };
 		A50000000000000000000015 /* FocusExitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusExitView.swift; sourceTree = "<group>"; };
 		A50000000000000000000016 /* FocusMaskLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskLayoutTests.swift; sourceTree = "<group>"; };
+		A50000000000000000000017 /* FocusMaskClickClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskClickClassifier.swift; sourceTree = "<group>"; };
+		A50000000000000000000018 /* FocusMaskClickClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskClickClassifierTests.swift; sourceTree = "<group>"; };
 		A60000000000000000000011 /* TutorialPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPlan.swift; sourceTree = "<group>"; };
 		A60000000000000000000012 /* TutorialPlanAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPlanAPIClient.swift; sourceTree = "<group>"; };
 		A60000000000000000000013 /* TutorialActionConsumer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialActionConsumer.swift; sourceTree = "<group>"; };
@@ -189,6 +193,7 @@
 				A20000000000000000000050 /* GroundingEndpointStoreTests.swift */,
 				A20000000000000000000052 /* ScreenFrameMaskerTests.swift */,
 				A50000000000000000000016 /* FocusMaskLayoutTests.swift */,
+				A50000000000000000000018 /* FocusMaskClickClassifierTests.swift */,
 				A60000000000000000000014 /* TutorialPlanTests.swift */,
 				A70000000000000000000014 /* TutorialAPIEndpointStoreTests.swift */,
 				A70000000000000000000015 /* TutorialPlanAPIClientTests.swift */,
@@ -227,6 +232,7 @@
 				A20000000000000000000048 /* GroundingBoundingBox.swift */,
 				A2000000000000000000004D /* GroundingEndpointStore.swift */,
 				A50000000000000000000011 /* FocusMaskLayout.swift */,
+				A50000000000000000000017 /* FocusMaskClickClassifier.swift */,
 				A60000000000000000000011 /* TutorialPlan.swift */,
 				A70000000000000000000011 /* TutorialAPIEndpointStore.swift */,
 			);
@@ -445,6 +451,7 @@
 				A2000000000000000000001E /* CallbackMenuItem.swift in Sources */,
 				A2000000000000000000001F /* StatusBarController.swift in Sources */,
 				A50000000000000000000001 /* FocusMaskLayout.swift in Sources */,
+				A50000000000000000000007 /* FocusMaskClickClassifier.swift in Sources */,
 				A50000000000000000000002 /* FocusMaskController.swift in Sources */,
 				A50000000000000000000003 /* FocusMaskPanel.swift in Sources */,
 				A50000000000000000000004 /* FocusMaskView.swift in Sources */,
@@ -474,6 +481,7 @@
 				A20000000000000000000020 /* GroundingEndpointStoreTests.swift in Sources */,
 				A30000000000000000000002 /* ScreenFrameMaskerTests.swift in Sources */,
 				A50000000000000000000006 /* FocusMaskLayoutTests.swift in Sources */,
+				A50000000000000000000008 /* FocusMaskClickClassifierTests.swift in Sources */,
 				A60000000000000000000004 /* TutorialPlanTests.swift in Sources */,
 				A70000000000000000000004 /* TutorialAPIEndpointStoreTests.swift in Sources */,
 				A70000000000000000000005 /* TutorialPlanAPIClientTests.swift in Sources */,

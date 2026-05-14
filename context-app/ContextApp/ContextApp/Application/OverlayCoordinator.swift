@@ -37,6 +37,13 @@ final class OverlayCoordinator {
         let tooltipController = TutorialTooltipController(screenProvider: screenProvider)
         let focusMaskController = FocusMaskController(
             screenProvider: screenProvider,
+            interactiveWindowsProvider: {
+                var windows: [NSWindow] = [popupPanel, iconPanel]
+                if let instructionWindow = instructionCardControllerRef?.interactiveWindow {
+                    windows.append(instructionWindow)
+                }
+                return windows
+            },
             onExit: { [weak bboxPanel] in
                 bboxPanel?.orderOut(nil)
                 instructionCardControllerRef?.hide()

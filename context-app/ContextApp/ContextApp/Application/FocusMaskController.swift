@@ -3,6 +3,8 @@ import SwiftUI
 
 @MainActor
 final class FocusMaskController {
+    private let clickClassifier: FocusMaskClickClassifier
+    private let interactiveWindowsProvider: () -> [NSWindow]
     private let layout: FocusMaskLayout
     private let onExit: () -> Void
     private let onInsideClick: () -> Void
@@ -17,11 +19,15 @@ final class FocusMaskController {
 
     init(
         layout: FocusMaskLayout = FocusMaskLayout(),
+        clickClassifier: FocusMaskClickClassifier = FocusMaskClickClassifier(),
         screenProvider: @escaping () -> NSScreen?,
+        interactiveWindowsProvider: @escaping () -> [NSWindow] = { [] },
         onExit: @escaping () -> Void,
         onInsideClick: @escaping () -> Void = {},
         onOutsideClick: @escaping () -> Void = {}
     ) {
+        self.clickClassifier = clickClassifier
+        self.interactiveWindowsProvider = interactiveWindowsProvider
         self.layout = layout
         self.screenProvider = screenProvider
         self.onExit = onExit
@@ -84,15 +90,12 @@ final class FocusMaskController {
     private func installClickMonitors() {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             Task { @MainActor [weak self] in
-                self?.handleClick(at: NSEvent.mouseLocation)
+                self?.handleClick(at: NSEvent.mouseLocation, eventWindow: nil)
             }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self else { return event }
-            if self.isOwnInteractiveWindow(event.window) {
-                return event
-            }
-            self.handleClick(at: NSEvent.mouseLocation)
+            self.handleClick(at: NSEvent.mouseLocation, eventWindow: event.window)
             return event
         }
     }
@@ -108,18 +111,30 @@ final class FocusMaskController {
         localMonitor = nil
     }
 
-    private func isOwnInteractiveWindow(_ window: NSWindow?) -> Bool {
+    private func isIgnoredInteractiveWindow(_ window: NSWindow?) -> Bool {
         guard let window else { return false }
-        return window === exitPanel
+        if window === exitPanel {
+            return true
+        }
+
+        return interactiveWindowsProvider().contains { $0 === window }
     }
 
-    private func handleClick(at screenPoint: CGPoint) {
-        guard !paddedCutout.isNull, !paddedCutout.isEmpty else { return }
-        let inside = paddedCutout.contains(screenPoint)
-        hide()
-        if inside {
+    private func handleClick(at screenPoint: CGPoint, eventWindow: NSWindow?) {
+        let target = clickClassifier.target(
+            for: screenPoint,
+            cutout: paddedCutout,
+            isIgnoredControl: isIgnoredInteractiveWindow(eventWindow)
+        )
+
+        switch target {
+        case .ignoredControl, nil:
+            return
+        case .insideCutout:
+            hide()
             onInsideClick()
-        } else {
+        case .outsideCutout:
+            hide()
             onOutsideClick()
         }
     }
@@ -132,6 +147,10 @@ final class InstructionCardController {
     private let onCopy: (String) -> Void
 
     private var panel: InstructionCardPanel?
+
+    var interactiveWindow: NSWindow? {
+        panel
+    }
 
     init(
         screenProvider: @escaping () -> NSScreen?,

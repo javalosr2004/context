@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from collections.abc import Callable
 from contextvars import ContextVar
 from typing import Any, TypedDict
@@ -13,6 +14,8 @@ from backend.images import UploadedImage
 from backend.tutorial_guide import TutorialGuide, TutorialSessionPlanRequest
 from backend.tutorial_schema import PlannerNeedsContext, PlannerReady, TutorialPlan
 from backend.tutorial_session_events import ServerSessionEvent, StatusChangedEvent
+
+logger = logging.getLogger(__name__)
 
 EventSink = Callable[[ServerSessionEvent], None]
 
@@ -128,6 +131,15 @@ class TutorialSessionGraph:
         state: TutorialSessionState,
     ) -> TutorialSessionState:
         emit_event(StatusChangedEvent(status="planning", label="Analyzing screen"))
+        logger.info(
+            "Graph node: plan_or_ask_context",
+            extra={
+                "session_id": state.get("session_id"),
+                "goal_chars": len(state.get("goal", "")),
+                "message_count": len(state.get("messages", [])),
+                "has_screen": state.get("latest_screen") is not None,
+            },
+        )
         reply = self._tutorial_guide.create_session_planner_reply(
             TutorialSessionPlanRequest(
                 session_id=state["session_id"],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections.abc import Callable, Iterator
 from json import dumps, loads
@@ -37,7 +38,38 @@ from backend.tutorial_sessions import TutorialSessionError, TutorialSessionManag
 logger = logging.getLogger(__name__)
 
 
+_RESERVED_LOG_RECORD_KEYS = frozenset(vars(logging.LogRecord("", 0, "", 0, "", None, None)).keys()) | {"message", "asctime"}
+
+
+class ExtraFieldsFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        base = super().format(record)
+        extras = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in _RESERVED_LOG_RECORD_KEYS and not key.startswith("_")
+        }
+        if not extras:
+            return base
+        formatted_extras = " ".join(f"{key}={value!r}" for key, value in extras.items())
+        return f"{base} | {formatted_extras}"
+
+
+def configure_logging() -> None:
+    level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        ExtraFieldsFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    root = logging.getLogger()
+    root.handlers = [handler]
+    root.setLevel(level)
+    logging.getLogger("backend").setLevel(level)
+
+
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title="Context Backend")
 
     @app.get("/health")
@@ -254,16 +286,24 @@ async def drain_session_events(
                 sink,
             )
         except TutorialSessionError as error:
+            logger.warning(
+                "Tutorial session error",
+                extra={
+                    "session_id": session_id,
+                    "code": error.code,
+                    "message": error.message,
+                },
+            )
             queue.put_nowait(ErrorEvent(code=error.code, message=error.message))
-        except Exception:
+        except Exception as error:
             logger.exception(
                 "Tutorial session event failed",
-                extra={"session_id": session_id},
+                extra={"session_id": session_id, "error_type": type(error).__name__},
             )
             queue.put_nowait(
                 ErrorEvent(
                     code="session_event_failed",
-                    message="The tutorial session could not process that event.",
+                    message=f"{type(error).__name__}: {error}",
                 )
             )
         finally:

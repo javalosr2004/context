@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -110,6 +111,9 @@ class TutorialGuide:
         )
 
 
+RAW_OUTPUT_LOG_LIMIT = 2000
+
+
 def generate_tutorial_plan(
     llm: MultimodalLLM,
     prompt: str,
@@ -121,7 +125,14 @@ def generate_tutorial_plan(
     last_error: TutorialPlanValidationError | None = None
     request_images = images or []
 
+    logger.info(
+        "Generating tutorial plan",
+        extra={"image_count": len(request_images), "max_attempts": max_retries + 1},
+    )
+
     for attempt in range(max_retries + 1):
+        attempt_number = attempt + 1
+        started_at = time.perf_counter()
         raw_plan = llm.complete_text(
             LLMRequest(
                 system_prompt=TUTORIAL_PLAN_SYSTEM_PROMPT,
@@ -138,24 +149,49 @@ def generate_tutorial_plan(
                 temperature=0,
             )
         )
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
         last_text = raw_plan
+        logger.info(
+            "Tutorial plan LLM call completed",
+            extra={
+                "attempt": attempt_number,
+                "elapsed_ms": elapsed_ms,
+                "raw_chars": len(raw_plan),
+            },
+        )
 
         try:
-            return parse_tutorial_plan(raw_plan)
+            plan = parse_tutorial_plan(raw_plan)
+            logger.info(
+                "Tutorial plan validated",
+                extra={"attempt": attempt_number, "step_count": len(plan.steps)},
+            )
+            return plan
         except TutorialPlanValidationError as error:
             last_error = error
             error_text = format_validation_error(error)
             logger.warning(
                 "Tutorial plan validation failed",
                 extra={
-                    "attempt": attempt + 1,
+                    "attempt": attempt_number,
                     "max_attempts": max_retries + 1,
                     "error": error_text,
+                    "raw_output": truncate(raw_plan, RAW_OUTPUT_LOG_LIMIT),
                 },
             )
 
+    logger.error(
+        "Tutorial plan exhausted retries",
+        extra={
+            "max_attempts": max_retries + 1,
+            "last_error": format_validation_error(last_error) if last_error else None,
+            "last_raw_output": truncate(last_text, RAW_OUTPUT_LOG_LIMIT),
+        },
+    )
     raise TutorialPlanValidationError(
-        "Could not generate valid TutorialPlan"
+        f"Could not generate valid TutorialPlan after {max_retries + 1} attempts. "
+        f"Last error: {format_validation_error(last_error) if last_error else 'unknown'}. "
+        f"Last output: {truncate(last_text, 500)}"
     ) from last_error
 
 
@@ -170,7 +206,14 @@ def generate_tutorial_planner_reply(
     last_error: TutorialPlannerReplyValidationError | None = None
     request_images = images or []
 
+    logger.info(
+        "Generating tutorial planner reply",
+        extra={"image_count": len(request_images), "max_attempts": max_retries + 1},
+    )
+
     for attempt in range(max_retries + 1):
+        attempt_number = attempt + 1
+        started_at = time.perf_counter()
         raw_reply = llm.complete_text(
             LLMRequest(
                 system_prompt=TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
@@ -187,25 +230,56 @@ def generate_tutorial_planner_reply(
                 temperature=0,
             )
         )
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
         last_text = raw_reply
+        logger.info(
+            "Tutorial planner reply LLM call completed",
+            extra={
+                "attempt": attempt_number,
+                "elapsed_ms": elapsed_ms,
+                "raw_chars": len(raw_reply),
+            },
+        )
 
         try:
-            return parse_tutorial_planner_reply(raw_reply)
+            reply = parse_tutorial_planner_reply(raw_reply)
+            logger.info(
+                "Tutorial planner reply validated",
+                extra={"attempt": attempt_number, "reply_type": reply.type},
+            )
+            return reply
         except TutorialPlannerReplyValidationError as error:
             last_error = error
             error_text = format_validation_error(error)
             logger.warning(
                 "Tutorial planner reply validation failed",
                 extra={
-                    "attempt": attempt + 1,
+                    "attempt": attempt_number,
                     "max_attempts": max_retries + 1,
                     "error": error_text,
+                    "raw_output": truncate(raw_reply, RAW_OUTPUT_LOG_LIMIT),
                 },
             )
 
+    logger.error(
+        "Tutorial planner reply exhausted retries",
+        extra={
+            "max_attempts": max_retries + 1,
+            "last_error": format_validation_error(last_error) if last_error else None,
+            "last_raw_output": truncate(last_text, RAW_OUTPUT_LOG_LIMIT),
+        },
+    )
     raise TutorialPlannerReplyValidationError(
-        "Could not generate valid tutorial planner reply"
+        f"Could not generate valid tutorial planner reply after {max_retries + 1} "
+        f"attempts. Last error: {format_validation_error(last_error) if last_error else 'unknown'}. "
+        f"Last output: {truncate(last_text, 500)}"
     ) from last_error
+
+
+def truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... [+{len(text) - limit} chars]"
 
 
 def plan_generation_prompt(

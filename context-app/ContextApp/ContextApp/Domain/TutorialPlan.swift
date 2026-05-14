@@ -62,6 +62,22 @@ struct TutorialStep: Codable, Equatable {
     }
 }
 
+enum TutorialStepJSONFormatter {
+    static func displayString(for step: TutorialStep) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+
+        guard
+            let data = try? encoder.encode(step),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            return "{}"
+        }
+
+        return json
+    }
+}
+
 enum TutorialAction: Codable, Equatable {
     case click(ClickAction)
     case doubleClick(DoubleClickAction)

@@ -92,6 +92,42 @@ final class TutorialPlanTests: XCTestCase {
         XCTAssertEqual(object?["key"] as? String, "command+return")
     }
 
+    func testStepJSONFormatterIncludesEntireStepPayload() throws {
+        let step = TutorialStep(
+            stepId: "step-1",
+            instruction: "Click the message field.",
+            action: .click(ClickAction(target: ActionTarget(
+                kind: .element,
+                label: "Message",
+                role: "text field",
+                description: "The chat composer field",
+                textNearby: ["Send"]
+            ))),
+            confidence: 0.93,
+            requiresConfirmation: false
+        )
+
+        let json = TutorialStepJSONFormatter.displayString(for: step)
+        let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        let action = object?["action"] as? [String: Any]
+        let target = action?["target"] as? [String: Any]
+
+        XCTAssertEqual(object?.keys.sorted(), [
+            "action",
+            "confidence",
+            "instruction",
+            "requires_confirmation",
+            "step_id"
+        ])
+        XCTAssertEqual(object?["step_id"] as? String, "step-1")
+        XCTAssertEqual(object?["instruction"] as? String, "Click the message field.")
+        XCTAssertEqual(object?["confidence"] as? Double, 0.93)
+        XCTAssertEqual(object?["requires_confirmation"] as? Bool, false)
+        XCTAssertEqual(action?["type"] as? String, "click")
+        XCTAssertEqual(target?["label"] as? String, "Message")
+        XCTAssertEqual(target?["text_nearby"] as? [String], ["Send"])
+    }
+
     func testDecodesFlatWaitAction() throws {
         let data = Data("""
         {

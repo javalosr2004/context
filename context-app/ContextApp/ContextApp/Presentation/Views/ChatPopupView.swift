@@ -10,7 +10,7 @@ struct InstructionInput {
     let submittedAtUptimeNanoseconds: UInt64
 }
 
-private struct GroundingPayloadPreview: Identifiable {
+private struct StepJSONPreview: Identifiable {
     let id = UUID()
     let stepID: String
     let json: String
@@ -25,7 +25,7 @@ struct ChatPopupView: View {
 
     @State private var activeStepID: String?
     @State private var draft = ""
-    @State private var groundingPayloadPreview: GroundingPayloadPreview?
+    @State private var stepJSONPreview: StepJSONPreview?
     @State private var instructionDraft = ""
     @State private var isFetchingTutorialPlan = false
     @State private var isInstructionInputVisible = false
@@ -75,8 +75,8 @@ struct ChatPopupView: View {
             guard isFetchingTutorialPlan else { return }
             loadingWordIndex = (loadingWordIndex + 1) % Self.loadingWords.count
         }
-        .sheet(item: $groundingPayloadPreview) { preview in
-            GroundingPayloadPreviewSheet(preview: preview)
+        .sheet(item: $stepJSONPreview) { preview in
+            StepJSONPreviewSheet(preview: preview)
         }
     }
 
@@ -430,9 +430,9 @@ struct ChatPopupView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button {
-                showGroundingPayloadPreview(for: step)
+                showStepJSONPreview(for: step)
             } label: {
-                Label("Show grounding JSON", systemImage: "curlybraces")
+                Label("Show step JSON", systemImage: "curlybraces")
             }
         }
         .disabled(activeStepID != nil)
@@ -524,10 +524,10 @@ struct ChatPopupView: View {
         }
     }
 
-    private func showGroundingPayloadPreview(for step: TutorialStep) {
-        groundingPayloadPreview = GroundingPayloadPreview(
+    private func showStepJSONPreview(for step: TutorialStep) {
+        stepJSONPreview = StepJSONPreview(
             stepID: step.stepId,
-            json: TutorialActionConsumer.groundingPayloadJSONString(for: step)
+            json: TutorialStepJSONFormatter.displayString(for: step)
         )
     }
 
@@ -602,15 +602,15 @@ struct ChatPopupView: View {
     }
 }
 
-private struct GroundingPayloadPreviewSheet: View {
-    let preview: GroundingPayloadPreview
+private struct StepJSONPreviewSheet: View {
+    let preview: StepJSONPreview
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Grounding JSON")
+                    Text("Step JSON")
                         .font(.system(size: 14, weight: .semibold))
 
                     Text(preview.stepID)

@@ -150,10 +150,7 @@ final class TutorialSessionController: ObservableObject {
     }
 
     func stop() {
-        listenTask?.cancel()
-        listenTask = nil
-        socket?.cancel(with: .goingAway, reason: nil)
-        socket = nil
+        clearSocket()
     }
 
     private func sendUserMessage(_ text: String) async {
@@ -210,9 +207,10 @@ final class TutorialSessionController: ObservableObject {
     }
 
     private func connectedSocket() async throws -> URLSessionWebSocketTask {
-        if let socket {
+        if let socket, socket.closeCode == .invalid {
             return socket
         }
+        clearSocket()
 
         guard let baseURL = endpointStore.baseURL.flatMap(URL.init(string:)) else {
             throw TutorialAPIEndpointStoreError.missingBaseURL
@@ -237,11 +235,21 @@ final class TutorialSessionController: ObservableObject {
                 } catch is CancellationError {
                     return
                 } catch {
-                    self?.applyFailure("Tutorial session socket failed: \(error.localizedDescription)")
+                    guard let self else { return }
+                    self.clearSocket()
+                    self.applyFailure("Tutorial session socket failed: \(error.localizedDescription)")
                     return
                 }
             }
         }
+    }
+
+    private func clearSocket() {
+        listenTask?.cancel()
+        listenTask = nil
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
+        sessionID = nil
     }
 
     private func apply(_ event: TutorialSessionServerEvent) {

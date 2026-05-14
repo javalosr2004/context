@@ -6,10 +6,14 @@ from dataclasses import dataclass
 
 from backend.gemini_client import GeminiClient
 from backend.llm import MultimodalLLM
+from backend.openai_client import OpenAIClient
 
 
 DEFAULT_LLM_PROVIDER = "gemini"
 DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+DEFAULT_OPENAI_MODEL = "gpt-5.4"
+DEFAULT_OPENAI_REASONING_EFFORT = "medium"
+DEFAULT_OPENAI_VERBOSITY = "medium"
 
 
 class LLMProviderConfigurationError(RuntimeError):
@@ -28,6 +32,8 @@ class LLMProvider:
         provider = self._provider_name()
         if provider == "gemini":
             return self._create_gemini_client()
+        if provider == "openai":
+            return self._create_openai_client()
 
         raise LLMProviderConfigurationError(f"Unsupported LLM_PROVIDER: {provider}")
 
@@ -36,11 +42,30 @@ class LLMProvider:
 
     def _create_gemini_client(self) -> GeminiClient:
         api_key = self._required("GEMINI_API_KEY")
-        model = self.environment.get("LLM_MODEL") or self.environment.get(
-            "GEMINI_MODEL",
-            DEFAULT_GEMINI_MODEL,
+        model = (
+            self.environment.get("LLM_MODEL")
+            or self.environment.get("GEMINI_MODEL")
+            or DEFAULT_GEMINI_MODEL
         )
         return GeminiClient(api_key=api_key, model=model)
+
+    def _create_openai_client(self) -> OpenAIClient:
+        api_key = self._required("OPENAI_API_KEY")
+        model = (
+            self.environment.get("LLM_MODEL")
+            or self.environment.get("OPENAI_MODEL")
+            or DEFAULT_OPENAI_MODEL
+        )
+        return OpenAIClient(
+            api_key=api_key,
+            model=model,
+            reasoning_effort=self.environment.get(
+                "OPENAI_REASONING_EFFORT", DEFAULT_OPENAI_REASONING_EFFORT
+            ),
+            verbosity=self.environment.get(
+                "OPENAI_VERBOSITY", DEFAULT_OPENAI_VERBOSITY
+            ),
+        )
 
     def _required(self, name: str) -> str:
         value = self.environment.get(name)

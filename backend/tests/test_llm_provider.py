@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from backend.llm_provider import (
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_OPENAI_MODEL,
     LLMProvider,
     LLMProviderConfigurationError,
 )
@@ -53,12 +54,51 @@ class LLMProviderTests(unittest.TestCase):
             model="legacy-model",
         )
 
+    def test_creates_openai_client_from_environment(self) -> None:
+        with patch("backend.llm_provider.OpenAIClient") as openai_client:
+            client = object()
+            openai_client.return_value = client
+
+            llm = LLMProvider(
+                {
+                    "LLM_PROVIDER": "openai",
+                    "OPENAI_API_KEY": "openai-key",
+                    "LLM_MODEL": "gpt-5.4",
+                    "OPENAI_REASONING_EFFORT": "high",
+                    "OPENAI_VERBOSITY": "low",
+                }
+            ).create_multimodal_llm()
+
+        self.assertIs(llm, client)
+        openai_client.assert_called_once_with(
+            api_key="openai-key",
+            model="gpt-5.4",
+            reasoning_effort="high",
+            verbosity="low",
+        )
+
+    def test_defaults_to_openai_model_and_settings(self) -> None:
+        with patch("backend.llm_provider.OpenAIClient") as openai_client:
+            LLMProvider(
+                {
+                    "LLM_PROVIDER": "openai",
+                    "OPENAI_API_KEY": "openai-key",
+                }
+            ).create_multimodal_llm()
+
+        openai_client.assert_called_once_with(
+            api_key="openai-key",
+            model=DEFAULT_OPENAI_MODEL,
+            reasoning_effort="medium",
+            verbosity="medium",
+        )
+
     def test_rejects_unsupported_provider(self) -> None:
         with self.assertRaisesRegex(
             LLMProviderConfigurationError,
-            "Unsupported LLM_PROVIDER: openai",
+            "Unsupported LLM_PROVIDER: anthropic",
         ):
-            LLMProvider({"LLM_PROVIDER": "openai"}).create_multimodal_llm()
+            LLMProvider({"LLM_PROVIDER": "anthropic"}).create_multimodal_llm()
 
     def test_requires_gemini_api_key(self) -> None:
         with self.assertRaisesRegex(
@@ -66,6 +106,13 @@ class LLMProviderTests(unittest.TestCase):
             "GEMINI_API_KEY is required",
         ):
             LLMProvider({"LLM_PROVIDER": "gemini"}).create_multimodal_llm()
+
+    def test_requires_openai_api_key(self) -> None:
+        with self.assertRaisesRegex(
+            LLMProviderConfigurationError,
+            "OPENAI_API_KEY is required",
+        ):
+            LLMProvider({"LLM_PROVIDER": "openai"}).create_multimodal_llm()
 
 
 if __name__ == "__main__":

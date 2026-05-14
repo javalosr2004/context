@@ -58,6 +58,7 @@ final class TutorialSessionController: ObservableObject {
     @Published private(set) var awaitingConfirmationStepID: String?
     @Published private(set) var currentStepID: String?
     @Published private(set) var messages: [ChatMessage]
+    @Published private(set) var pendingContinuePromptStepID: String?
     @Published private(set) var pendingQuestion: TutorialSessionQuestion?
     @Published private(set) var status: TutorialSessionUIStatus = .ready
 
@@ -110,27 +111,33 @@ final class TutorialSessionController: ObservableObject {
 
     func markStepStarted(stepID: String) async {
         do {
-            let socket = try await connectedSocket()
-            try await client.send(.stepStarted(stepID: stepID), on: socket)
+            try await sendSessionEvent(.stepStarted(stepID: stepID))
         } catch {
             applyFailure("Could not start tutorial step: \(error.localizedDescription)")
         }
     }
 
+    func presentContinuePrompt(stepID: String) {
+        pendingContinuePromptStepID = stepID
+    }
+
+    func dismissContinuePrompt() {
+        pendingContinuePromptStepID = nil
+    }
+
     func confirmStep(stepID: String, confirmed: Bool, note: String?) async {
+        pendingContinuePromptStepID = nil
         do {
             status = confirmed ? .sending : .preparingScreen
             let screen = confirmed ? nil : try await captureScreenSnapshot()
-            let socket = try await connectedSocket()
             status = .sending
-            try await client.send(
+            try await sendSessionEvent(
                 .userConfirmation(
                     stepID: stepID,
                     confirmed: confirmed,
                     note: note,
                     screen: screen
-                ),
-                on: socket
+                )
             )
             awaitingConfirmationStepID = nil
             status = confirmed ? .requestReceived : .planning("Replanning from current screen")
@@ -159,9 +166,8 @@ final class TutorialSessionController: ObservableObject {
         do {
             status = .preparingScreen
             let screen = try await captureScreenSnapshot()
-            let socket = try await connectedSocket()
             status = .sending
-            try await client.send(.userMessage(text: text, screen: screen), on: socket)
+            try await sendSessionEvent(.userMessage(text: text, screen: screen))
         } catch {
             await runFallbackPlanIfAvailable(text: text, originalError: error)
         }
@@ -173,16 +179,14 @@ final class TutorialSessionController: ObservableObject {
         do {
             status = .preparingScreen
             let screen = try await captureScreenSnapshot()
-            let socket = try await connectedSocket()
             pendingQuestion = nil
             status = .sending
-            try await client.send(
+            try await sendSessionEvent(
                 .userAnswer(
                     questionID: question.questionID,
                     text: text,
                     screen: screen
-                ),
-                on: socket
+                )
             )
         } catch {
             applyFailure("Could not send answer: \(error.localizedDescription)")
@@ -207,7 +211,7 @@ final class TutorialSessionController: ObservableObject {
     }
 
     private func connectedSocket() async throws -> URLSessionWebSocketTask {
-        if let socket, socket.closeCode == .invalid {
+        if let socket, socket.closeCode == .invalid, socket.state == .running {
             return socket
         }
         clearSocket()
@@ -218,10 +222,26 @@ final class TutorialSessionController: ObservableObject {
 
         let createdSession = try await client.createSession(baseURL: baseURL)
         let newSocket = try client.openSocket(baseURL: baseURL, sessionID: createdSession.sessionID)
+        do {
+            try await client.waitUntilReady(on: newSocket, sessionID: createdSession.sessionID)
+        } catch {
+            newSocket.cancel(with: .goingAway, reason: nil)
+            throw error
+        }
         sessionID = createdSession.sessionID
         socket = newSocket
         startListening(on: newSocket)
         return newSocket
+    }
+
+    private func sendSessionEvent(_ event: TutorialSessionClientEvent) async throws {
+        let socket = try await connectedSocket()
+        do {
+            try await client.send(event, on: socket)
+        } catch {
+            clearSocketIfCurrent(socket)
+            throw error
+        }
     }
 
     private func startListening(on socket: URLSessionWebSocketTask) {
@@ -236,7 +256,7 @@ final class TutorialSessionController: ObservableObject {
                     return
                 } catch {
                     guard let self else { return }
-                    self.clearSocket()
+                    guard self.clearSocketIfCurrent(socket) else { return }
                     self.applyFailure("Tutorial session socket failed: \(error.localizedDescription)")
                     return
                 }
@@ -250,6 +270,12 @@ final class TutorialSessionController: ObservableObject {
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         sessionID = nil
+    }
+
+    private func clearSocketIfCurrent(_ socketToClear: URLSessionWebSocketTask) -> Bool {
+        guard socket === socketToClear else { return false }
+        clearSocket()
+        return true
     }
 
     private func apply(_ event: TutorialSessionServerEvent) {

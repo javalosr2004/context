@@ -6,6 +6,8 @@ enum TutorialSessionAPIClientError: LocalizedError {
     case decodingFailed(Error)
     case invalidWebSocketURL(URL)
     case unsupportedWebSocketMessage
+    case unexpectedSocketReadyEvent
+    case mismatchedSocketSession(expected: String, actual: String)
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +21,10 @@ enum TutorialSessionAPIClientError: LocalizedError {
             return "Could not create a WebSocket URL from \(url.absoluteString)."
         case .unsupportedWebSocketMessage:
             return "The tutorial session socket returned an unsupported message."
+        case .unexpectedSocketReadyEvent:
+            return "The tutorial session socket did not become ready."
+        case .mismatchedSocketSession(let expected, let actual):
+            return "The tutorial session socket became ready for \(actual), but expected \(expected)."
         }
     }
 }
@@ -261,6 +267,19 @@ final class TutorialSessionAPIClient {
         let task = session.webSocketTask(with: try Self.socketURL(from: baseURL, sessionID: sessionID))
         task.resume()
         return task
+    }
+
+    func waitUntilReady(on socket: URLSessionWebSocketTask, sessionID: String) async throws {
+        let event = try await receive(from: socket)
+        guard case .sessionReady(let readySessionID) = event else {
+            throw TutorialSessionAPIClientError.unexpectedSocketReadyEvent
+        }
+        guard readySessionID == sessionID else {
+            throw TutorialSessionAPIClientError.mismatchedSocketSession(
+                expected: sessionID,
+                actual: readySessionID
+            )
+        }
     }
 
     func send(_ event: TutorialSessionClientEvent, on socket: URLSessionWebSocketTask) async throws {

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-import json
-from json import JSONDecodeError
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 INVALID_TUTORIAL_PLAN_MESSAGE = "LLM returned an invalid tutorial plan."
+LOW_CONFIDENCE_THRESHOLD = 0.7
+GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
+    {
+        "additionalProperties",
+        "additional_properties",
+        "default",
+    }
+)
 
 
 class TutorialPlanValidationError(ValueError):
@@ -19,164 +25,167 @@ class TutorialSchemaModel(BaseModel):
 
 
 class ActionTarget(TutorialSchemaModel):
-    kind: Literal["element", "screen", "window", "region"]
-    label: str | None = None
-    role: str | None = None
-    description: str | None = None
-    text_nearby: list[str] = Field(default_factory=list)
+    kind: Literal["element", "screen", "window", "region"] = Field(
+        description="Type of UI target the overlay should locate."
+    )
+    label: str | None = Field(
+        default=None,
+        description="Visible label or accessible name for the target.",
+    )
+    role: str | None = Field(
+        default=None,
+        description="UI role such as button, menu item, text field, or window.",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Semantic visual description useful for grounding on screen.",
+    )
 
 
-class ClickAction(TutorialSchemaModel):
-    type: Literal["click"]
-    target: ActionTarget
-
-
-class DoubleClickAction(TutorialSchemaModel):
-    type: Literal["double_click"]
-    target: ActionTarget
-
-
-class RightClickAction(TutorialSchemaModel):
-    type: Literal["right_click"]
-    target: ActionTarget
-
-
-class HoverAction(TutorialSchemaModel):
-    type: Literal["hover"]
-    target: ActionTarget
-
-
-class TypeAction(TutorialSchemaModel):
-    type: Literal["type"]
-    target: ActionTarget
-    text: str = Field(min_length=1)
-
-
-class PressKeyAction(TutorialSchemaModel):
-    type: Literal["press_key"]
-    keys: list[str] = Field(min_length=1)
-
-
-class ScrollAction(TutorialSchemaModel):
-    type: Literal["scroll"]
-    target: ActionTarget | None = None
-    direction: Literal["up", "down", "left", "right"]
-    amount: Literal["small", "medium", "large"]
-    until: str | None = None
-
-
-class DragAction(TutorialSchemaModel):
-    type: Literal["drag"]
-    target: ActionTarget
-    direction: Literal["up", "down", "left", "right"]
-    amount: Literal["small", "medium", "large"]
-
-
-class WaitAction(TutorialSchemaModel):
-    type: Literal["wait"]
-    until: str = Field(min_length=1)
-    timeout_ms: int | None = Field(default=None, gt=0)
-
-
-class ConfirmAction(TutorialSchemaModel):
-    type: Literal["confirm"]
-    question: str = Field(min_length=1)
-    expected_screen: str = Field(min_length=1)
-
-
-TutorialAction = Annotated[
-    ClickAction
-    | DoubleClickAction
-    | RightClickAction
-    | HoverAction
-    | TypeAction
-    | PressKeyAction
-    | ScrollAction
-    | DragAction
-    | WaitAction
-    | ConfirmAction,
-    Field(discriminator="type"),
-]
+class TutorialAction(TutorialSchemaModel):
+    type: Literal[
+        "click",
+        "double_click",
+        "right_click",
+        "hover",
+        "type",
+        "press_key",
+        "scroll",
+        "drag",
+        "wait",
+        "confirm",
+    ] = Field(description="Action type supported by the overlay tutorial player.")
+    target: ActionTarget | None = Field(
+        default=None,
+        description="Required for pointer actions and drag actions.",
+    )
+    text: str | None = Field(
+        default=None,
+        description="Text to enter. Only used when type is 'type'.",
+    )
+    key: str | None = Field(
+        default=None,
+        description="Keyboard key or shortcut. Only used when type is 'press_key'.",
+    )
+    direction: Literal["up", "down", "left", "right"] | None = Field(
+        default=None,
+        description="Direction for scroll or drag actions.",
+    )
+    duration_ms: int | None = Field(
+        default=None,
+        ge=0,
+        le=10000,
+        description="Wait duration in milliseconds. Only used when type is 'wait'.",
+    )
 
 
 class TutorialStep(TutorialSchemaModel):
-    step_id: str = Field(min_length=1)
-    instruction: str = Field(min_length=1)
+    step_id: str = Field(
+        min_length=1,
+        description="Stable unique ID like step_001.",
+    )
+    instruction: str = Field(
+        min_length=1,
+        description="One concise user-facing overlay instruction.",
+    )
     action: TutorialAction
-    confidence: float = Field(ge=0.0, le=1.0)
-    requires_confirmation: bool
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_requires_confirmation(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-
-        action = data.get("action")
-        action_type = action.get("type") if isinstance(action, dict) else None
-        confidence = data.get("confidence")
-        if action_type == "confirm" or is_low_confidence(confidence):
-            return {**data, "requires_confirmation": True}
-
-        return data
-
-    @model_validator(mode="after")
-    def require_confirmation_for_uncertainty(self) -> TutorialStep:
-        if self.action.type == "confirm" and not self.requires_confirmation:
-            raise ValueError("confirm actions must set requires_confirmation to true")
-        if self.confidence < 0.7 and not self.requires_confirmation:
-            raise ValueError("steps below 0.7 confidence must require confirmation")
-        return self
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Model confidence from 0.0 to 1.0.",
+    )
+    requires_confirmation: bool = Field(
+        description="True when the screen state or target is uncertain."
+    )
 
 
 class TutorialPlan(TutorialSchemaModel):
     schema_version: Literal["tutorial_plan.v1"]
-    goal: str = Field(min_length=1)
-    summary: str = Field(min_length=1)
-    steps: list[TutorialStep] = Field(min_length=1, max_length=8)
+    goal: str = Field(min_length=1, description="The user's requested task.")
+    summary: str = Field(
+        min_length=1,
+        description="Short summary of the generated tutorial plan.",
+    )
+    steps: list[TutorialStep] = Field(
+        min_length=1,
+        max_length=8,
+        description="Ordered tutorial steps for the overlay player.",
+    )
 
 
 def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
     try:
-        return TutorialPlan.model_validate_json(raw_json)
-    except ValidationError as error:
-        if not is_json_invalid_error(error):
-            raise TutorialPlanValidationError(
-                INVALID_TUTORIAL_PLAN_MESSAGE
-            ) from error
-
-    try:
-        return TutorialPlan.model_validate(extract_first_json_object(raw_json))
-    except (JSONDecodeError, TypeError, ValueError, ValidationError) as error:
+        plan = TutorialPlan.model_validate_json(raw_json)
+        validate_tutorial_plan_semantics(plan)
+        return plan
+    except (ValidationError, ValueError) as error:
         raise TutorialPlanValidationError(
             INVALID_TUTORIAL_PLAN_MESSAGE
         ) from error
 
 
-def extract_first_json_object(raw_text: str) -> dict[str, Any]:
-    decoder = json.JSONDecoder()
-    for start_index, character in enumerate(raw_text):
-        if character != "{":
-            continue
-
-        try:
-            value, _ = decoder.raw_decode(raw_text, start_index)
-        except JSONDecodeError:
-            continue
-
-        if isinstance(value, dict):
-            return value
-
-    raise ValueError("No JSON object found in tutorial plan response.")
+def tutorial_plan_response_schema() -> dict[str, Any]:
+    return remove_gemini_unsupported_schema_keys(TutorialPlan.model_json_schema())
 
 
-def is_json_invalid_error(error: ValidationError) -> bool:
-    return any(detail.get("type") == "json_invalid" for detail in error.errors())
+def remove_gemini_unsupported_schema_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: remove_gemini_unsupported_schema_keys(child)
+            for key, child in value.items()
+            if key not in GEMINI_UNSUPPORTED_SCHEMA_KEYS
+        }
+
+    if isinstance(value, list):
+        return [remove_gemini_unsupported_schema_keys(item) for item in value]
+
+    return value
 
 
-def is_low_confidence(value: object) -> bool:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and value < 0.7
-    )
+def validate_tutorial_plan_semantics(plan: TutorialPlan) -> None:
+    for step in plan.steps:
+        validate_step_semantics(step)
+
+
+def validate_step_semantics(step: TutorialStep) -> None:
+    validate_action_semantics(step.action)
+
+    if step.action.type == "confirm" and not step.requires_confirmation:
+        raise ValueError("confirm actions must set requires_confirmation to true")
+
+    if (
+        step.confidence < LOW_CONFIDENCE_THRESHOLD
+        and not step.requires_confirmation
+    ):
+        raise ValueError("steps below 0.7 confidence must require confirmation")
+
+
+def validate_action_semantics(action: TutorialAction) -> None:
+    if action.type in {"click", "double_click", "right_click", "hover"}:
+        require_target(action)
+
+    if action.type == "type" and not has_text(action.text):
+        raise ValueError("type action requires text")
+
+    if action.type == "press_key" and not has_text(action.key):
+        raise ValueError("press_key action requires key")
+
+    if action.type == "scroll" and action.direction is None:
+        raise ValueError("scroll action requires direction")
+
+    if action.type == "drag":
+        require_target(action)
+        if action.direction is None:
+            raise ValueError("drag action requires direction")
+
+    if action.type == "wait" and action.duration_ms is None:
+        raise ValueError("wait action requires duration_ms")
+
+
+def require_target(action: TutorialAction) -> None:
+    if action.target is None:
+        raise ValueError(f"{action.type} action requires target")
+
+
+def has_text(value: str | None) -> bool:
+    return value is not None and bool(value.strip())

@@ -84,12 +84,37 @@ final class TutorialPlanTests: XCTestCase {
     }
 
     func testActionEncodingPreservesDiscriminatorKeys() throws {
-        let action = TutorialAction.pressKey(PressKeyAction(keys: ["command", "return"]))
+        let action = TutorialAction.pressKey(PressKeyAction(key: "command+return"))
         let data = try JSONEncoder().encode(action)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
         XCTAssertEqual(object?["type"] as? String, "press_key")
-        XCTAssertEqual(object?["keys"] as? [String], ["command", "return"])
+        XCTAssertEqual(object?["key"] as? String, "command+return")
+    }
+
+    func testDecodesFlatWaitAction() throws {
+        let data = Data("""
+        {
+          "type": "wait",
+          "duration_ms": 750
+        }
+        """.utf8)
+
+        let action = try JSONDecoder().decode(TutorialAction.self, from: data)
+
+        XCTAssertEqual(action, .wait(WaitAction(durationMs: 750)))
+    }
+
+    func testDecodesFlatConfirmAction() throws {
+        let data = Data("""
+        {
+          "type": "confirm"
+        }
+        """.utf8)
+
+        let action = try JSONDecoder().decode(TutorialAction.self, from: data)
+
+        XCTAssertEqual(action, .confirm(ConfirmAction()))
     }
 
     func testDecodingMissingRequiredPayloadFieldThrowsKeyNotFound() {

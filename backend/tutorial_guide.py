@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 
 from backend.images import UploadedImage
 from backend.llm import LLMRequest, MultimodalLLM
-from backend.tutorial_schema import TutorialPlan, parse_tutorial_plan
+from backend.tutorial_schema import (
+    TutorialPlan,
+    TutorialPlanValidationError,
+    parse_tutorial_plan,
+    tutorial_plan_response_schema,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 TUTORIAL_CREATOR_SYSTEM_PROMPT = (
@@ -19,65 +28,15 @@ TUTORIAL_CREATOR_SYSTEM_PROMPT = (
 
 TUTORIAL_PLAN_SYSTEM_PROMPT = """
 You are a tutorial planner for a macOS overlay teaching system.
-
-Return only valid JSON. Do not include Markdown. Do not include prose outside JSON.
-The response must match schema_version "tutorial_plan.v1".
-Return at most 8 steps.
-
-Allowed action types:
-click, double_click, right_click, hover, type, press_key, scroll, drag, wait, confirm.
-
-Each step must include:
-- step_id
-- instruction
-- action
-- confidence
-- requires_confirmation
-
-Each step must contain exactly one action.
-Do not invent action types.
-Do not use a generic payload object. Use only the fields allowed by each action type.
-Use confirm when confidence is below 0.7, the target is ambiguous, or the screen may not match the expected state.
-Keep instruction short and readable for a human overlay.
+Do not assume application context; design the tutorial to work with the
+attached screen context and the user's request. Follow the provided response
+schema exactly. Keep each instruction short and readable for a human overlay.
 Use semantic targets, not coordinates, unless coordinates were provided.
-
-JSON shape:
-{
-  "schema_version": "tutorial_plan.v1",
-  "goal": "string",
-  "summary": "string",
-  "steps": [
-    {
-      "step_id": "step_001",
-      "instruction": "string",
-      "action": {
-        "type": "click",
-        "target": {
-          "kind": "element",
-          "label": "string",
-          "role": "string",
-          "description": "string",
-          "text_nearby": ["string"]
-        }
-      },
-      "confidence": 0.0,
-      "requires_confirmation": true
-    }
-  ]
-}
-
-Action schemas:
-- click, double_click, right_click, hover: {"type": "...", "target": ActionTarget}
-- type: {"type": "type", "target": ActionTarget, "text": "string"}
-- press_key: {"type": "press_key", "keys": ["Meta", "K"]}
-- scroll: {"type": "scroll", "target": ActionTarget optional, "direction": "up|down|left|right", "amount": "small|medium|large", "until": "string optional"}
-- drag: {"type": "drag", "target": ActionTarget, "direction": "up|down|left|right", "amount": "small|medium|large"}
-- wait: {"type": "wait", "until": "string", "timeout_ms": 5000 optional}
-- confirm: {"type": "confirm", "question": "string", "expected_screen": "string"}
-
-ActionTarget schema:
-{"kind": "element|screen|window|region", "label": "string optional", "role": "string optional", "description": "string optional", "text_nearby": ["string"] optional}
+Use confirmation when confidence is low, the target is ambiguous, or the
+screen may not match the expected state.
 """.strip()
+
+MAX_TUTORIAL_PLAN_RETRIES = 2
 
 
 @dataclass(frozen=True)
@@ -99,16 +58,11 @@ class TutorialGuide:
         self._llm = llm
 
     def create_plan(self, request: TutorialPlanRequest) -> TutorialPlan:
-        raw_plan = self._llm.complete_text(
-            LLMRequest(
-                system_prompt=TUTORIAL_PLAN_SYSTEM_PROMPT,
-                user_text=build_tutorial_plan_user_prompt(request.text),
-                images=request.images,
-                enable_search_grounding=False,
-                response_mime_type="application/json",
-            )
+        return generate_tutorial_plan(
+            llm=self._llm,
+            prompt=build_tutorial_plan_user_prompt(request.text),
+            images=request.images,
         )
-        return parse_tutorial_plan(raw_plan)
 
     def stream_tutorial(self, request: TutorialStreamRequest) -> Iterator[str]:
         return self._llm.stream_text(
@@ -121,9 +75,80 @@ class TutorialGuide:
         )
 
 
+def generate_tutorial_plan(
+    llm: MultimodalLLM,
+    prompt: str,
+    images: list[UploadedImage] | None = None,
+    max_retries: int = MAX_TUTORIAL_PLAN_RETRIES,
+) -> TutorialPlan:
+    last_text = ""
+    error_text = ""
+    last_error: TutorialPlanValidationError | None = None
+    request_images = images or []
+
+    for attempt in range(max_retries + 1):
+        raw_plan = llm.complete_text(
+            LLMRequest(
+                system_prompt=TUTORIAL_PLAN_SYSTEM_PROMPT,
+                user_text=plan_generation_prompt(
+                    prompt=prompt,
+                    attempt=attempt,
+                    error_text=error_text,
+                    last_text=last_text,
+                ),
+                images=request_images,
+                enable_search_grounding=False,
+                response_mime_type="application/json",
+                response_schema=tutorial_plan_response_schema(),
+                temperature=0,
+            )
+        )
+        last_text = raw_plan
+
+        try:
+            return parse_tutorial_plan(raw_plan)
+        except TutorialPlanValidationError as error:
+            last_error = error
+            error_text = format_validation_error(error)
+            logger.warning(
+                "Tutorial plan validation failed",
+                extra={
+                    "attempt": attempt + 1,
+                    "max_attempts": max_retries + 1,
+                    "error": error_text,
+                },
+            )
+
+    raise TutorialPlanValidationError(
+        "Could not generate valid TutorialPlan"
+    ) from last_error
+
+
+def plan_generation_prompt(
+    prompt: str,
+    attempt: int,
+    error_text: str,
+    last_text: str,
+) -> str:
+    if attempt == 0:
+        return prompt
+
+    return (
+        "Fix the previous JSON so it validates against the provided response "
+        "schema and tutorial action semantics.\n\n"
+        f"Validation failed because:\n{error_text}\n\n"
+        f"Previous output:\n{last_text}"
+    )
+
+
 def build_tutorial_plan_user_prompt(user_request: str) -> str:
     return (
         "Create a compact tutorial plan for this user request. "
         "Use the attached screen images as the current visual context.\n\n"
         f"User request: {user_request}"
     )
+
+
+def format_validation_error(error: TutorialPlanValidationError) -> str:
+    cause = error.__cause__
+    return str(cause) if cause is not None else str(error)

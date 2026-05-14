@@ -35,9 +35,7 @@ final class TutorialActionConsumerTests: XCTestCase {
                     description: "The app settings window",
                     textNearby: nil
                 ),
-                direction: .down,
-                amount: .medium,
-                until: "Billing appears"
+                direction: .down
             )),
             confidence: 0.75,
             requiresConfirmation: false
@@ -54,7 +52,7 @@ final class TutorialActionConsumerTests: XCTestCase {
         let step = TutorialStep(
             stepId: "step-3",
             instruction: "Press Command K.",
-            action: .pressKey(PressKeyAction(keys: ["Command", "K"])),
+            action: .pressKey(PressKeyAction(key: "Command+K")),
             confidence: 0.91,
             requiresConfirmation: false
         )

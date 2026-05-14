@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 from google import genai
 from google.genai import types
@@ -23,6 +24,8 @@ class GeminiClient:
                 system_prompt=request.system_prompt,
                 enable_search_grounding=request.enable_search_grounding,
                 response_mime_type=request.response_mime_type,
+                response_schema=request.response_schema,
+                temperature=request.temperature,
             ),
         )
         return response.text or ""
@@ -36,6 +39,8 @@ class GeminiClient:
                 system_prompt=request.system_prompt,
                 enable_search_grounding=request.enable_search_grounding,
                 response_mime_type=request.response_mime_type,
+                response_schema=request.response_schema,
+                temperature=request.temperature,
             ),
         )
 
@@ -63,11 +68,15 @@ def build_generate_content_config(
     system_prompt: str,
     enable_search_grounding: bool,
     response_mime_type: str | None = None,
+    response_schema: dict[str, Any] | None = None,
+    temperature: float | None = None,
 ) -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
         system_instruction=system_prompt,
         tools=[build_google_search_tool()] if enable_search_grounding else [],
         response_mime_type=response_mime_type,
+        response_schema=response_schema,
+        temperature=temperature,
     )
 
 

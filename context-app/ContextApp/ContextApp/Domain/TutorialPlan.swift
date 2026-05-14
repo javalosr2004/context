@@ -103,13 +103,9 @@ enum TutorialAction: Codable, Equatable {
         case type
         case target
         case text
-        case keys
+        case key
         case direction
-        case amount
-        case until
-        case timeoutMs = "timeout_ms"
-        case question
-        case expectedScreen = "expected_screen"
+        case durationMs = "duration_ms"
     }
 
     init(from decoder: Decoder) throws {
@@ -160,25 +156,20 @@ enum TutorialAction: Codable, Equatable {
         case .hover(let action):
             try container.encode(action.target, forKey: .target)
         case .type(let action):
-            try container.encode(action.target, forKey: .target)
+            try container.encodeIfPresent(action.target, forKey: .target)
             try container.encode(action.text, forKey: .text)
         case .pressKey(let action):
-            try container.encode(action.keys, forKey: .keys)
+            try container.encode(action.key, forKey: .key)
         case .scroll(let action):
             try container.encodeIfPresent(action.target, forKey: .target)
             try container.encode(action.direction, forKey: .direction)
-            try container.encode(action.amount, forKey: .amount)
-            try container.encodeIfPresent(action.until, forKey: .until)
         case .drag(let action):
             try container.encode(action.target, forKey: .target)
             try container.encode(action.direction, forKey: .direction)
-            try container.encode(action.amount, forKey: .amount)
         case .wait(let action):
-            try container.encode(action.until, forKey: .until)
-            try container.encodeIfPresent(action.timeoutMs, forKey: .timeoutMs)
-        case .confirm(let action):
-            try container.encode(action.question, forKey: .question)
-            try container.encode(action.expectedScreen, forKey: .expectedScreen)
+            try container.encode(action.durationMs, forKey: .durationMs)
+        case .confirm:
+            break
         }
     }
 }
@@ -213,12 +204,6 @@ enum ScrollDirection: String, Codable, Equatable {
     case right
 }
 
-enum ScrollAmount: String, Codable, Equatable {
-    case small
-    case medium
-    case large
-}
-
 struct ClickAction: Codable, Equatable {
     let target: ActionTarget
 }
@@ -236,43 +221,31 @@ struct HoverAction: Codable, Equatable {
 }
 
 struct TypeAction: Codable, Equatable {
-    let target: ActionTarget
+    let target: ActionTarget?
     let text: String
 }
 
 struct PressKeyAction: Codable, Equatable {
-    let keys: [String]
+    let key: String
 }
 
 struct ScrollAction: Codable, Equatable {
     let target: ActionTarget?
     let direction: ScrollDirection
-    let amount: ScrollAmount
-    let until: String?
 }
 
 struct DragAction: Codable, Equatable {
     let target: ActionTarget
     let direction: ScrollDirection
-    let amount: ScrollAmount
 }
 
 struct WaitAction: Codable, Equatable {
-    let until: String
-    let timeoutMs: Int?
+    let durationMs: Int
 
     private enum CodingKeys: String, CodingKey {
-        case until
-        case timeoutMs = "timeout_ms"
+        case durationMs = "duration_ms"
     }
 }
 
 struct ConfirmAction: Codable, Equatable {
-    let question: String
-    let expectedScreen: String
-
-    private enum CodingKeys: String, CodingKey {
-        case question
-        case expectedScreen = "expected_screen"
-    }
 }

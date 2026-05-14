@@ -56,6 +56,7 @@ struct ChatPopupView: View {
         VStack(spacing: 0) {
             header
             messageList
+            continuePromptControls
             confirmationControls
             instructionInput
             composer
@@ -311,6 +312,58 @@ struct ChatPopupView: View {
         }
     }
 
+    private var continuePromptControls: some View {
+        Group {
+            if let stepID = sessionController.pendingContinuePromptStepID {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Continue to next step?")
+                        .font(.system(size: 13, weight: .medium))
+
+                    Text("Clicked outside the highlight. Continue, or re-check the screen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        Button {
+                            submitContinuePrompt(stepID: stepID, confirmed: true)
+                        } label: {
+                            Label("Continue", systemImage: "arrow.right")
+                                .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button {
+                            submitContinuePrompt(stepID: stepID, confirmed: false)
+                        } label: {
+                            Label("Re-check screen", systemImage: "arrow.clockwise")
+                                .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        Button {
+                            sessionController.dismissContinuePrompt()
+                        } label: {
+                            Text("Dismiss")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(OverlayTheme.quietFill)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(OverlayTheme.separator)
+                        .frame(height: 1)
+                }
+            }
+        }
+    }
+
     private var confirmationControls: some View {
         Group {
             if let selectedConfirmationStepID {
@@ -496,9 +549,7 @@ struct ChatPopupView: View {
     }
 
     private func canSelectTutorialStep(_ step: TutorialStep) -> Bool {
-        guard !sessionController.status.isBusy else { return false }
-        guard let currentStepID = sessionController.currentStepID else { return true }
-        return currentStepID == step.stepId
+        !sessionController.status.isBusy
     }
 
     private func iconName(for action: TutorialAction) -> String {
@@ -572,6 +623,12 @@ struct ChatPopupView: View {
                 activeStepID = nil
                 selectedConfirmationStepID = step.stepId
             }
+        }
+    }
+
+    private func submitContinuePrompt(stepID: String, confirmed: Bool) {
+        Task {
+            await sessionController.confirmStep(stepID: stepID, confirmed: confirmed, note: nil)
         }
     }
 

@@ -11,6 +11,7 @@ final class OverlayCoordinator {
     private var debugBboxController: DebugBboxController?
     private var focusMaskController: FocusMaskController?
     private var iconMenuController: IconMenuController?
+    private var instructionCardController: InstructionCardController?
     private var popupController: PopupController?
     private var screenGroundingController: ScreenGroundingController?
     private var screenObserver: NSObjectProtocol?
@@ -30,10 +31,29 @@ final class OverlayCoordinator {
         let iconPanel = IconPanel(frame: initialIconFrame(on: screen.frame))
         let bboxPanel = DebugBboxPanel(frame: CGRect(origin: .zero, size: DebugBoundingBox.size))
 
+        var sessionControllerRef: TutorialSessionController?
+        var instructionCardControllerRef: InstructionCardController?
         let focusMaskController = FocusMaskController(
             screenProvider: screenProvider,
             onExit: { [weak bboxPanel] in
                 bboxPanel?.orderOut(nil)
+                instructionCardControllerRef?.hide()
+            },
+            onInsideClick: { [weak bboxPanel] in
+                bboxPanel?.orderOut(nil)
+                instructionCardControllerRef?.hide()
+                guard let sessionController = sessionControllerRef,
+                      let stepID = sessionController.currentStepID else { return }
+                Task { @MainActor in
+                    await sessionController.confirmStep(stepID: stepID, confirmed: true, note: nil)
+                }
+            },
+            onOutsideClick: { [weak bboxPanel] in
+                bboxPanel?.orderOut(nil)
+                instructionCardControllerRef?.hide()
+                guard let sessionController = sessionControllerRef,
+                      let stepID = sessionController.currentStepID else { return }
+                sessionController.presentContinuePrompt(stepID: stepID)
             }
         )
         let debugController = DebugBboxController(
@@ -71,14 +91,53 @@ final class OverlayCoordinator {
             },
             screenProvider: screenProvider
         )
-        let tutorialActionConsumer = TutorialActionConsumer { instruction in
-            await screenGroundingController.submit(instruction)
-        }
+        sessionControllerRef = tutorialSessionController
+        let instructionCardController: InstructionCardController
+        instructionCardController = InstructionCardController(
+            screenProvider: screenProvider,
+            onDone: { stepID in
+                Task { @MainActor in
+                    await tutorialSessionController.confirmStep(stepID: stepID, confirmed: true, note: nil)
+                }
+            },
+            onCopy: { text in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        )
+        instructionCardControllerRef = instructionCardController
+        let tutorialActionConsumer = TutorialActionConsumer(
+            groundInstruction: { instruction in
+                await screenGroundingController.submit(instruction)
+            },
+            presentNonSpatial: { step in
+                await MainActor.run {
+                    instructionCardController.show(
+                        stepID: step.stepId,
+                        title: Self.instructionCardTitle(for: step.action),
+                        message: step.instruction,
+                        copyableText: nil
+                    )
+                }
+                return "Showing instruction card for \(step.action.type)."
+            }
+        )
 
         popupPanel.contentView = NSHostingView(rootView: ChatPopupView(
             sessionController: tutorialSessionController,
             onTutorialStepSelected: { step in
-                await tutorialActionConsumer.consume(step: step)
+                let result = await tutorialActionConsumer.consume(step: step)
+                if case .type(let action) = step.action, !action.text.isEmpty {
+                    await MainActor.run {
+                        instructionCardController.show(
+                            stepID: step.stepId,
+                            title: "Type",
+                            message: step.instruction,
+                            copyableText: action.text
+                        )
+                    }
+                }
+                return result
             },
             onInputInstruction: { input in
                 await screenGroundingController.submit(GroundingInstruction(
@@ -108,6 +167,7 @@ final class OverlayCoordinator {
             tutorialEndpointStore: tutorialEndpointStore,
             onTestBbox: { debugController.showReplacementBbox() }
         )
+        self.instructionCardController = instructionCardController
         self.tutorialActionConsumer = tutorialActionConsumer
         self.tutorialPlanController = tutorialPlanController
         self.tutorialSessionController = tutorialSessionController
@@ -122,16 +182,33 @@ final class OverlayCoordinator {
         statusBarController?.stop()
         debugBboxController?.hide()
         focusMaskController?.hide()
+        instructionCardController?.hide()
         tutorialSessionController?.stop()
         popupController = nil
         iconMenuController = nil
         debugBboxController = nil
         focusMaskController = nil
+        instructionCardController = nil
         screenGroundingController = nil
         statusBarController = nil
         tutorialActionConsumer = nil
         tutorialPlanController = nil
         tutorialSessionController = nil
+    }
+
+    private static func instructionCardTitle(for action: TutorialAction) -> String {
+        switch action {
+        case .scroll(let action):
+            return "Scroll \(action.direction.rawValue)"
+        case .pressKey(let action):
+            return "Press \(action.key)"
+        case .wait:
+            return "Wait"
+        case .confirm:
+            return "Confirm"
+        default:
+            return "Next step"
+        }
     }
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {

@@ -7,12 +7,20 @@ struct TutorialGroundingPayload: Codable, Equatable {
 
 final class TutorialActionConsumer {
     private let groundInstruction: (GroundingInstruction) async -> String
+    private let presentNonSpatial: (TutorialStep) async -> String
 
-    init(groundInstruction: @escaping (GroundingInstruction) async -> String) {
+    init(
+        groundInstruction: @escaping (GroundingInstruction) async -> String,
+        presentNonSpatial: @escaping (TutorialStep) async -> String = { _ in "" }
+    ) {
         self.groundInstruction = groundInstruction
+        self.presentNonSpatial = presentNonSpatial
     }
 
     func consume(step: TutorialStep) async -> String {
+        if Self.skipsGrounding(action: step.action) {
+            return await presentNonSpatial(step)
+        }
         let payload = Self.groundingPayload(for: step)
         let instruction = GroundingInstruction(
             text: payload.instruction,
@@ -21,6 +29,15 @@ final class TutorialActionConsumer {
             submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
         )
         return await groundInstruction(instruction)
+    }
+
+    static func skipsGrounding(action: TutorialAction) -> Bool {
+        switch action {
+        case .scroll, .pressKey, .wait, .confirm:
+            return true
+        case .click, .doubleClick, .rightClick, .hover, .type, .drag:
+            return false
+        }
     }
 
     static func groundingPayload(for step: TutorialStep) -> TutorialGroundingPayload {

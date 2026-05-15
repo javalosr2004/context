@@ -9,6 +9,7 @@ from backend.tutorial_guide import TutorialSessionPlanRequest
 from backend.tutorial_schema import (
     PlannerConversation,
     PlannerReply,
+    PlannerReady,
     parse_tutorial_planner_reply,
 )
 from backend.tutorial_sessions import TutorialSessionManager
@@ -136,10 +137,20 @@ class StreamingConversationGuide(StubTutorialGuide):
         on_text_delta=None,
     ) -> PlannerReply:
         self.requests.append(request)
-        message = "Yes. Ask naturally, and I will only use the overlay when it helps."
-        if on_text_delta is not None:
-            on_text_delta(message)
-        return PlannerConversation(type="conversation", message=message)
+        reply = (
+            self.replies.pop(0)
+            if self.replies
+            else PlannerConversation(
+                type="conversation",
+                message="Yes. Ask naturally, and I will only use the overlay when it helps.",
+            )
+        )
+        if isinstance(reply, PlannerConversation) and on_text_delta is not None:
+            on_text_delta(reply.message)
+        if isinstance(reply, PlannerReady) and on_streamed_step is not None:
+            for step in reply.plan.steps:
+                on_streamed_step(step)
+        return reply
 
 
 class TutorialSessionTests(unittest.TestCase):
@@ -273,18 +284,71 @@ class TutorialSessionTests(unittest.TestCase):
             websocket.send_json(
                 {"type": "user_message", "text": "Can I just talk to you?"}
             )
-            events = [websocket.receive_json() for _ in range(4)]
+            events = [websocket.receive_json() for _ in range(5)]
 
         self.assertEqual(events[0]["type"], "request_received")
         self.assertEqual(events[1]["label"], "Thinking")
         self.assertEqual(events[2]["label"], "Checking context")
         self.assertEqual(events[3]["type"], "tutorial_text_delta")
         self.assertNotIn("mode", events[3]["text"].lower())
+        self.assertEqual(
+            events[4],
+            {"type": "status_changed", "status": "ready", "label": "Ready"},
+        )
 
         session = client.get(f"/tutorial-sessions/{session_id}").json()
-        self.assertEqual(session["status"], "conversation")
+        self.assertEqual(session["status"], "ready")
         self.assertIsNone(session["pending_question"])
         self.assertIsNone(session["current_plan"])
+
+    def test_conversation_can_route_back_to_tutorial_on_next_message(self) -> None:
+        guide = StreamingConversationGuide(
+            [
+                PlannerConversation(
+                    type="conversation",
+                    message="Yes. Ask naturally, and I will only use the overlay when it helps.",
+                ),
+                ready_reply(VALID_PLAN_JSON),
+            ]
+        )
+        client = client_with_manager(
+            TutorialSessionManager(
+                guide,
+                session_id_factory=lambda: "session-1",
+            )
+        )
+        session_id = client.post("/tutorial-sessions").json()["session_id"]
+
+        with client.websocket_connect(f"/tutorial-sessions/{session_id}/socket") as websocket:
+            websocket.receive_json()
+            websocket.send_json(
+                {"type": "user_message", "text": "Can I just talk to you?"}
+            )
+            for _ in range(5):
+                websocket.receive_json()
+
+            websocket.send_json(
+                {"type": "user_message", "text": "Now guide me through creating a repo."}
+            )
+            events = [websocket.receive_json() for _ in range(8)]
+
+        self.assertEqual(events[0]["type"], "request_received")
+        self.assertEqual(events[1]["label"], "Thinking")
+        self.assertEqual(events[2]["label"], "Checking context")
+        self.assertEqual(events[3]["type"], "tutorial_action_delta")
+        self.assertEqual(events[5]["type"], "plan_ready")
+        self.assertEqual(events[6], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(
+            guide.requests[1].messages,
+            [
+                {"role": "user", "content": "Can I just talk to you?"},
+                {
+                    "role": "assistant",
+                    "content": "Yes. Ask naturally, and I will only use the overlay when it helps.",
+                },
+                {"role": "user", "content": "Now guide me through creating a repo."},
+            ],
+        )
 
     def test_second_user_message_emits_fresh_plan_with_full_session_context(self) -> None:
         guide = StubTutorialGuide(
@@ -410,7 +474,6 @@ class TutorialSessionTests(unittest.TestCase):
                     "step_id": "step_001",
                     "confirmed": True,
                     "note": None,
-                    "screen": None,
                 }
             )
             event = websocket.receive_json()
@@ -442,7 +505,6 @@ class TutorialSessionTests(unittest.TestCase):
                     "step_id": "step_001",
                     "confirmed": False,
                     "note": "The New repository button is not visible.",
-                    "screen": None,
                 }
             )
             events = [websocket.receive_json() for _ in range(7)]

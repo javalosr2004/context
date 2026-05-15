@@ -137,7 +137,7 @@ class TutorialSessionManager:
             session_id=session_id,
             goal=session.goal,
             messages=messages,
-            latest_screen=screen_to_state(event.screen),
+            latest_screen=None,
             current_plan=None,
             current_step_id=None,
             completed_step_ids=[],
@@ -170,7 +170,6 @@ class TutorialSessionManager:
             {
                 "question_id": event.question_id,
                 "text": event.text,
-                "screen": screen_to_state(event.screen),
             },
         ):
             event_sink(streamed_event)
@@ -197,7 +196,6 @@ class TutorialSessionManager:
                 "step_id": event.step_id,
                 "confirmed": event.confirmed,
                 "note": event.note,
-                "screen": screen_to_state(event.screen),
             },
         ):
             event_sink(streamed_event)

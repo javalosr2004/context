@@ -253,11 +253,9 @@ class TutorialSessionGraph:
             }
         )
         answer_text = str(answer.get("text", "")).strip()
-        latest_screen = answer.get("screen") or state.get("latest_screen")
         return TutorialSessionState(
             messages=state.get("messages", [])
             + [{"role": "user", "content": answer_text}],
-            latest_screen=latest_screen,
             pending_question=None,
             status="planning",
             last_error=None,
@@ -316,7 +314,6 @@ class TutorialSessionGraph:
                 "step_id": step_id,
             }
         )
-        latest_screen = response.get("screen") or state.get("latest_screen")
         confirmed = bool(response.get("confirmed"))
 
         if confirmed and step_id is not None:
@@ -325,7 +322,6 @@ class TutorialSessionGraph:
                     state.get("completed_step_ids", []),
                     step_id,
                 ),
-                latest_screen=latest_screen,
                 status="advancing",
                 last_error=None,
             )
@@ -338,7 +334,6 @@ class TutorialSessionGraph:
         return TutorialSessionState(
             messages=state.get("messages", [])
             + [{"role": "user", "content": message}],
-            latest_screen=latest_screen,
             status="planning",
             last_error=None,
         )

@@ -35,14 +35,12 @@ class TutorialSessionResponse(TutorialSessionEventModel):
 class UserMessageEvent(TutorialSessionEventModel):
     type: Literal["user_message"]
     text: str = Field(min_length=1)
-    screen: ScreenSnapshot | None = None
 
 
 class UserAnswerEvent(TutorialSessionEventModel):
     type: Literal["user_answer"]
     question_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
-    screen: ScreenSnapshot | None = None
 
 
 class StepStartedEvent(TutorialSessionEventModel):
@@ -55,7 +53,6 @@ class UserConfirmationEvent(TutorialSessionEventModel):
     step_id: str = Field(min_length=1)
     confirmed: bool
     note: str | None = None
-    screen: ScreenSnapshot | None = None
 
 
 class UserScreenEvent(TutorialSessionEventModel):

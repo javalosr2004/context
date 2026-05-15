@@ -20,7 +20,60 @@ final class ChatMessageStoreTests: XCTestCase {
         let message = store.appendTutorialText("  next step  ")
 
         XCTAssertEqual(message?.role, .tutorial)
-        XCTAssertEqual(message?.content, .text("next step"))
+        XCTAssertEqual(message?.content, .text("  next step  "))
+    }
+
+    func testAppendTutorialTextDeltaExtendsLastTutorialText() {
+        let store = ChatMessageStore()
+        let now = Date(timeIntervalSince1970: 10)
+        let message = store.appendTutorialText("Looking", now: { now })
+
+        let updated = store.appendTutorialTextDelta(" at the screen")
+
+        XCTAssertEqual(updated?.id, message?.id)
+        XCTAssertEqual(updated?.createdAt, now)
+        XCTAssertEqual(store.messages.map(\.content), [.text("Looking at the screen")])
+    }
+
+    func testAppendTutorialTextDeltaStartsMessageWhenNeeded() {
+        let store = ChatMessageStore()
+
+        store.appendUserText("Create a repo")
+        store.appendTutorialTextDelta("Looking...")
+
+        XCTAssertEqual(store.messages.map(\.role), [.user, .tutorial])
+        XCTAssertEqual(store.messages.map(\.content), [.text("Create a repo"), .text("Looking...")])
+    }
+
+    func testAppendTutorialTextDeltaPreservesLeadingSpaceWhenStartingMessage() {
+        let store = ChatMessageStore()
+
+        store.appendUserText("Create a repo")
+        store.appendTutorialTextDelta(" a company account")
+
+        XCTAssertEqual(store.messages.map(\.content), [.text("Create a repo"), .text(" a company account")])
+    }
+
+    func testAppendTutorialTextDeltaPreservesStandaloneSpaceChunk() {
+        let store = ChatMessageStore()
+
+        store.appendTutorialTextDelta("a")
+        store.appendTutorialTextDelta(" ")
+        store.appendTutorialTextDelta("company")
+
+        XCTAssertEqual(store.messages.map(\.content), [.text("a company")])
+    }
+
+    func testReplaceLastTutorialTextKeepsExistingMessageIdentity() {
+        let store = ChatMessageStore()
+        let now = Date(timeIntervalSince1970: 10)
+        let message = store.appendTutorialTextDelta("Run", now: { now })
+
+        let updated = store.replaceLastTutorialText("RunPod is a cloud GPU host.")
+
+        XCTAssertEqual(updated?.id, message?.id)
+        XCTAssertEqual(updated?.createdAt, now, "createdAt should not be recreated")
+        XCTAssertEqual(store.messages.map(\.content), [.text("RunPod is a cloud GPU host.")])
     }
 
     func testAppendRejectsEmptyTextAfterTrimming() {
@@ -28,6 +81,7 @@ final class ChatMessageStoreTests: XCTestCase {
 
         XCTAssertNil(store.appendUserText(" \n\t "))
         XCTAssertNil(store.appendTutorialText(" \n\t "))
+        XCTAssertNil(store.appendTutorialTextDelta(" \n\t "))
         XCTAssertTrue(store.messages.isEmpty)
     }
 
@@ -83,5 +137,41 @@ final class ChatMessageStoreTests: XCTestCase {
                 )
             ]
         )
+    }
+}
+
+final class MarkdownTextRendererTests: XCTestCase {
+    func testRendererPreservesActualNewlines() {
+        let rendered = renderedText(from: "First\nSecond")
+
+        XCTAssertEqual(rendered, "First\nSecond")
+    }
+
+    func testRendererConvertsEscapedNewlines() {
+        let rendered = renderedText(from: "First\\nSecond")
+
+        XCTAssertEqual(rendered, "First\nSecond")
+    }
+
+    func testRendererConvertsDoubleEscapedNewlines() {
+        let rendered = renderedText(from: "First\\\\nSecond")
+
+        XCTAssertEqual(rendered, "First\nSecond")
+    }
+
+    func testRendererConvertsEscapedBlankLineBeforeMarkdownParsing() {
+        let rendered = renderedText(from: "First\\n\\n**Second**")
+
+        XCTAssertEqual(rendered, "First\n\nSecond")
+    }
+
+    func testRendererConvertsEscapedCarriageReturnNewline() {
+        let rendered = renderedText(from: "First\\r\\nSecond")
+
+        XCTAssertEqual(rendered, "First\nSecond")
+    }
+
+    private func renderedText(from source: String) -> String {
+        String(MarkdownTextRenderer.attributedString(from: source).characters)
     }
 }

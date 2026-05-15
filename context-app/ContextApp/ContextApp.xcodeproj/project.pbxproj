@@ -66,6 +66,8 @@
 		A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */; };
 		A90000000000000000000001 /* TutorialTooltipController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000011 /* TutorialTooltipController.swift */; };
 		AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ApplicationMenuController.swift */; };
+		AB0000000000000000000001 /* MarkdownTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000011 /* MarkdownTextView.swift */; };
+		AB0000000000000000000002 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000000000000000000013 /* Markdown */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +144,7 @@
 		A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionAPIClientTests.swift; sourceTree = "<group>"; };
 		A90000000000000000000011 /* TutorialTooltipController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialTooltipController.swift; sourceTree = "<group>"; };
 		AA0000000000000000000011 /* ApplicationMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationMenuController.swift; sourceTree = "<group>"; };
+		AB0000000000000000000011 /* MarkdownTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -149,6 +152,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB0000000000000000000002 /* Markdown in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -314,6 +318,7 @@
 				A50000000000000000000014 /* FocusMaskView.swift */,
 				A50000000000000000000015 /* FocusExitView.swift */,
 				A70000000000000000000013 /* TutorialAPISettingsView.swift */,
+				AB0000000000000000000011 /* MarkdownTextView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -343,6 +348,9 @@
 			dependencies = (
 			);
 			name = ContextApp;
+			packageProductDependencies = (
+				AB0000000000000000000013 /* Markdown */,
+			);
 			productName = ContextApp;
 			productReference = A10000000000000000000004 /* ContextApp.app */;
 			productType = "com.apple.product-type.application";
@@ -393,6 +401,9 @@
 				Base,
 			);
 			mainGroup = A1000000000000000000000A;
+			packageReferences = (
+				AB0000000000000000000012 /* XCRemoteSwiftPackageReference "swift-markdown" */,
+			);
 			productRefGroup = A1000000000000000000000D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -469,6 +480,7 @@
 				A90000000000000000000001 /* TutorialTooltipController.swift in Sources */,
 				A70000000000000000000003 /* TutorialAPISettingsView.swift in Sources */,
 				AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */,
+				AB0000000000000000000001 /* MarkdownTextView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -755,6 +767,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AB0000000000000000000012 /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/swiftlang/swift-markdown.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AB0000000000000000000013 /* Markdown */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AB0000000000000000000012 /* XCRemoteSwiftPackageReference "swift-markdown" */;
+			productName = Markdown;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A10000000000000000000002 /* Project object */;
 }

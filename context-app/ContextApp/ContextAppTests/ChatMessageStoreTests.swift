@@ -177,6 +177,18 @@ final class MarkdownTextRendererTests: XCTestCase {
         XCTAssertEqual(rendered, "Defines:\n\n• multiple services\n• ports")
     }
 
+    func testRendererPreservesEscapedStandardListAfterColon() {
+        let rendered = renderedText(from: "Defines:\\n- multiple services\\n- ports\\n")
+
+        XCTAssertEqual(rendered, "Defines:\n\n• multiple services\n• ports")
+    }
+
+    func testRendererPreservesListItemChildBlocks() {
+        let rendered = renderedText(from: "- Defines:\\n  - multiple services\\n  - ports\\n")
+
+        XCTAssertEqual(rendered, "• Defines:\n  • multiple services\n  • ports")
+    }
+
     private func renderedText(from source: String) -> String {
         String(MarkdownTextRenderer.attributedString(from: source).characters)
     }

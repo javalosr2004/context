@@ -15,59 +15,88 @@ enum MarkdownTextRenderer {
         var result = AttributedString()
 
         for child in document.children {
-            appendBlock(child, to: &result)
+            appendTopLevelBlock(child, to: &result)
         }
 
         return result
     }
 
-    private static func appendBlock(_ markup: Markup, to result: inout AttributedString) {
+    private static func appendTopLevelBlock(_ markup: Markup, to result: inout AttributedString) {
         if !result.characters.isEmpty {
             result.append(AttributedString("\n\n"))
         }
+        result.append(blockText(for: markup, listDepth: 0))
+    }
 
+    private static func blockText(for markup: Markup, listDepth: Int) -> AttributedString {
         switch markup {
         case let heading as Heading:
             var headingText = inlineText(for: heading)
             headingText.font = .system(size: 14, weight: .semibold)
-            result.append(headingText)
+            return headingText
         case let paragraph as Paragraph:
-            result.append(inlineText(for: paragraph))
+            return inlineText(for: paragraph)
         case let list as UnorderedList:
-            appendList(list, marker: "•", to: &result)
+            return listText(for: list, marker: "•", listDepth: listDepth)
         case let list as OrderedList:
-            appendOrderedList(list, to: &result)
+            return orderedListText(for: list, listDepth: listDepth)
         case let quote as BlockQuote:
             var quoteText = inlineText(for: quote)
             quoteText.foregroundColor = .secondary
-            result.append(quoteText)
+            return quoteText
         case let codeBlock as CodeBlock:
             var codeText = AttributedString(codeBlock.code)
             codeText.font = .system(size: 12, design: .monospaced)
-            result.append(codeText)
+            return codeText
         default:
+            return inlineText(for: markup)
+        }
+    }
+
+    private static func listText(for list: Markup, marker: String, listDepth: Int) -> AttributedString {
+        var result = AttributedString()
+        for (index, child) in list.children.enumerated() {
+            if index > 0 {
+                result.append(AttributedString("\n"))
+            }
+            result.append(listItemText(for: child, marker: marker, listDepth: listDepth))
+        }
+        return result
+    }
+
+    private static func orderedListText(for list: OrderedList, listDepth: Int) -> AttributedString {
+        var result = AttributedString()
+        for (index, child) in list.children.enumerated() {
+            if index > 0 {
+                result.append(AttributedString("\n"))
+            }
+            result.append(listItemText(for: child, marker: "\(index + 1).", listDepth: listDepth))
+        }
+        return result
+    }
+
+    private static func listItemText(for markup: Markup, marker: String, listDepth: Int) -> AttributedString {
+        let indentation = String(repeating: "  ", count: listDepth)
+        var result = AttributedString("\(indentation)\(marker) ")
+        var appendedFirstBlock = false
+
+        for child in markup.children {
+            let childText = blockText(for: child, listDepth: listDepth + 1)
+            if appendedFirstBlock {
+                result.append(AttributedString("\n"))
+                if !(child is UnorderedList) && !(child is OrderedList) {
+                    result.append(AttributedString(indentation + "  "))
+                }
+            }
+            result.append(childText)
+            appendedFirstBlock = true
+        }
+
+        if !appendedFirstBlock {
             result.append(inlineText(for: markup))
         }
-    }
 
-    private static func appendList(_ list: Markup, marker: String, to result: inout AttributedString) {
-        for (index, child) in list.children.enumerated() {
-            if index > 0 {
-                result.append(AttributedString("\n"))
-            }
-            result.append(AttributedString("\(marker) "))
-            result.append(inlineText(for: child))
-        }
-    }
-
-    private static func appendOrderedList(_ list: OrderedList, to result: inout AttributedString) {
-        for (index, child) in list.children.enumerated() {
-            if index > 0 {
-                result.append(AttributedString("\n"))
-            }
-            result.append(AttributedString("\(index + 1). "))
-            result.append(inlineText(for: child))
-        }
+        return result
     }
 
     private static func inlineText(for markup: Markup) -> AttributedString {
@@ -106,10 +135,6 @@ enum MarkdownTextRenderer {
 
 enum MarkdownNewlineNormalizer {
     static func normalize(_ source: String) -> String {
-        normalizeIndentedListMarkers(in: normalizeEscapedNewlines(source))
-    }
-
-    private static func normalizeEscapedNewlines(_ source: String) -> String {
         var result = ""
         var index = source.startIndex
 
@@ -167,37 +192,6 @@ enum MarkdownNewlineNormalizer {
         }
 
         return result
-    }
-
-    private static func normalizeIndentedListMarkers(in source: String) -> String {
-        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
-        var normalizedLines: [String] = []
-        normalizedLines.reserveCapacity(lines.count)
-
-        var previousContentLineEndedWithColon = false
-        var isNormalizingIndentedListRun = false
-        for line in lines {
-            let lineText = String(line)
-            if (previousContentLineEndedWithColon || isNormalizingIndentedListRun),
-               isIndentedDashListMarker(lineText) {
-                normalizedLines.append(String(lineText.dropFirst(2)))
-                isNormalizingIndentedListRun = true
-            } else {
-                normalizedLines.append(lineText)
-                isNormalizingIndentedListRun = false
-            }
-
-            let trimmedLine = lineText.trimmingCharacters(in: .whitespaces)
-            if !trimmedLine.isEmpty {
-                previousContentLineEndedWithColon = trimmedLine.hasSuffix(":")
-            }
-        }
-
-        return normalizedLines.joined(separator: "\n")
-    }
-
-    private static func isIndentedDashListMarker(_ line: String) -> Bool {
-        line.hasPrefix("  - ")
     }
 
     private static func escapedNewlineStarts(at index: String.Index, in source: String) -> Bool {

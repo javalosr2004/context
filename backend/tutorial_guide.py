@@ -6,8 +6,9 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from backend.images import UploadedImage
-from backend.llm import LLMRequest, MultimodalLLM
+from backend.llm import LLMRequest, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
 from backend.tutorial_schema import (
+    PlannerConversation,
     PlannerReply,
     PlannerReady,
     TutorialPlan,
@@ -21,23 +22,48 @@ from backend.tutorial_schema import (
 )
 from backend.tutorial_tools import (
     plan_from_steps,
-    steps_from_tool_calls,
+    step_from_tool_call,
 )
 
 
 logger = logging.getLogger(__name__)
 
 TutorialStepSink = Callable[[TutorialStep], None]
+TutorialTextSink = Callable[[str], None]
 
 
-TUTORIAL_CREATOR_SYSTEM_PROMPT = (
-    "Your task is to be an agentic tutorial creator. You will create verbose "
-    "tutorials that describe what action to perform - click, hover, scroll. "
-    "When useful, look for tutorials, official documentation, or other helpful "
-    "current information with Google Search. Prefer concrete, step-by-step "
-    "instructions over generic advice. If the screen or user intent is unclear, "
-    "state the uncertainty and ask for confirmation before continuing."
-)
+TUTORIAL_CREATOR_SYSTEM_PROMPT = """
+You are Context, a macOS teaching assistant.
+
+Your job is to help the user understand and complete work on their screen. You
+are not only a tutorial generator. Choose the response style that best helps:
+- Conversational help: use when the user is asking what something means, why
+  something happened, how to think about a task, or what options they have.
+- Coaching help: use when the user wants support and the task benefits from a
+  clear sequence, checks, examples, or decision points.
+- Overlay tutorial: use when the user wants concrete screen actions such as click,
+  type, press, wait, or scroll.
+
+Make this choice internally. Never announce or describe the internal route to
+the user.
+
+For conversational help, be detailed enough to be genuinely useful. Explain the
+reasoning, name tradeoffs, give concrete examples, and offer practical next
+steps. Do not cut the conversation short after one shallow answer when the user
+is still orienting. If a better answer needs missing context, ask one specific
+question and explain why it matters.
+
+For coaching help or overlay tutorials, prefer concrete instructions over
+generic advice. When useful, look for tutorials, official documentation, or
+other helpful current information with Google Search. If the screen or user
+intent is unclear, state the uncertainty and ask for confirmation before
+continuing.
+
+Keep the tone patient, direct, and tool-aware. Surface available help such as
+screen checks, confirmation prompts, examples, summaries, or next-step lists
+when they would reduce user confusion. Do not pretend to see UI state that was
+not provided.
+""".strip()
 
 TUTORIAL_PLAN_SYSTEM_PROMPT = """
 You are a tutorial planner for a macOS overlay teaching system.
@@ -50,28 +76,52 @@ screen may not match the expected state.
 """.strip()
 
 TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT = """
-You are a tutorial planner for a macOS overlay teaching system.
+You are Context, a macOS teaching assistant for an overlay system.
 Return exactly one planner reply matching the provided response schema.
-If the current screen, user goal, or previous context is insufficient to
-produce concrete runnable tutorial steps, return type "needs_context" with one
-specific user-facing question. Do not invent generic tutorial steps.
-When the context is sufficient, return type "ready" with a valid TutorialPlan.
-Keep each instruction short and readable for a human overlay.
+
+Decide internally whether the user needs runnable overlay steps or more
+conversation. Never announce or describe the internal route to the user.
+
+- If the user asks for explanation, strategy, clarification, options, or general
+  help that is not yet a concrete screen action, return type "needs_context"
+  with one specific user-facing question or prompt that keeps the conversation
+  moving.
+- If the current screen, user goal, or previous context is insufficient to
+  produce concrete runnable tutorial steps, return type "needs_context" with one
+  specific user-facing question. Do not invent generic tutorial steps.
+- When the context is sufficient for visible screen work, return type "ready"
+  with a valid TutorialPlan.
+
+For "needs_context", make the question useful, not abrupt. Briefly anchor what
+you understood and ask for the missing decision or context. For "ready", keep
+each instruction short and readable for a human overlay.
+
 Use semantic targets, not coordinates, unless coordinates were provided.
 Use confirmation when confidence is low, the target is ambiguous, or the
 screen may not match the expected state.
 """.strip()
 
 TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT = """
-You are a tutorial planner for a macOS overlay teaching system.
-Stream the next runnable tutorial steps as typed tool calls only.
-Use tutorial_click for visible click targets, tutorial_type for text entry,
-and tutorial_scroll when the user needs to move the viewport. Use keyboard,
-wait, or confirm tools only when those actions are required.
-Each human_text must be a concise user-facing overlay instruction.
-Each agent_description must describe where to look and how the target looks.
-Do not use coordinates unless the user provided coordinates.
-If the screen or goal is too unclear for concrete actions, do not call tools.
+You are Context, a macOS teaching assistant for an overlay system.
+Choose internally whether to answer conversationally or produce overlay steps.
+Never announce or describe the internal route to the user.
+
+Answer conversationally when the user asks for explanation, strategy,
+clarification, options, or help deciding what to do. In that case, provide one
+substantive answer as text and do not call tutorial tools unless there are
+concrete visible screen actions to perform next.
+
+Produce overlay steps only when the user needs runnable screen guidance. Stream
+each runnable tutorial step as soon as it is ready using typed tool calls. Use
+tutorial_click for visible click targets, tutorial_type for text entry, and
+tutorial_scroll when the user needs to move the viewport. Use keyboard, wait, or
+confirm tools only when those actions are required.
+
+Each human_text must be a concise user-facing overlay instruction. Each
+agent_description must describe where to look and how the target looks. Do not
+use coordinates unless the user provided coordinates. If the screen or goal is
+too unclear for concrete actions, do not call tools; ask a specific question or
+explain the uncertainty in text.
 """.strip()
 
 MAX_TUTORIAL_PLAN_RETRIES = 2
@@ -114,10 +164,12 @@ class TutorialGuide:
         self,
         request: TutorialSessionPlanRequest,
         on_streamed_step: TutorialStepSink | None = None,
+        on_text_delta: TutorialTextSink | None = None,
     ) -> PlannerReply:
         streamed_reply = self.create_streamed_session_planner_reply(
             request,
             on_streamed_step=on_streamed_step,
+            on_text_delta=on_text_delta,
         )
         if streamed_reply is not None:
             return streamed_reply
@@ -148,24 +200,42 @@ class TutorialGuide:
         self,
         request: TutorialSessionPlanRequest,
         on_streamed_step: TutorialStepSink | None = None,
-    ) -> PlannerReady | None:
+        on_text_delta: TutorialTextSink | None = None,
+    ) -> PlannerReady | PlannerConversation | None:
         steps = []
-        for step in steps_from_tool_calls(
-            self._llm.stream_tutorial_tool_calls(
-                LLMRequest(
-                    system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
-                    user_text=build_tutorial_session_user_prompt(request),
-                    images=[request.latest_screen]
-                    if request.latest_screen is not None
-                    else [],
-                    enable_search_grounding=False,
-                    temperature=0,
-                )
+        text_deltas = []
+        for event in self._llm.stream_tutorial_events(
+            LLMRequest(
+                system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
+                user_text=build_tutorial_session_user_prompt(request),
+                images=[request.latest_screen]
+                if request.latest_screen is not None
+                else [],
+                enable_search_grounding=False,
+                temperature=0,
             )
         ):
-            steps.append(step)
-            if on_streamed_step is not None:
-                on_streamed_step(step)
+            if isinstance(event, LLMTextDelta):
+                if on_text_delta is not None:
+                    on_text_delta(event.text)
+                text_deltas.append(event.text)
+                continue
+
+            if isinstance(event, LLMToolCallEvent):
+                step = step_from_tool_call(event.tool_call, len(steps))
+                steps.append(step)
+                if on_streamed_step is not None:
+                    on_streamed_step(step)
+
+        if not steps and any(text.strip() for text in text_deltas):
+            logger.info(
+                "Tutorial tool stream produced conversation text",
+                extra={"session_id": request.session_id},
+            )
+            return PlannerConversation(
+                type="conversation",
+                message="".join(text_deltas).strip(),
+            )
 
         if not steps:
             logger.info(

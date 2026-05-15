@@ -3,12 +3,13 @@ from __future__ import annotations
 import unittest
 from collections.abc import Iterator
 
-from backend.llm import LLMRequest
+from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
 from backend.tutorial_tools import TutorialToolCall
 from backend.tutorial_guide import (
     TUTORIAL_CREATOR_SYSTEM_PROMPT,
     TUTORIAL_PLAN_SYSTEM_PROMPT,
     TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
+    TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
     TutorialGuide,
     TutorialPlanRequest,
     TutorialSessionPlanRequest,
@@ -60,11 +61,13 @@ class FakeLLM:
         self,
         complete_responses: list[str] | None = None,
         tool_calls: list[TutorialToolCall] | None = None,
+        stream_events: list[LLMStreamEvent] | None = None,
     ) -> None:
         self.complete_responses = (
             [VALID_PLAN_JSON] if complete_responses is None else complete_responses
         )
         self.tool_calls = tool_calls or []
+        self.stream_events = stream_events
         self.requests: list[LLMRequest] = []
 
     def complete_text(self, request: LLMRequest) -> str:
@@ -82,8 +85,31 @@ class FakeLLM:
         self.requests.append(request)
         return iter(self.tool_calls)
 
+    def stream_tutorial_events(
+        self,
+        request: LLMRequest,
+    ) -> Iterator[LLMStreamEvent]:
+        self.requests.append(request)
+        if self.stream_events is not None:
+            return iter(self.stream_events)
+        return iter(LLMToolCallEvent(tool_call=call) for call in self.tool_calls)
+
 
 class TutorialGuideTests(unittest.TestCase):
+    def test_creator_prompt_supports_conversation_mode(self) -> None:
+        self.assertIn("Conversational help", TUTORIAL_CREATOR_SYSTEM_PROMPT)
+        self.assertIn("not only a tutorial generator", TUTORIAL_CREATOR_SYSTEM_PROMPT)
+        self.assertIn("Do not cut the conversation short", TUTORIAL_CREATOR_SYSTEM_PROMPT)
+        self.assertIn("screen checks", TUTORIAL_CREATOR_SYSTEM_PROMPT)
+        self.assertIn("Never announce or describe the internal route", TUTORIAL_CREATOR_SYSTEM_PROMPT)
+
+    def test_session_prompts_do_not_force_tutorial_steps(self) -> None:
+        self.assertIn("conversation", TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT)
+        self.assertIn("Do not invent generic tutorial steps", TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT)
+        self.assertIn("Choose internally", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("substantive answer", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("Never announce or describe the internal route", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+
     def test_stream_tutorial_maps_domain_request_to_llm_request(self) -> None:
         llm = FakeLLM()
         guide = TutorialGuide(llm)
@@ -242,6 +268,73 @@ class TutorialGuideTests(unittest.TestCase):
             ["step_001", "step_002"],
         )
         self.assertEqual(streamed_steps, reply.plan.steps)
+
+    def test_create_session_planner_reply_reports_text_deltas(self) -> None:
+        llm = FakeLLM(
+            complete_responses=[],
+            stream_events=[
+                LLMTextDelta(text="Looking at the screen..."),
+                LLMToolCallEvent(
+                    tool_call=TutorialToolCall(
+                        name="tutorial_click",
+                        arguments=(
+                            '{"human_text":"Click New.",'
+                            '"agent_description":"A green New button."}'
+                        ),
+                    )
+                ),
+            ],
+        )
+        guide = TutorialGuide(llm)
+        text_deltas = []
+
+        reply = guide.create_session_planner_reply(
+            TutorialSessionPlanRequest(
+                session_id="session-1",
+                goal="Create a repo.",
+                messages=[{"role": "user", "content": "Create a repo."}],
+                latest_screen=None,
+            ),
+            on_text_delta=text_deltas.append,
+        )
+
+        self.assertEqual(reply.type, "ready")
+        self.assertEqual(text_deltas, ["Looking at the screen..."])
+        self.assertEqual(reply.plan.steps[0].instruction, "Click New.")
+
+    def test_create_session_planner_reply_accepts_text_only_conversation(self) -> None:
+        llm = FakeLLM(
+            complete_responses=[],
+            stream_events=[
+                LLMTextDelta(text="You can talk to me naturally."),
+                LLMTextDelta(text=" I will only use the overlay when it helps."),
+            ],
+        )
+        guide = TutorialGuide(llm)
+        text_deltas = []
+
+        reply = guide.create_session_planner_reply(
+            TutorialSessionPlanRequest(
+                session_id="session-1",
+                goal="Can I just ask questions?",
+                messages=[{"role": "user", "content": "Can I just ask questions?"}],
+                latest_screen=None,
+            ),
+            on_text_delta=text_deltas.append,
+        )
+
+        self.assertEqual(reply.type, "conversation")
+        self.assertEqual(
+            reply.message,
+            "You can talk to me naturally. I will only use the overlay when it helps.",
+        )
+        self.assertEqual(
+            text_deltas,
+            [
+                "You can talk to me naturally.",
+                " I will only use the overlay when it helps.",
+            ],
+        )
 
     def test_create_session_planner_reply_accepts_context_question(self) -> None:
         llm = FakeLLM(complete_responses=[VALID_NEEDS_CONTEXT_REPLY_JSON])

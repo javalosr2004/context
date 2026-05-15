@@ -81,10 +81,10 @@ class TutorialSessionManager:
         if isinstance(event, UserMessageEvent):
             return [
                 RequestReceivedEvent(),
-                StatusChangedEvent(status="planning", label="Planning tutorial"),
+                StatusChangedEvent(status="planning", label="Thinking"),
             ]
         if isinstance(event, UserAnswerEvent):
-            return [StatusChangedEvent(status="planning", label="Planning tutorial")]
+            return [StatusChangedEvent(status="planning", label="Thinking")]
         if isinstance(event, UserConfirmationEvent) and not event.confirmed:
             return [
                 StatusChangedEvent(

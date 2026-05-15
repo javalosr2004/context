@@ -131,7 +131,15 @@ class PlannerNeedsContext(TutorialSchemaModel):
     )
 
 
-PlannerReply = PlannerReady | PlannerNeedsContext
+class PlannerConversation(TutorialSchemaModel):
+    type: Literal["conversation"]
+    message: str = Field(
+        min_length=1,
+        description="A conversational assistant reply that does not need overlay steps.",
+    )
+
+
+PlannerReply = PlannerReady | PlannerNeedsContext | PlannerConversation
 
 
 class TutorialPlannerReplyPayload(TutorialSchemaModel):

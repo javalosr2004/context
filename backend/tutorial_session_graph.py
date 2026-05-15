@@ -13,6 +13,7 @@ from langgraph.types import Command, interrupt
 from backend.images import UploadedImage
 from backend.tutorial_guide import TutorialGuide, TutorialSessionPlanRequest
 from backend.tutorial_schema import (
+    PlannerConversation,
     PlannerNeedsContext,
     PlannerReady,
     TutorialPlan,
@@ -24,6 +25,7 @@ from backend.tutorial_session_events import (
     StatusChangedEvent,
     TutorialActionDeltaEvent,
     TutorialActionEvent,
+    TutorialTextDeltaEvent,
 )
 from backend.tutorial_tools import TutorialToolCallError
 
@@ -107,6 +109,7 @@ class TutorialSessionGraph:
             {
                 "wait_for_context": "wait_for_context",
                 "emit_plan": "emit_plan",
+                "end": END,
             },
         )
         builder.add_edge("wait_for_context", "plan_or_ask_context")
@@ -142,7 +145,7 @@ class TutorialSessionGraph:
         self,
         state: TutorialSessionState,
     ) -> TutorialSessionState:
-        emit_event(StatusChangedEvent(status="planning", label="Analyzing screen"))
+        emit_event(StatusChangedEvent(status="planning", label="Checking context"))
         logger.info(
             "Graph node: plan_or_ask_context",
             extra={
@@ -165,9 +168,14 @@ class TutorialSessionGraph:
                 streamed_step_ids.append(step.step_id)
                 emit_event(TutorialActionDeltaEvent(step=step))
 
+            def emit_text_delta(text: str) -> None:
+                if text:
+                    emit_event(TutorialTextDeltaEvent(text=text))
+
             reply = self._tutorial_guide.create_session_planner_reply(
                 request,
                 on_streamed_step=emit_streamed_step,
+                on_text_delta=emit_text_delta,
             )
         except TutorialToolCallError as error:
             emit_event(ErrorEvent(code=error.code, message=error.message))
@@ -193,6 +201,15 @@ class TutorialSessionGraph:
                 + [{"role": "assistant", "content": reply.question}],
                 pending_question=question,
                 status="needs_context",
+                last_error=None,
+            )
+
+        if isinstance(reply, PlannerConversation):
+            return TutorialSessionState(
+                messages=state.get("messages", [])
+                + [{"role": "assistant", "content": reply.message}],
+                pending_question=None,
+                status="conversation",
                 last_error=None,
             )
 
@@ -311,6 +328,8 @@ def config_for_session(session_id: str) -> dict[str, dict[str, str]]:
 
 
 def route_after_planning(state: TutorialSessionState) -> str:
+    if state.get("status") == "conversation":
+        return "end"
     if state.get("pending_question") is not None:
         return "wait_for_context"
     return "emit_plan"

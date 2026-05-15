@@ -6,7 +6,11 @@ from fastapi.testclient import TestClient
 
 from backend.main import create_app, get_tutorial_session_manager
 from backend.tutorial_guide import TutorialSessionPlanRequest
-from backend.tutorial_schema import PlannerReply, parse_tutorial_planner_reply
+from backend.tutorial_schema import (
+    PlannerConversation,
+    PlannerReply,
+    parse_tutorial_planner_reply,
+)
 from backend.tutorial_sessions import TutorialSessionManager
 from backend.tutorial_tools import INVALID_TOOL_ARGUMENTS, TutorialToolCallError
 
@@ -76,6 +80,7 @@ class StubTutorialGuide:
         self,
         request: TutorialSessionPlanRequest,
         on_streamed_step=None,
+        on_text_delta=None,
     ) -> PlannerReply:
         self.requests.append(request)
         return self.replies.pop(0)
@@ -92,6 +97,7 @@ class ErroringToolTutorialGuide(StubTutorialGuide):
         self,
         request: TutorialSessionPlanRequest,
         on_streamed_step=None,
+        on_text_delta=None,
     ) -> PlannerReply:
         self.requests.append(request)
         raise TutorialToolCallError(
@@ -111,12 +117,29 @@ class StreamingToolTutorialGuide(StubTutorialGuide):
         self,
         request: TutorialSessionPlanRequest,
         on_streamed_step=None,
+        on_text_delta=None,
     ) -> PlannerReply:
         reply = super().create_session_planner_reply(request)
+        if on_text_delta is not None:
+            on_text_delta("Looking at the screen...")
         if on_streamed_step is not None:
             for step in reply.plan.steps:
                 on_streamed_step(step)
         return reply
+
+
+class StreamingConversationGuide(StubTutorialGuide):
+    def create_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+        on_streamed_step=None,
+        on_text_delta=None,
+    ) -> PlannerReply:
+        self.requests.append(request)
+        message = "Yes. Ask naturally, and I will only use the overlay when it helps."
+        if on_text_delta is not None:
+            on_text_delta(message)
+        return PlannerConversation(type="conversation", message=message)
 
 
 class TutorialSessionTests(unittest.TestCase):
@@ -167,9 +190,9 @@ class TutorialSessionTests(unittest.TestCase):
         self.assertEqual(events[0]["type"], "request_received")
         self.assertEqual(events[1]["type"], "status_changed")
         self.assertEqual(events[1]["status"], "planning")
-        self.assertEqual(events[1]["label"], "Planning tutorial")
+        self.assertEqual(events[1]["label"], "Thinking")
         self.assertEqual(events[2]["type"], "status_changed")
-        self.assertEqual(events[2]["label"], "Analyzing screen")
+        self.assertEqual(events[2]["label"], "Checking context")
         self.assertEqual(events[3]["status"], "needs_context")
         self.assertEqual(events[4]["type"], "assistant_question")
         self.assertEqual(events[4]["question_id"], "question_002")
@@ -193,8 +216,8 @@ class TutorialSessionTests(unittest.TestCase):
 
         self.assertEqual(events[0]["type"], "request_received")
         self.assertEqual(events[1]["status"], "planning")
-        self.assertEqual(events[1]["label"], "Planning tutorial")
-        self.assertEqual(events[2]["label"], "Analyzing screen")
+        self.assertEqual(events[1]["label"], "Thinking")
+        self.assertEqual(events[2]["label"], "Checking context")
         self.assertEqual(events[3]["type"], "tutorial_action")
         self.assertEqual(events[3]["step"]["step_id"], "step_001")
         self.assertEqual(events[4]["label"], "Validating targets")
@@ -205,7 +228,7 @@ class TutorialSessionTests(unittest.TestCase):
             {"type": "awaiting_confirmation", "step_id": "step_001"},
         )
 
-    def test_streamed_tool_step_emits_action_delta_before_plan_ready(self) -> None:
+    def test_streamed_planning_emits_text_and_action_deltas_before_plan_ready(self) -> None:
         client = client_with_manager(
             TutorialSessionManager(
                 StreamingToolTutorialGuide([ready_reply(VALID_PLAN_JSON)]),
@@ -219,20 +242,49 @@ class TutorialSessionTests(unittest.TestCase):
             websocket.send_json(
                 {"type": "user_message", "text": "Show me how to create a repo."}
             )
-            events = [websocket.receive_json() for _ in range(8)]
+            events = [websocket.receive_json() for _ in range(9)]
 
         self.assertEqual(events[0]["type"], "request_received")
-        self.assertEqual(events[1]["label"], "Planning tutorial")
-        self.assertEqual(events[2]["label"], "Analyzing screen")
-        self.assertEqual(events[3]["type"], "tutorial_action_delta")
-        self.assertEqual(events[3]["step"]["step_id"], "step_001")
-        self.assertEqual(events[4]["label"], "Validating targets")
-        self.assertEqual(events[5]["type"], "plan_ready")
-        self.assertEqual(events[6], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(events[1]["label"], "Thinking")
+        self.assertEqual(events[2]["label"], "Checking context")
+        self.assertEqual(events[3]["type"], "tutorial_text_delta")
+        self.assertEqual(events[3]["text"], "Looking at the screen...")
+        self.assertEqual(events[4]["type"], "tutorial_action_delta")
+        self.assertEqual(events[4]["step"]["step_id"], "step_001")
+        self.assertEqual(events[5]["label"], "Validating targets")
+        self.assertEqual(events[6]["type"], "plan_ready")
+        self.assertEqual(events[7], {"type": "step_ready", "step_id": "step_001"})
         self.assertEqual(
-            events[7],
+            events[8],
             {"type": "awaiting_confirmation", "step_id": "step_001"},
         )
+
+    def test_conversation_reply_does_not_emit_secondary_question(self) -> None:
+        client = client_with_manager(
+            TutorialSessionManager(
+                StreamingConversationGuide([]),
+                session_id_factory=lambda: "session-1",
+            )
+        )
+        session_id = client.post("/tutorial-sessions").json()["session_id"]
+
+        with client.websocket_connect(f"/tutorial-sessions/{session_id}/socket") as websocket:
+            websocket.receive_json()
+            websocket.send_json(
+                {"type": "user_message", "text": "Can I just talk to you?"}
+            )
+            events = [websocket.receive_json() for _ in range(4)]
+
+        self.assertEqual(events[0]["type"], "request_received")
+        self.assertEqual(events[1]["label"], "Thinking")
+        self.assertEqual(events[2]["label"], "Checking context")
+        self.assertEqual(events[3]["type"], "tutorial_text_delta")
+        self.assertNotIn("mode", events[3]["text"].lower())
+
+        session = client.get(f"/tutorial-sessions/{session_id}").json()
+        self.assertEqual(session["status"], "conversation")
+        self.assertIsNone(session["pending_question"])
+        self.assertIsNone(session["current_plan"])
 
     def test_second_user_message_emits_fresh_plan_with_full_session_context(self) -> None:
         guide = StubTutorialGuide(
@@ -300,8 +352,8 @@ class TutorialSessionTests(unittest.TestCase):
             events = [websocket.receive_json() for _ in range(7)]
 
         self.assertEqual(events[0]["status"], "planning")
-        self.assertEqual(events[0]["label"], "Planning tutorial")
-        self.assertEqual(events[1]["label"], "Analyzing screen")
+        self.assertEqual(events[0]["label"], "Thinking")
+        self.assertEqual(events[1]["label"], "Checking context")
         self.assertEqual(events[2]["type"], "tutorial_action")
         self.assertEqual(events[3]["label"], "Validating targets")
         self.assertEqual(events[4]["type"], "plan_ready")
@@ -328,8 +380,8 @@ class TutorialSessionTests(unittest.TestCase):
             events = [websocket.receive_json() for _ in range(9)]
 
         self.assertEqual(events[0]["type"], "request_received")
-        self.assertEqual(events[1]["label"], "Planning tutorial")
-        self.assertEqual(events[2]["label"], "Analyzing screen")
+        self.assertEqual(events[1]["label"], "Thinking")
+        self.assertEqual(events[2]["label"], "Checking context")
         self.assertEqual(events[3]["type"], "error")
         self.assertEqual(events[3]["code"], INVALID_TOOL_ARGUMENTS)
         self.assertEqual(events[4]["type"], "tutorial_action")
@@ -397,7 +449,7 @@ class TutorialSessionTests(unittest.TestCase):
 
         self.assertEqual(events[0]["status"], "planning")
         self.assertEqual(events[0]["label"], "Replanning from current screen")
-        self.assertEqual(events[1]["label"], "Analyzing screen")
+        self.assertEqual(events[1]["label"], "Checking context")
         self.assertEqual(events[2]["type"], "tutorial_action")
         self.assertEqual(events[3]["label"], "Validating targets")
         self.assertEqual(events[4]["type"], "plan_updated")

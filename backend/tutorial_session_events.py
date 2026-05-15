@@ -58,8 +58,18 @@ class UserConfirmationEvent(TutorialSessionEventModel):
     screen: ScreenSnapshot | None = None
 
 
+class UserScreenEvent(TutorialSessionEventModel):
+    type: Literal["user_screen"]
+    request_id: str = Field(min_length=1)
+    screen: ScreenSnapshot
+
+
 ClientSessionEvent = Annotated[
-    UserMessageEvent | UserAnswerEvent | StepStartedEvent | UserConfirmationEvent,
+    UserMessageEvent
+    | UserAnswerEvent
+    | StepStartedEvent
+    | UserConfirmationEvent
+    | UserScreenEvent,
     Field(discriminator="type"),
 ]
 
@@ -107,6 +117,11 @@ class TutorialActionDeltaEvent(TutorialSessionEventModel):
     step: TutorialStep
 
 
+class TutorialTextDeltaEvent(TutorialSessionEventModel):
+    type: Literal["tutorial_text_delta"] = "tutorial_text_delta"
+    text: str = Field(min_length=1)
+
+
 class StepReadyEvent(TutorialSessionEventModel):
     type: Literal["step_ready"] = "step_ready"
     step_id: str
@@ -115,6 +130,12 @@ class StepReadyEvent(TutorialSessionEventModel):
 class AwaitingConfirmationEvent(TutorialSessionEventModel):
     type: Literal["awaiting_confirmation"] = "awaiting_confirmation"
     step_id: str
+
+
+class ScreenRequestedEvent(TutorialSessionEventModel):
+    type: Literal["screen_requested"] = "screen_requested"
+    request_id: str
+    reason: str
 
 
 class SessionCompletedEvent(TutorialSessionEventModel):
@@ -136,8 +157,10 @@ ServerSessionEvent = (
     | PlanUpdatedEvent
     | TutorialActionEvent
     | TutorialActionDeltaEvent
+    | TutorialTextDeltaEvent
     | StepReadyEvent
     | AwaitingConfirmationEvent
+    | ScreenRequestedEvent
     | SessionCompletedEvent
     | ErrorEvent
 )

@@ -24,6 +24,7 @@ from backend.tutorial_session_events import (
     UserAnswerEvent,
     UserConfirmationEvent,
     UserMessageEvent,
+    UserScreenEvent,
 )
 from backend.tutorial_session_graph import EventSink, TutorialSessionGraph, TutorialSessionState
 
@@ -47,6 +48,7 @@ class TutorialSessionRecord:
     current_step_id: str | None = None
     completed_step_ids: list[str] = field(default_factory=list)
     pending_question: dict[str, str] | None = None
+    pending_screen_request: dict[str, str] | None = None
     current_plan: TutorialPlan | None = None
     last_error: str | None = None
     plan_emitted: bool = False
@@ -84,6 +86,8 @@ class TutorialSessionManager:
             ]
         if isinstance(event, UserAnswerEvent):
             return [StatusChangedEvent(status="planning", label="Thinking")]
+        if isinstance(event, UserScreenEvent):
+            return [StatusChangedEvent(status="planning", label="Thinking")]
         if isinstance(event, UserConfirmationEvent) and not event.confirmed:
             return [
                 StatusChangedEvent(
@@ -107,6 +111,9 @@ class TutorialSessionManager:
             return
         if isinstance(event, UserConfirmationEvent):
             self._handle_user_confirmation(session_id, event, event_sink)
+            return
+        if isinstance(event, UserScreenEvent):
+            self._handle_user_screen(session_id, event, event_sink)
             return
         self._handle_step_started(session_id, event.step_id, event_sink)
 
@@ -198,6 +205,32 @@ class TutorialSessionManager:
             session_id,
             plan_was_rejected=not event.confirmed,
             event_sink=event_sink,
+        )
+
+    def _handle_user_screen(
+        self,
+        session_id: str,
+        event: UserScreenEvent,
+        event_sink: EventSink,
+    ) -> None:
+        session = self._require_session(session_id)
+        pending = session.pending_screen_request or {}
+        if event.request_id != pending.get("request_id"):
+            raise TutorialSessionError(
+                INVALID_SESSION_EVENT,
+                "The screen did not match the pending screen request.",
+            )
+
+        for streamed_event in self._graph.resume(
+            session_id,
+            {
+                "request_id": event.request_id,
+                "screen": screen_to_state(event.screen),
+            },
+        ):
+            event_sink(streamed_event)
+        self._emit_events_after_graph_run(
+            session_id, plan_was_rejected=False, event_sink=event_sink
         )
 
     def _handle_step_started(
@@ -294,6 +327,7 @@ def update_session_from_state(
     session.current_step_id = state.get("current_step_id")
     session.completed_step_ids = state.get("completed_step_ids", [])
     session.pending_question = state.get("pending_question")
+    session.pending_screen_request = state.get("pending_screen_request")
     session.current_plan = plan_from_state(state)
     session.last_error = state.get("last_error")
     session.updated_at = datetime.now(UTC)

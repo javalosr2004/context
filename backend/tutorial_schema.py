@@ -121,6 +121,13 @@ class TutorialPlan(TutorialSchemaModel):
 class PlannerReady(TutorialSchemaModel):
     type: Literal["ready"]
     plan: TutorialPlan
+    needs_screen_after: bool = Field(
+        default=False,
+        description=(
+            "True when the planner emitted steps but also requested a fresh screen "
+            "after the steps complete, so it can resume planning from the new state."
+        ),
+    )
 
 
 class PlannerNeedsContext(TutorialSchemaModel):
@@ -128,6 +135,14 @@ class PlannerNeedsContext(TutorialSchemaModel):
     question: str = Field(
         min_length=1,
         description="One concrete user-facing question needed before planning.",
+    )
+
+
+class PlannerNeedsScreen(TutorialSchemaModel):
+    type: Literal["needs_screen"]
+    reason: str = Field(
+        min_length=1,
+        description="Why a fresh screenshot is required before the planner can continue.",
     )
 
 
@@ -139,7 +154,9 @@ class PlannerConversation(TutorialSchemaModel):
     )
 
 
-PlannerReply = PlannerReady | PlannerNeedsContext | PlannerConversation
+PlannerReply = (
+    PlannerReady | PlannerNeedsContext | PlannerNeedsScreen | PlannerConversation
+)
 
 
 class TutorialPlannerReplyPayload(TutorialSchemaModel):

@@ -9,6 +9,7 @@ from backend.images import UploadedImage
 from backend.llm import LLMRequest, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
 from backend.tutorial_schema import (
     PlannerConversation,
+    PlannerNeedsScreen,
     PlannerReply,
     PlannerReady,
     TutorialPlan,
@@ -21,6 +22,8 @@ from backend.tutorial_schema import (
     tutorial_plan_response_schema,
 )
 from backend.tutorial_tools import (
+    is_request_screen_call,
+    parse_request_screen_reason,
     plan_from_steps,
     step_from_tool_call,
 )
@@ -117,6 +120,14 @@ When you do call an action tool, human_text is one concise on-screen
 instruction. agent_description says where to look and what the target
 looks like. Do not use coordinates unless the user provided them.
 
+Use tutorial_request_screen when you need a fresh screenshot before you
+can plan further — either because no screen was provided, the screen
+looks stale or wrong, or because the next step depends on the result of
+the steps you just planned. You may call it on its own (request only),
+or as the last call after action steps (request a checkpoint). Anything
+you would have planned after request_screen is discarded; do not try to
+plan past it in the same turn.
+
 Do not narrate your reasoning. Do not announce what you are about to do.
 Do not explain when or why you are or are not taking an action. Do not
 refer to yourself as a planner, generator, tutorial, or overlay. Just
@@ -200,9 +211,10 @@ class TutorialGuide:
         request: TutorialSessionPlanRequest,
         on_streamed_step: TutorialStepSink | None = None,
         on_text_delta: TutorialTextSink | None = None,
-    ) -> PlannerReady | PlannerConversation | None:
-        steps = []
-        text_deltas = []
+    ) -> PlannerReady | PlannerConversation | PlannerNeedsScreen | None:
+        steps: list[TutorialStep] = []
+        text_deltas: list[str] = []
+        screen_request_reason: str | None = None
         for event in self._llm.stream_tutorial_events(
             LLMRequest(
                 system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
@@ -221,10 +233,38 @@ class TutorialGuide:
                 continue
 
             if isinstance(event, LLMToolCallEvent):
+                if is_request_screen_call(event.tool_call):
+                    screen_request_reason = parse_request_screen_reason(
+                        event.tool_call
+                    )
+                    break
                 step = step_from_tool_call(event.tool_call, len(steps))
                 steps.append(step)
                 if on_streamed_step is not None:
                     on_streamed_step(step)
+
+        if screen_request_reason is not None and not steps:
+            logger.info(
+                "Tutorial tool stream requested screen with no prior steps",
+                extra={"session_id": request.session_id},
+            )
+            return PlannerNeedsScreen(
+                type="needs_screen", reason=screen_request_reason
+            )
+
+        if screen_request_reason is not None:
+            logger.info(
+                "Tutorial tool stream requested screen after steps",
+                extra={
+                    "session_id": request.session_id,
+                    "step_count": len(steps),
+                },
+            )
+            return PlannerReady(
+                type="ready",
+                plan=plan_from_steps(request.goal, steps),
+                needs_screen_after=True,
+            )
 
         if not steps and any(text.strip() for text in text_deltas):
             logger.info(

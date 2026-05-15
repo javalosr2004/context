@@ -24,8 +24,10 @@ TUTORIAL_TOOL_NAMES = frozenset(
         "tutorial_press_key",
         "tutorial_wait",
         "tutorial_confirm",
+        "tutorial_request_screen",
     }
 )
+REQUEST_SCREEN_TOOL_NAME = "tutorial_request_screen"
 INVALID_TOOL_CALL = "invalid_tool_call"
 INVALID_TOOL_ARGUMENTS = "invalid_tool_arguments"
 
@@ -84,6 +86,10 @@ class TutorialConfirmArguments(TutorialToolArguments):
     human_text: str = Field(min_length=1)
 
 
+class TutorialRequestScreenArguments(TutorialToolArguments):
+    reason: str = Field(min_length=1)
+
+
 class TutorialToolCallPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -94,6 +100,7 @@ class TutorialToolCallPayload(BaseModel):
         "tutorial_press_key",
         "tutorial_wait",
         "tutorial_confirm",
+        "tutorial_request_screen",
     ]
     arguments: dict[str, Any]
 
@@ -142,6 +149,17 @@ def openai_tutorial_tool_definitions() -> list[dict[str, Any]]:
             name="tutorial_confirm",
             description="Ask the user to confirm that what is on screen matches what was expected.",
             model=TutorialConfirmArguments,
+        ),
+        build_openai_tool(
+            name="tutorial_request_screen",
+            description=(
+                "Request a fresh screenshot from the user's device before continuing. "
+                "Call this when the current screen is missing, stale, or insufficient to "
+                "plan further, or at the end of a turn when the next step depends on the "
+                "result of the steps you just planned. After this is called, the rest of "
+                "the turn is discarded — do not plan additional steps in the same turn."
+            ),
+            model=TutorialRequestScreenArguments,
         ),
     ]
 
@@ -195,7 +213,28 @@ def parse_tutorial_tool_call_list(raw_json: str) -> list[TutorialToolCall]:
     ]
 
 
+def is_request_screen_call(call: TutorialToolCall) -> bool:
+    return call.name == REQUEST_SCREEN_TOOL_NAME
+
+
+def parse_request_screen_reason(call: TutorialToolCall) -> str:
+    try:
+        payload = json.loads(call.arguments)
+        arguments = TutorialRequestScreenArguments.model_validate(payload)
+    except (ValidationError, json.JSONDecodeError) as error:
+        raise TutorialToolCallError(
+            INVALID_TOOL_ARGUMENTS,
+            f"Invalid arguments for {call.name}: {error}",
+        ) from error
+    return arguments.reason
+
+
 def step_from_tool_call(call: TutorialToolCall, index: int) -> TutorialStep:
+    if call.name == REQUEST_SCREEN_TOOL_NAME:
+        raise TutorialToolCallError(
+            INVALID_TOOL_CALL,
+            "request_screen calls do not produce tutorial steps.",
+        )
     if call.name not in TUTORIAL_TOOL_NAMES:
         raise TutorialToolCallError(
             INVALID_TOOL_CALL,

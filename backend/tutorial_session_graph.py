@@ -15,12 +15,14 @@ from backend.tutorial_guide import TutorialGuide, TutorialSessionPlanRequest
 from backend.tutorial_schema import (
     PlannerConversation,
     PlannerNeedsContext,
+    PlannerNeedsScreen,
     PlannerReady,
     TutorialPlan,
     TutorialStep,
 )
 from backend.tutorial_session_events import (
     ErrorEvent,
+    ScreenRequestedEvent,
     ServerSessionEvent,
     StatusChangedEvent,
     TutorialActionDeltaEvent,
@@ -48,6 +50,8 @@ class TutorialSessionState(TypedDict, total=False):
     current_step_id: str | None
     completed_step_ids: list[str]
     pending_question: dict[str, str] | None
+    pending_screen_request: dict[str, str] | None
+    needs_screen_after_plan: bool
     status: str
     last_error: str | None
 
@@ -87,6 +91,7 @@ class TutorialSessionGraph:
         builder.add_node("receive_user_message", self._receive_user_message)
         builder.add_node("plan_or_ask_context", self._plan_or_ask_context)
         builder.add_node("wait_for_context", self._wait_for_context)
+        builder.add_node("wait_for_screen", self._wait_for_screen)
         builder.add_node("emit_plan", self._emit_plan)
         builder.add_node("wait_for_step_confirmation", self._wait_for_step_confirmation)
         builder.add_node("advance_or_replan", self._advance_or_replan)
@@ -99,11 +104,13 @@ class TutorialSessionGraph:
             route_after_planning,
             {
                 "wait_for_context": "wait_for_context",
+                "wait_for_screen": "wait_for_screen",
                 "emit_plan": "emit_plan",
                 "end": END,
             },
         )
         builder.add_edge("wait_for_context", "plan_or_ask_context")
+        builder.add_edge("wait_for_screen", "plan_or_ask_context")
         builder.add_edge("emit_plan", "wait_for_step_confirmation")
         builder.add_edge("wait_for_step_confirmation", "advance_or_replan")
         builder.add_conditional_edges(
@@ -112,6 +119,7 @@ class TutorialSessionGraph:
             {
                 "plan_or_ask_context": "plan_or_ask_context",
                 "wait_for_step_confirmation": "wait_for_step_confirmation",
+                "wait_for_screen": "wait_for_screen",
                 "complete": "complete",
             },
         )
@@ -128,6 +136,8 @@ class TutorialSessionGraph:
             current_step_id=state.get("current_step_id"),
             current_plan=state.get("current_plan"),
             pending_question=None,
+            pending_screen_request=None,
+            needs_screen_after_plan=False,
             status="planning",
             last_error=None,
         )
@@ -195,6 +205,18 @@ class TutorialSessionGraph:
                 last_error=None,
             )
 
+        if isinstance(reply, PlannerNeedsScreen):
+            screen_request = {
+                "request_id": next_screen_request_id(state),
+                "reason": reply.reason,
+            }
+            return TutorialSessionState(
+                pending_question=None,
+                pending_screen_request=screen_request,
+                status="needs_screen",
+                last_error=None,
+            )
+
         if isinstance(reply, PlannerConversation):
             return TutorialSessionState(
                 messages=state.get("messages", [])
@@ -211,6 +233,7 @@ class TutorialSessionGraph:
                 current_plan=reply.plan.model_dump(mode="json"),
                 current_step_id=None,
                 pending_question=None,
+                needs_screen_after_plan=reply.needs_screen_after,
                 status="planned",
                 last_error=None,
             )
@@ -236,6 +259,36 @@ class TutorialSessionGraph:
             + [{"role": "user", "content": answer_text}],
             latest_screen=latest_screen,
             pending_question=None,
+            status="planning",
+            last_error=None,
+        )
+
+    def _wait_for_screen(
+        self,
+        state: TutorialSessionState,
+    ) -> TutorialSessionState:
+        screen_request = state.get("pending_screen_request") or {
+            "request_id": next_screen_request_id(state),
+            "reason": "Fresh screen needed to continue.",
+        }
+        emit_event(
+            ScreenRequestedEvent(
+                request_id=screen_request["request_id"],
+                reason=screen_request["reason"],
+            )
+        )
+        response = interrupt(
+            {
+                "type": "screen_request",
+                "request_id": screen_request["request_id"],
+                "reason": screen_request["reason"],
+            }
+        )
+        latest_screen = response.get("screen") or state.get("latest_screen")
+        return TutorialSessionState(
+            latest_screen=latest_screen,
+            pending_screen_request=None,
+            needs_screen_after_plan=False,
             status="planning",
             last_error=None,
         )
@@ -303,6 +356,15 @@ class TutorialSessionGraph:
             completed_step_ids=state.get("completed_step_ids", []),
         )
         if next_step_id is None:
+            if state.get("needs_screen_after_plan"):
+                return TutorialSessionState(
+                    current_step_id=None,
+                    pending_screen_request={
+                        "request_id": next_screen_request_id(state),
+                        "reason": "Steps completed; fresh screen needed to continue planning.",
+                    },
+                    status="needs_screen",
+                )
             return TutorialSessionState(current_step_id=None, status="completed")
 
         return TutorialSessionState(
@@ -323,12 +385,16 @@ def route_after_planning(state: TutorialSessionState) -> str:
         return "end"
     if state.get("pending_question") is not None:
         return "wait_for_context"
+    if state.get("pending_screen_request") is not None:
+        return "wait_for_screen"
     return "emit_plan"
 
 
 def route_after_confirmation(state: TutorialSessionState) -> str:
     if state.get("status") == "planning":
         return "plan_or_ask_context"
+    if state.get("status") == "needs_screen":
+        return "wait_for_screen"
     if state.get("status") == "completed":
         return "complete"
     return "wait_for_step_confirmation"
@@ -347,6 +413,11 @@ def uploaded_image_from_screen(screen: dict[str, str] | None) -> UploadedImage |
 def next_question_id(state: TutorialSessionState) -> str:
     message_count = len(state.get("messages", []))
     return f"question_{message_count + 1:03}"
+
+
+def next_screen_request_id(state: TutorialSessionState) -> str:
+    completed_count = len(state.get("completed_step_ids", []))
+    return f"screen_{completed_count + 1:03}"
 
 
 def plan_from_state(state: TutorialSessionState) -> TutorialPlan:

@@ -305,6 +305,8 @@ final class TutorialSessionController: ObservableObject {
             status = .ready
         case .tutorialAction(let step):
             applyTutorialAction(step)
+        case .tutorialActionDelta(let step):
+            applyTutorialAction(step)
         case .stepReady(let stepID):
             currentStepID = stepID
             status = .ready

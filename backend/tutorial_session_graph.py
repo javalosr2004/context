@@ -12,11 +12,17 @@ from langgraph.types import Command, interrupt
 
 from backend.images import UploadedImage
 from backend.tutorial_guide import TutorialGuide, TutorialSessionPlanRequest
-from backend.tutorial_schema import PlannerNeedsContext, PlannerReady, TutorialPlan
+from backend.tutorial_schema import (
+    PlannerNeedsContext,
+    PlannerReady,
+    TutorialPlan,
+    TutorialStep,
+)
 from backend.tutorial_session_events import (
     ErrorEvent,
     ServerSessionEvent,
     StatusChangedEvent,
+    TutorialActionDeltaEvent,
     TutorialActionEvent,
 )
 from backend.tutorial_tools import TutorialToolCallError
@@ -153,7 +159,16 @@ class TutorialSessionGraph:
             latest_screen=uploaded_image_from_screen(state.get("latest_screen")),
         )
         try:
-            reply = self._tutorial_guide.create_session_planner_reply(request)
+            streamed_step_ids: list[str] = []
+
+            def emit_streamed_step(step: TutorialStep) -> None:
+                streamed_step_ids.append(step.step_id)
+                emit_event(TutorialActionDeltaEvent(step=step))
+
+            reply = self._tutorial_guide.create_session_planner_reply(
+                request,
+                on_streamed_step=emit_streamed_step,
+            )
         except TutorialToolCallError as error:
             emit_event(ErrorEvent(code=error.code, message=error.message))
             logger.warning(
@@ -182,7 +197,7 @@ class TutorialSessionGraph:
             )
 
         if isinstance(reply, PlannerReady):
-            for step in reply.plan.steps:
+            for step in unstreamed_steps(reply.plan.steps, streamed_step_ids):
                 emit_event(TutorialActionEvent(step=step))
             return TutorialSessionState(
                 current_plan=reply.plan.model_dump(mode="json"),
@@ -346,3 +361,11 @@ def append_unique(values: list[str], value: str) -> list[str]:
     if value in values:
         return values
     return values + [value]
+
+
+def unstreamed_steps(
+    steps: list[TutorialStep],
+    streamed_step_ids: list[str],
+) -> list[TutorialStep]:
+    streamed = set(streamed_step_ids)
+    return [step for step in steps if step.step_id not in streamed]

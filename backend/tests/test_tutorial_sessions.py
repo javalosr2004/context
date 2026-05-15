@@ -75,6 +75,7 @@ class StubTutorialGuide:
     def create_session_planner_reply(
         self,
         request: TutorialSessionPlanRequest,
+        on_streamed_step=None,
     ) -> PlannerReply:
         self.requests.append(request)
         return self.replies.pop(0)
@@ -90,6 +91,7 @@ class ErroringToolTutorialGuide(StubTutorialGuide):
     def create_session_planner_reply(
         self,
         request: TutorialSessionPlanRequest,
+        on_streamed_step=None,
     ) -> PlannerReply:
         self.requests.append(request)
         raise TutorialToolCallError(
@@ -102,6 +104,19 @@ class ErroringToolTutorialGuide(StubTutorialGuide):
         request: TutorialSessionPlanRequest,
     ) -> PlannerReply:
         return StubTutorialGuide.create_session_planner_reply(self, request)
+
+
+class StreamingToolTutorialGuide(StubTutorialGuide):
+    def create_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+        on_streamed_step=None,
+    ) -> PlannerReply:
+        reply = super().create_session_planner_reply(request)
+        if on_streamed_step is not None:
+            for step in reply.plan.steps:
+                on_streamed_step(step)
+        return reply
 
 
 class TutorialSessionTests(unittest.TestCase):
@@ -181,6 +196,35 @@ class TutorialSessionTests(unittest.TestCase):
         self.assertEqual(events[1]["label"], "Planning tutorial")
         self.assertEqual(events[2]["label"], "Analyzing screen")
         self.assertEqual(events[3]["type"], "tutorial_action")
+        self.assertEqual(events[3]["step"]["step_id"], "step_001")
+        self.assertEqual(events[4]["label"], "Validating targets")
+        self.assertEqual(events[5]["type"], "plan_ready")
+        self.assertEqual(events[6], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(
+            events[7],
+            {"type": "awaiting_confirmation", "step_id": "step_001"},
+        )
+
+    def test_streamed_tool_step_emits_action_delta_before_plan_ready(self) -> None:
+        client = client_with_manager(
+            TutorialSessionManager(
+                StreamingToolTutorialGuide([ready_reply(VALID_PLAN_JSON)]),
+                session_id_factory=lambda: "session-1",
+            )
+        )
+        session_id = client.post("/tutorial-sessions").json()["session_id"]
+
+        with client.websocket_connect(f"/tutorial-sessions/{session_id}/socket") as websocket:
+            websocket.receive_json()
+            websocket.send_json(
+                {"type": "user_message", "text": "Show me how to create a repo."}
+            )
+            events = [websocket.receive_json() for _ in range(8)]
+
+        self.assertEqual(events[0]["type"], "request_received")
+        self.assertEqual(events[1]["label"], "Planning tutorial")
+        self.assertEqual(events[2]["label"], "Analyzing screen")
+        self.assertEqual(events[3]["type"], "tutorial_action_delta")
         self.assertEqual(events[3]["step"]["step_id"], "step_001")
         self.assertEqual(events[4]["label"], "Validating targets")
         self.assertEqual(events[5]["type"], "plan_ready")

@@ -102,6 +102,11 @@ class TutorialActionEvent(TutorialSessionEventModel):
     step: TutorialStep
 
 
+class TutorialActionDeltaEvent(TutorialSessionEventModel):
+    type: Literal["tutorial_action_delta"] = "tutorial_action_delta"
+    step: TutorialStep
+
+
 class StepReadyEvent(TutorialSessionEventModel):
     type: Literal["step_ready"] = "step_ready"
     step_id: str
@@ -130,6 +135,7 @@ ServerSessionEvent = (
     | PlanReadyEvent
     | PlanUpdatedEvent
     | TutorialActionEvent
+    | TutorialActionDeltaEvent
     | StepReadyEvent
     | AwaitingConfirmationEvent
     | SessionCompletedEvent

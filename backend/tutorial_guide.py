@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from backend.images import UploadedImage
@@ -13,6 +13,7 @@ from backend.tutorial_schema import (
     TutorialPlan,
     TutorialPlannerReplyValidationError,
     TutorialPlanValidationError,
+    TutorialStep,
     parse_tutorial_planner_reply,
     parse_tutorial_plan,
     tutorial_planner_reply_response_schema,
@@ -25,6 +26,8 @@ from backend.tutorial_tools import (
 
 
 logger = logging.getLogger(__name__)
+
+TutorialStepSink = Callable[[TutorialStep], None]
 
 
 TUTORIAL_CREATOR_SYSTEM_PROMPT = (
@@ -110,8 +113,12 @@ class TutorialGuide:
     def create_session_planner_reply(
         self,
         request: TutorialSessionPlanRequest,
+        on_streamed_step: TutorialStepSink | None = None,
     ) -> PlannerReply:
-        streamed_reply = self.create_streamed_session_planner_reply(request)
+        streamed_reply = self.create_streamed_session_planner_reply(
+            request,
+            on_streamed_step=on_streamed_step,
+        )
         if streamed_reply is not None:
             return streamed_reply
 
@@ -140,22 +147,26 @@ class TutorialGuide:
     def create_streamed_session_planner_reply(
         self,
         request: TutorialSessionPlanRequest,
+        on_streamed_step: TutorialStepSink | None = None,
     ) -> PlannerReady | None:
-        steps = list(
-            steps_from_tool_calls(
-                self._llm.stream_tutorial_tool_calls(
-                    LLMRequest(
-                        system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
-                        user_text=build_tutorial_session_user_prompt(request),
-                        images=[request.latest_screen]
-                        if request.latest_screen is not None
-                        else [],
-                        enable_search_grounding=False,
-                        temperature=0,
-                    )
+        steps = []
+        for step in steps_from_tool_calls(
+            self._llm.stream_tutorial_tool_calls(
+                LLMRequest(
+                    system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
+                    user_text=build_tutorial_session_user_prompt(request),
+                    images=[request.latest_screen]
+                    if request.latest_screen is not None
+                    else [],
+                    enable_search_grounding=False,
+                    temperature=0,
                 )
             )
-        )
+        ):
+            steps.append(step)
+            if on_streamed_step is not None:
+                on_streamed_step(step)
+
         if not steps:
             logger.info(
                 "Tutorial tool stream produced no steps; falling back to planner reply",

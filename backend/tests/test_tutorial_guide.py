@@ -203,6 +203,46 @@ class TutorialGuideTests(unittest.TestCase):
             "A green New button.",
         )
 
+    def test_create_session_planner_reply_reports_each_streamed_step(self) -> None:
+        llm = FakeLLM(
+            complete_responses=[],
+            tool_calls=[
+                TutorialToolCall(
+                    name="tutorial_click",
+                    arguments=(
+                        '{"human_text":"Click New.","agent_description":"A green New button."}'
+                    ),
+                ),
+                TutorialToolCall(
+                    name="tutorial_type",
+                    arguments=(
+                        '{"human_text":"Type the name.",'
+                        '"copiable_text":"context-demo",'
+                        '"agent_description":"The repository name field."}'
+                    ),
+                ),
+            ],
+        )
+        guide = TutorialGuide(llm)
+        streamed_steps = []
+
+        reply = guide.create_session_planner_reply(
+            TutorialSessionPlanRequest(
+                session_id="session-1",
+                goal="Create a repo.",
+                messages=[{"role": "user", "content": "Create a repo."}],
+                latest_screen=None,
+            ),
+            on_streamed_step=streamed_steps.append,
+        )
+
+        self.assertEqual(reply.type, "ready")
+        self.assertEqual(
+            [step.step_id for step in streamed_steps],
+            ["step_001", "step_002"],
+        )
+        self.assertEqual(streamed_steps, reply.plan.steps)
+
     def test_create_session_planner_reply_accepts_context_question(self) -> None:
         llm = FakeLLM(complete_responses=[VALID_NEEDS_CONTEXT_REPLY_JSON])
         guide = TutorialGuide(llm)

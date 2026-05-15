@@ -1,0 +1,16 @@
+[project]
+name = "notebooks"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.2.0",
+    "lightglue",
+    "matplotlib>=3.10.9",
+    "numpy>=2.4.4",
+    "pillow>=12.2.0",
+    "torch>=2.12.0",
+    "torchvision>=0.27.0",
+]
+
+[tool.uv.sources]
+lightglue = { git = "https://github.com/cvg/LightGlue.git" }

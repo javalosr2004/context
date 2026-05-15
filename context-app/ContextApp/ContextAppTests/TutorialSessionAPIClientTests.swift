@@ -28,7 +28,22 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         let event = TutorialSessionClientEvent.userConfirmation(
             stepID: "step_001",
             confirmed: false,
-            note: "Wrong target",
+            note: "Wrong target"
+        )
+
+        let data = try JSONEncoder().encode(event)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["type"] as? String, "user_confirmation")
+        XCTAssertEqual(object["step_id"] as? String, "step_001")
+        XCTAssertEqual(object["confirmed"] as? Bool, false)
+        XCTAssertEqual(object["note"] as? String, "Wrong target")
+        XCTAssertNil(object["screen"])
+    }
+
+    func testUserScreenEventEncodingUsesWireKeys() throws {
+        let event = TutorialSessionClientEvent.userScreen(
+            requestID: "screen_001",
             screen: TutorialSessionScreenSnapshot(
                 mimeType: "image/jpeg",
                 dataBase64: "abc123"
@@ -39,10 +54,8 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let screen = try XCTUnwrap(object["screen"] as? [String: Any])
 
-        XCTAssertEqual(object["type"] as? String, "user_confirmation")
-        XCTAssertEqual(object["step_id"] as? String, "step_001")
-        XCTAssertEqual(object["confirmed"] as? Bool, false)
-        XCTAssertEqual(object["note"] as? String, "Wrong target")
+        XCTAssertEqual(object["type"] as? String, "user_screen")
+        XCTAssertEqual(object["request_id"] as? String, "screen_001")
         XCTAssertEqual(screen["mime_type"] as? String, "image/jpeg")
         XCTAssertEqual(screen["data_base64"] as? String, "abc123")
     }
@@ -144,6 +157,22 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         }
         XCTAssertEqual(step.stepId, "step_001")
         XCTAssertEqual(step.action.type, "click")
+    }
+
+    func testServerEventDecodingTutorialTextDelta() throws {
+        let data = Data("""
+        {
+          "type": "tutorial_text_delta",
+          "text": "Looking at the screen..."
+        }
+        """.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .tutorialTextDelta(let text) = event else {
+            return XCTFail("Expected tutorialTextDelta, got \(event)")
+        }
+        XCTAssertEqual(text, "Looking at the screen...")
     }
 
     func testStatusLabelsAndBusyStates() {

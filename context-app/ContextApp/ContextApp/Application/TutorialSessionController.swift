@@ -129,15 +129,12 @@ final class TutorialSessionController: ObservableObject {
     func confirmStep(stepID: String, confirmed: Bool, note: String?) async {
         pendingContinuePromptStepID = nil
         do {
-            status = confirmed ? .sending : .preparingScreen
-            let screen = confirmed ? nil : try await captureScreenSnapshot()
             status = .sending
             try await sendSessionEvent(
                 .userConfirmation(
                     stepID: stepID,
                     confirmed: confirmed,
-                    note: note,
-                    screen: screen
+                    note: note
                 )
             )
             awaitingConfirmationStepID = nil
@@ -149,6 +146,11 @@ final class TutorialSessionController: ObservableObject {
 
     func appendTutorialText(_ text: String) {
         guard messageStore.appendTutorialText(text) != nil else { return }
+        messages = messageStore.messages
+    }
+
+    func appendTutorialTextDelta(_ text: String) {
+        guard messageStore.appendTutorialTextDelta(text) != nil else { return }
         messages = messageStore.messages
     }
 
@@ -169,10 +171,8 @@ final class TutorialSessionController: ObservableObject {
         appendUserText(text)
 
         do {
-            status = .preparingScreen
-            let screen = try await captureScreenSnapshot()
             status = .sending
-            try await sendSessionEvent(.userMessage(text: text, screen: screen))
+            try await sendSessionEvent(.userMessage(text: text))
         } catch {
             await runFallbackPlanIfAvailable(text: text, originalError: error)
         }
@@ -182,19 +182,35 @@ final class TutorialSessionController: ObservableObject {
         appendUserText(text)
 
         do {
-            status = .preparingScreen
-            let screen = try await captureScreenSnapshot()
             pendingQuestion = nil
             status = .sending
             try await sendSessionEvent(
                 .userAnswer(
                     questionID: question.questionID,
-                    text: text,
-                    screen: screen
+                    text: text
                 )
             )
         } catch {
             applyFailure("Could not send answer: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleScreenRequest(requestID: String, reason: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.sendRequestedScreen(requestID: requestID, reason: reason)
+        }
+    }
+
+    private func sendRequestedScreen(requestID: String, reason: String) async {
+        logger.info("Screen requested: \(reason, privacy: .public)")
+        do {
+            status = .preparingScreen
+            let screen = try await captureScreenSnapshot()
+            status = .sending
+            try await sendSessionEvent(.userScreen(requestID: requestID, screen: screen))
+        } catch {
+            applyFailure("Could not send requested screen: \(error.localizedDescription)")
         }
     }
 
@@ -307,12 +323,16 @@ final class TutorialSessionController: ObservableObject {
             applyTutorialAction(step)
         case .tutorialActionDelta(let step):
             applyTutorialAction(step)
+        case .tutorialTextDelta(let text):
+            appendTutorialTextDelta(text)
         case .stepReady(let stepID):
             currentStepID = stepID
             status = .ready
         case .awaitingConfirmation(let stepID):
             awaitingConfirmationStepID = stepID
             status = .awaitingConfirmation
+        case .screenRequested(let requestID, let reason):
+            handleScreenRequest(requestID: requestID, reason: reason)
         case .sessionCompleted:
             currentStepID = nil
             awaitingConfirmationStepID = nil
@@ -325,6 +345,8 @@ final class TutorialSessionController: ObservableObject {
 
     private func applyStatus(_ rawStatus: String, label: String) {
         switch rawStatus {
+        case "ready":
+            status = .ready
         case "planning":
             status = .planning(label)
         case "needs_context":

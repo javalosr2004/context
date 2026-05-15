@@ -50,10 +50,11 @@ struct CreateTutorialSessionResponse: Codable, Equatable {
 }
 
 enum TutorialSessionClientEvent: Codable, Equatable {
-    case userMessage(text: String, screen: TutorialSessionScreenSnapshot?)
-    case userAnswer(questionID: String, text: String, screen: TutorialSessionScreenSnapshot?)
+    case userMessage(text: String)
+    case userAnswer(questionID: String, text: String)
     case stepStarted(stepID: String)
-    case userConfirmation(stepID: String, confirmed: Bool, note: String?, screen: TutorialSessionScreenSnapshot?)
+    case userConfirmation(stepID: String, confirmed: Bool, note: String?)
+    case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -61,6 +62,7 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         case screen
         case questionID = "question_id"
         case stepID = "step_id"
+        case requestID = "request_id"
         case confirmed
         case note
     }
@@ -71,15 +73,11 @@ enum TutorialSessionClientEvent: Codable, Equatable {
 
         switch type {
         case "user_message":
-            self = .userMessage(
-                text: try container.decode(String.self, forKey: .text),
-                screen: try container.decodeIfPresent(TutorialSessionScreenSnapshot.self, forKey: .screen)
-            )
+            self = .userMessage(text: try container.decode(String.self, forKey: .text))
         case "user_answer":
             self = .userAnswer(
                 questionID: try container.decode(String.self, forKey: .questionID),
-                text: try container.decode(String.self, forKey: .text),
-                screen: try container.decodeIfPresent(TutorialSessionScreenSnapshot.self, forKey: .screen)
+                text: try container.decode(String.self, forKey: .text)
             )
         case "step_started":
             self = .stepStarted(stepID: try container.decode(String.self, forKey: .stepID))
@@ -87,8 +85,12 @@ enum TutorialSessionClientEvent: Codable, Equatable {
             self = .userConfirmation(
                 stepID: try container.decode(String.self, forKey: .stepID),
                 confirmed: try container.decode(Bool.self, forKey: .confirmed),
-                note: try container.decodeIfPresent(String.self, forKey: .note),
-                screen: try container.decodeIfPresent(TutorialSessionScreenSnapshot.self, forKey: .screen)
+                note: try container.decodeIfPresent(String.self, forKey: .note)
+            )
+        case "user_screen":
+            self = .userScreen(
+                requestID: try container.decode(String.self, forKey: .requestID),
+                screen: try container.decode(TutorialSessionScreenSnapshot.self, forKey: .screen)
             )
         default:
             throw DecodingError.dataCorruptedError(
@@ -103,24 +105,25 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
         switch self {
-        case .userMessage(let text, let screen):
+        case .userMessage(let text):
             try container.encode("user_message", forKey: .type)
             try container.encode(text, forKey: .text)
-            try container.encodeIfPresent(screen, forKey: .screen)
-        case .userAnswer(let questionID, let text, let screen):
+        case .userAnswer(let questionID, let text):
             try container.encode("user_answer", forKey: .type)
             try container.encode(questionID, forKey: .questionID)
             try container.encode(text, forKey: .text)
-            try container.encodeIfPresent(screen, forKey: .screen)
         case .stepStarted(let stepID):
             try container.encode("step_started", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
-        case .userConfirmation(let stepID, let confirmed, let note, let screen):
+        case .userConfirmation(let stepID, let confirmed, let note):
             try container.encode("user_confirmation", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
             try container.encode(confirmed, forKey: .confirmed)
             try container.encodeIfPresent(note, forKey: .note)
-            try container.encodeIfPresent(screen, forKey: .screen)
+        case .userScreen(let requestID, let screen):
+            try container.encode("user_screen", forKey: .type)
+            try container.encode(requestID, forKey: .requestID)
+            try container.encode(screen, forKey: .screen)
         }
     }
 }
@@ -134,8 +137,10 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case planUpdated(TutorialPlan)
     case tutorialAction(TutorialStep)
     case tutorialActionDelta(TutorialStep)
+    case tutorialTextDelta(String)
     case stepReady(stepID: String)
     case awaitingConfirmation(stepID: String)
+    case screenRequested(requestID: String, reason: String)
     case sessionCompleted
     case error(code: String, message: String)
 
@@ -148,7 +153,10 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case prompt
         case plan
         case step
+        case text
         case stepID = "step_id"
+        case requestID = "request_id"
+        case reason
         case code
         case message
     }
@@ -180,10 +188,17 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .tutorialAction(try container.decode(TutorialStep.self, forKey: .step))
         case "tutorial_action_delta":
             self = .tutorialActionDelta(try container.decode(TutorialStep.self, forKey: .step))
+        case "tutorial_text_delta":
+            self = .tutorialTextDelta(try container.decode(String.self, forKey: .text))
         case "step_ready":
             self = .stepReady(stepID: try container.decode(String.self, forKey: .stepID))
         case "awaiting_confirmation":
             self = .awaitingConfirmation(stepID: try container.decode(String.self, forKey: .stepID))
+        case "screen_requested":
+            self = .screenRequested(
+                requestID: try container.decode(String.self, forKey: .requestID),
+                reason: try container.decode(String.self, forKey: .reason)
+            )
         case "session_completed":
             self = .sessionCompleted
         case "error":
@@ -229,12 +244,19 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case .tutorialActionDelta(let step):
             try container.encode("tutorial_action_delta", forKey: .type)
             try container.encode(step, forKey: .step)
+        case .tutorialTextDelta(let text):
+            try container.encode("tutorial_text_delta", forKey: .type)
+            try container.encode(text, forKey: .text)
         case .stepReady(let stepID):
             try container.encode("step_ready", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
         case .awaitingConfirmation(let stepID):
             try container.encode("awaiting_confirmation", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
+        case .screenRequested(let requestID, let reason):
+            try container.encode("screen_requested", forKey: .type)
+            try container.encode(requestID, forKey: .requestID)
+            try container.encode(reason, forKey: .reason)
         case .sessionCompleted:
             try container.encode("session_completed", forKey: .type)
         case .error(let code, let message):

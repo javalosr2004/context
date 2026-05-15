@@ -82,7 +82,12 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_action_tool_call_produces_plan_and_awaits_confirmation(self) -> None:
         events: list[Any] = []
-        llm = ScriptedLLM([[LLMToolCallEvent(tool_call=CLICK_CALL)]])
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_CALL)],
+                [LLMTextDelta(text="Looks done.")],
+            ]
+        )
         session = TutorialSession(
             session_id="s1", llm=llm, emit=await collect_events(events)
         )

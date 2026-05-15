@@ -174,15 +174,20 @@ class TutorialSession:
 
     async def _run_session(self) -> None:
         try:
+            any_steps_walked = False
             while True:
                 await self._run_agent_loop()
                 if not self.plan_steps:
+                    if any_steps_walked:
+                        await self.emit(SessionCompletedEvent())
+                        self.status = "completed"
                     return
-                replan = await self._walk_steps()
-                if not replan:
-                    await self.emit(SessionCompletedEvent())
-                    self.status = "completed"
-                    return
+                await self._walk_steps()
+                any_steps_walked = True
+                self._record_walk_outcome()
+                self.plan_steps = []
+                self.completed_step_ids = []
+                self.plan_emitted = False
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -191,6 +196,20 @@ class TutorialSession:
                 extra={"session_id": self.session_id},
             )
             raise
+
+    def _record_walk_outcome(self) -> None:
+        completed = list(self.completed_step_ids)
+        if not completed:
+            return
+        summary = (
+            "Previous tutorial step(s) finished: "
+            + ", ".join(completed)
+            + ". Decide whether the user's goal is now met. If yes, answer "
+            "with a short confirmation in plain text and stop. If more work "
+            "is needed, plan the next steps with the action tools — request "
+            "a fresh screen first if you need to see the result."
+        )
+        self.history.append(HistoryEntry(role="user", content=summary))
 
     # -------- Agent loop --------
 
@@ -372,9 +391,9 @@ class TutorialSession:
                 role="tool",
                 content=(
                     f"{call.name} ok — fresh screen captured at {captured_at} "
-                    "is attached as the image in this turn. Plan from it; "
-                    "do not request another screen unless the user has acted "
-                    "since this capture."
+                    "is attached as the image in this turn. Plan from it. "
+                    "After you instruct the user to do something, you may "
+                    "request another screen to verify the result."
                 ),
             )
         )

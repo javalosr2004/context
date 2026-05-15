@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Callable
 from uuid import uuid4
 
 from backend.tutorial_guide import TutorialGuide
@@ -12,7 +12,6 @@ from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
     ClientSessionEvent,
     CreateTutorialSessionResponse,
-    ErrorEvent,
     PlanReadyEvent,
     PlanUpdatedEvent,
     RequestReceivedEvent,
@@ -127,23 +126,22 @@ class TutorialSessionManager:
             session.goal,
         )
 
-        result = self._graph.start(
-            TutorialSessionState(
-                session_id=session_id,
-                goal=session.goal,
-                messages=messages,
-                latest_screen=screen_to_state(event.screen),
-                current_plan=None,
-                current_step_id=None,
-                completed_step_ids=[],
-                pending_question=None,
-                status="planning",
-                last_error=None,
-            ),
-            event_sink=event_sink,
+        initial_state = TutorialSessionState(
+            session_id=session_id,
+            goal=session.goal,
+            messages=messages,
+            latest_screen=screen_to_state(event.screen),
+            current_plan=None,
+            current_step_id=None,
+            completed_step_ids=[],
+            pending_question=None,
+            status="planning",
+            last_error=None,
         )
+        for streamed_event in self._graph.start(initial_state):
+            event_sink(streamed_event)
         self._emit_events_after_graph_run(
-            session_id, result, plan_was_rejected=False, event_sink=event_sink
+            session_id, plan_was_rejected=False, event_sink=event_sink
         )
 
     def _handle_user_answer(
@@ -160,17 +158,17 @@ class TutorialSessionManager:
                 "The answer did not match the pending tutorial question.",
             )
 
-        result = self._graph.resume(
+        for streamed_event in self._graph.resume(
             session_id,
             {
                 "question_id": event.question_id,
                 "text": event.text,
                 "screen": screen_to_state(event.screen),
             },
-            event_sink=event_sink,
-        )
+        ):
+            event_sink(streamed_event)
         self._emit_events_after_graph_run(
-            session_id, result, plan_was_rejected=False, event_sink=event_sink
+            session_id, plan_was_rejected=False, event_sink=event_sink
         )
 
     def _handle_user_confirmation(
@@ -186,7 +184,7 @@ class TutorialSessionManager:
                 "The confirmation did not match the current tutorial step.",
             )
 
-        result = self._graph.resume(
+        for streamed_event in self._graph.resume(
             session_id,
             {
                 "step_id": event.step_id,
@@ -194,11 +192,10 @@ class TutorialSessionManager:
                 "note": event.note,
                 "screen": screen_to_state(event.screen),
             },
-            event_sink=event_sink,
-        )
+        ):
+            event_sink(streamed_event)
         self._emit_events_after_graph_run(
             session_id,
-            result,
             plan_was_rejected=not event.confirmed,
             event_sink=event_sink,
         )
@@ -223,7 +220,6 @@ class TutorialSessionManager:
     def _emit_events_after_graph_run(
         self,
         session_id: str,
-        result: dict[str, Any],
         plan_was_rejected: bool,
         event_sink: EventSink,
     ) -> None:
@@ -241,6 +237,12 @@ class TutorialSessionManager:
             )
             return
 
+        if session.status == "conversation":
+            session.status = "ready"
+            session.updated_at = datetime.now(UTC)
+            event_sink(StatusChangedEvent(status="ready", label="Ready"))
+            return
+
         if session.current_plan is not None and session.status == "awaiting_confirmation":
             if not session.plan_emitted:
                 event_sink(PlanReadyEvent(plan=session.current_plan))
@@ -256,14 +258,6 @@ class TutorialSessionManager:
         if session.status == "completed":
             event_sink(SessionCompletedEvent())
             return
-
-        if "__interrupt__" in result:
-            event_sink(
-                ErrorEvent(
-                    code="unknown_interrupt",
-                    message="The tutorial session paused without a recognized state.",
-                )
-            )
 
     def _require_session(self, session_id: str) -> TutorialSessionRecord:
         session = self._sessions.get(session_id)

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import base64
 import logging
-from collections.abc import Callable
-from contextvars import ContextVar
+from collections.abc import Callable, Iterator
 from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
@@ -33,15 +33,10 @@ logger = logging.getLogger(__name__)
 
 EventSink = Callable[[ServerSessionEvent], None]
 
-_current_sink: ContextVar[EventSink | None] = ContextVar(
-    "tutorial_session_event_sink", default=None
-)
-
 
 def emit_event(event: ServerSessionEvent) -> None:
-    sink = _current_sink.get()
-    if sink is not None:
-        sink(event)
+    writer = get_stream_writer()
+    writer(event)
 
 
 class TutorialSessionState(TypedDict, total=False):
@@ -65,27 +60,23 @@ class TutorialSessionGraph:
     def start(
         self,
         state: TutorialSessionState,
-        event_sink: EventSink | None = None,
-    ) -> dict[str, Any]:
-        token = _current_sink.set(event_sink)
-        try:
-            return self._graph.invoke(state, config_for_session(state["session_id"]))
-        finally:
-            _current_sink.reset(token)
+    ) -> Iterator[ServerSessionEvent]:
+        yield from self._graph.stream(
+            state,
+            config=config_for_session(state["session_id"]),
+            stream_mode="custom",
+        )
 
     def resume(
         self,
         session_id: str,
         value: dict[str, Any],
-        event_sink: EventSink | None = None,
-    ) -> dict[str, Any]:
-        token = _current_sink.set(event_sink)
-        try:
-            return self._graph.invoke(
-                Command(resume=value), config=config_for_session(session_id)
-            )
-        finally:
-            _current_sink.reset(token)
+    ) -> Iterator[ServerSessionEvent]:
+        yield from self._graph.stream(
+            Command(resume=value),
+            config=config_for_session(session_id),
+            stream_mode="custom",
+        )
 
     def state_for(self, session_id: str) -> TutorialSessionState:
         snapshot = self._graph.get_state(config_for_session(session_id))

@@ -452,7 +452,7 @@ struct ChatPopupView: View {
                 Spacer(minLength: 28)
             }
 
-            Text(text)
+            chatText(text, role: role)
                 .font(.system(size: 13))
                 .lineSpacing(2)
                 .foregroundStyle(.primary)
@@ -471,6 +471,14 @@ struct ChatPopupView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
+    }
+
+    private func chatText(_ text: String, role: ChatMessageRole) -> Text {
+        guard role == .tutorial, let markdown = try? AttributedString(markdown: text) else {
+            return Text(text)
+        }
+
+        return Text(markdown)
     }
 
     private func tutorialPlanRow(_ plan: TutorialPlan) -> some View {

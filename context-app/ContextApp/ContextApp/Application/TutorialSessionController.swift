@@ -4,18 +4,11 @@ import Dispatch
 import Foundation
 import OSLog
 
-struct TutorialSessionQuestion: Equatable {
-    let questionID: String
-    let prompt: String
-}
-
 enum TutorialSessionUIStatus: Equatable {
     case ready
     case preparingScreen
     case sending
-    case requestReceived
     case planning(String)
-    case needsContext
     case awaitingConfirmation
     case completed
     case failed(String)
@@ -28,12 +21,8 @@ enum TutorialSessionUIStatus: Equatable {
             return "Preparing screen"
         case .sending:
             return "Sending"
-        case .requestReceived:
-            return "Request received"
         case .planning(let label):
             return label
-        case .needsContext:
-            return "Needs context"
         case .awaitingConfirmation:
             return "Awaiting confirmation"
         case .completed:
@@ -45,9 +34,9 @@ enum TutorialSessionUIStatus: Equatable {
 
     var isBusy: Bool {
         switch self {
-        case .preparingScreen, .sending, .requestReceived, .planning:
+        case .preparingScreen, .sending, .planning:
             return true
-        case .ready, .needsContext, .awaitingConfirmation, .completed, .failed:
+        case .ready, .awaitingConfirmation, .completed, .failed:
             return false
         }
     }
@@ -59,7 +48,6 @@ final class TutorialSessionController: ObservableObject {
     @Published private(set) var currentStepID: String?
     @Published private(set) var messages: [ChatMessage]
     @Published private(set) var pendingContinuePromptStepID: String?
-    @Published private(set) var pendingQuestion: TutorialSessionQuestion?
     @Published private(set) var status: TutorialSessionUIStatus = .ready
 
     private let capture: ScreenFrameCapture
@@ -102,11 +90,6 @@ final class TutorialSessionController: ObservableObject {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty, !status.isBusy else { return }
 
-        if let pendingQuestion {
-            await sendAnswer(trimmedText, question: pendingQuestion)
-            return
-        }
-
         await sendUserMessage(trimmedText)
     }
 
@@ -138,7 +121,7 @@ final class TutorialSessionController: ObservableObject {
                 )
             )
             awaitingConfirmationStepID = nil
-            status = confirmed ? .requestReceived : .planning("Replanning from current screen")
+            status = confirmed ? .planning("Continuing") : .planning("Replanning from current screen")
         } catch {
             applyFailure("Could not confirm tutorial step: \(error.localizedDescription)")
         }
@@ -175,23 +158,6 @@ final class TutorialSessionController: ObservableObject {
             try await sendSessionEvent(.userMessage(text: text))
         } catch {
             await runFallbackPlanIfAvailable(text: text, originalError: error)
-        }
-    }
-
-    private func sendAnswer(_ text: String, question: TutorialSessionQuestion) async {
-        appendUserText(text)
-
-        do {
-            pendingQuestion = nil
-            status = .sending
-            try await sendSessionEvent(
-                .userAnswer(
-                    questionID: question.questionID,
-                    text: text
-                )
-            )
-        } catch {
-            applyFailure("Could not send answer: \(error.localizedDescription)")
         }
     }
 
@@ -303,28 +269,19 @@ final class TutorialSessionController: ObservableObject {
         switch event {
         case .sessionReady:
             status = .ready
-        case .requestReceived:
-            status = .requestReceived
         case .statusChanged(let rawStatus, let label):
             applyStatus(rawStatus, label: label)
-        case .assistantQuestion(let questionID, let prompt):
-            pendingQuestion = TutorialSessionQuestion(questionID: questionID, prompt: prompt)
-            appendTutorialText(prompt)
-            status = .needsContext
+        case .textResponse(let text):
+            appendTutorialText(text)
+            status = .ready
         case .planReady(let plan):
-            pendingQuestion = nil
             appendTutorialPlan(plan)
             status = .ready
         case .planUpdated(let plan):
-            pendingQuestion = nil
             appendTutorialPlan(plan)
             status = .ready
         case .tutorialAction(let step):
             applyTutorialAction(step)
-        case .tutorialActionDelta(let step):
-            applyTutorialAction(step)
-        case .tutorialTextDelta(let text):
-            appendTutorialTextDelta(text)
         case .stepReady(let stepID):
             currentStepID = stepID
             status = .ready
@@ -345,12 +302,10 @@ final class TutorialSessionController: ObservableObject {
 
     private func applyStatus(_ rawStatus: String, label: String) {
         switch rawStatus {
-        case "ready":
+        case "ready", "step_ready":
             status = .ready
-        case "planning":
+        case "planning", "needs_screen":
             status = .planning(label)
-        case "needs_context":
-            status = .needsContext
         case "awaiting_confirmation":
             status = .awaitingConfirmation
         case "completed":

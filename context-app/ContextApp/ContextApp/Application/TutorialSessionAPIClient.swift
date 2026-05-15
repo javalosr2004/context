@@ -51,7 +51,6 @@ struct CreateTutorialSessionResponse: Codable, Equatable {
 
 enum TutorialSessionClientEvent: Codable, Equatable {
     case userMessage(text: String)
-    case userAnswer(questionID: String, text: String)
     case stepStarted(stepID: String)
     case userConfirmation(stepID: String, confirmed: Bool, note: String?)
     case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
@@ -60,7 +59,6 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         case type
         case text
         case screen
-        case questionID = "question_id"
         case stepID = "step_id"
         case requestID = "request_id"
         case confirmed
@@ -74,11 +72,6 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         switch type {
         case "user_message":
             self = .userMessage(text: try container.decode(String.self, forKey: .text))
-        case "user_answer":
-            self = .userAnswer(
-                questionID: try container.decode(String.self, forKey: .questionID),
-                text: try container.decode(String.self, forKey: .text)
-            )
         case "step_started":
             self = .stepStarted(stepID: try container.decode(String.self, forKey: .stepID))
         case "user_confirmation":
@@ -108,10 +101,6 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         case .userMessage(let text):
             try container.encode("user_message", forKey: .type)
             try container.encode(text, forKey: .text)
-        case .userAnswer(let questionID, let text):
-            try container.encode("user_answer", forKey: .type)
-            try container.encode(questionID, forKey: .questionID)
-            try container.encode(text, forKey: .text)
         case .stepStarted(let stepID):
             try container.encode("step_started", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
@@ -130,14 +119,11 @@ enum TutorialSessionClientEvent: Codable, Equatable {
 
 enum TutorialSessionServerEvent: Codable, Equatable {
     case sessionReady(sessionID: String)
-    case requestReceived
     case statusChanged(status: String, label: String)
-    case assistantQuestion(questionID: String, prompt: String)
+    case textResponse(String)
     case planReady(TutorialPlan)
     case planUpdated(TutorialPlan)
     case tutorialAction(TutorialStep)
-    case tutorialActionDelta(TutorialStep)
-    case tutorialTextDelta(String)
     case stepReady(stepID: String)
     case awaitingConfirmation(stepID: String)
     case screenRequested(requestID: String, reason: String)
@@ -149,8 +135,6 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case sessionID = "session_id"
         case status
         case label
-        case questionID = "question_id"
-        case prompt
         case plan
         case step
         case text
@@ -168,28 +152,19 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         switch type {
         case "session_ready":
             self = .sessionReady(sessionID: try container.decode(String.self, forKey: .sessionID))
-        case "request_received":
-            self = .requestReceived
         case "status_changed":
             self = .statusChanged(
                 status: try container.decode(String.self, forKey: .status),
                 label: try container.decode(String.self, forKey: .label)
             )
-        case "assistant_question":
-            self = .assistantQuestion(
-                questionID: try container.decode(String.self, forKey: .questionID),
-                prompt: try container.decode(String.self, forKey: .prompt)
-            )
+        case "text_response":
+            self = .textResponse(try container.decode(String.self, forKey: .text))
         case "plan_ready":
             self = .planReady(try container.decode(TutorialPlan.self, forKey: .plan))
         case "plan_updated":
             self = .planUpdated(try container.decode(TutorialPlan.self, forKey: .plan))
         case "tutorial_action":
             self = .tutorialAction(try container.decode(TutorialStep.self, forKey: .step))
-        case "tutorial_action_delta":
-            self = .tutorialActionDelta(try container.decode(TutorialStep.self, forKey: .step))
-        case "tutorial_text_delta":
-            self = .tutorialTextDelta(try container.decode(String.self, forKey: .text))
         case "step_ready":
             self = .stepReady(stepID: try container.decode(String.self, forKey: .stepID))
         case "awaiting_confirmation":
@@ -222,16 +197,13 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case .sessionReady(let sessionID):
             try container.encode("session_ready", forKey: .type)
             try container.encode(sessionID, forKey: .sessionID)
-        case .requestReceived:
-            try container.encode("request_received", forKey: .type)
         case .statusChanged(let status, let label):
             try container.encode("status_changed", forKey: .type)
             try container.encode(status, forKey: .status)
             try container.encode(label, forKey: .label)
-        case .assistantQuestion(let questionID, let prompt):
-            try container.encode("assistant_question", forKey: .type)
-            try container.encode(questionID, forKey: .questionID)
-            try container.encode(prompt, forKey: .prompt)
+        case .textResponse(let text):
+            try container.encode("text_response", forKey: .type)
+            try container.encode(text, forKey: .text)
         case .planReady(let plan):
             try container.encode("plan_ready", forKey: .type)
             try container.encode(plan, forKey: .plan)
@@ -241,12 +213,6 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case .tutorialAction(let step):
             try container.encode("tutorial_action", forKey: .type)
             try container.encode(step, forKey: .step)
-        case .tutorialActionDelta(let step):
-            try container.encode("tutorial_action_delta", forKey: .type)
-            try container.encode(step, forKey: .step)
-        case .tutorialTextDelta(let text):
-            try container.encode("tutorial_text_delta", forKey: .type)
-            try container.encode(text, forKey: .text)
         case .stepReady(let stepID):
             try container.encode("step_ready", forKey: .type)
             try container.encode(stepID, forKey: .stepID)

@@ -181,9 +181,9 @@ struct ChatPopupView: View {
 
     private var loadingText: String {
         switch sessionController.status {
-        case .preparingScreen, .sending, .requestReceived, .planning:
+        case .preparingScreen, .sending, .planning:
             return sessionController.status.label
-        case .ready, .needsContext, .awaitingConfirmation, .completed, .failed:
+        case .ready, .awaitingConfirmation, .completed, .failed:
             return Self.loadingWords[loadingWordIndex]
         }
     }
@@ -423,7 +423,7 @@ struct ChatPopupView: View {
     }
 
     private var composerPlaceholder: String {
-        sessionController.pendingQuestion == nil ? "Message" : "Answer"
+        "Message"
     }
 
     private var canSubmitDraft: Bool {

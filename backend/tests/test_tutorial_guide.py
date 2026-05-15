@@ -106,13 +106,14 @@ class TutorialGuideTests(unittest.TestCase):
     def test_session_prompts_do_not_force_tutorial_steps(self) -> None:
         self.assertIn("conversation", TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT)
         self.assertIn("Do not invent generic tutorial steps", TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT)
-        self.assertIn("Default to answering in plain text", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("Only emit step calls", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("Never describe what mode you are in", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("answer, or just act", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("Do not narrate your reasoning", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("Do not explain when or why you are or are not", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertNotIn("overlay system", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
         self.assertNotIn("overlay steps", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
         self.assertNotIn("tutorial_click", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertNotIn("call tools", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
+        self.assertNotIn("default to answering", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
 
     def test_stream_tutorial_maps_domain_request_to_llm_request(self) -> None:
         llm = FakeLLM()

@@ -115,32 +115,32 @@ def openai_tutorial_tool_definitions() -> list[dict[str, Any]]:
     return [
         build_openai_tool(
             name="tutorial_click",
-            description="Tell the overlay to guide the user to click a visible UI target.",
+            description="Guide the user to click a visible target on their current screen.",
             model=TutorialClickArguments,
         ),
         build_openai_tool(
             name="tutorial_type",
-            description="Tell the overlay to guide the user to type or paste text into a UI target.",
+            description="Guide the user to type or paste text into a field on their current screen.",
             model=TutorialTypeArguments,
         ),
         build_openai_tool(
             name="tutorial_scroll",
-            description="Tell the overlay to guide the user to scroll until an expected state is visible.",
+            description="Guide the user to scroll their current screen until a specific state appears.",
             model=TutorialScrollArguments,
         ),
         build_openai_tool(
             name="tutorial_press_key",
-            description="Tell the overlay to guide the user to press a keyboard key or shortcut.",
+            description="Guide the user to press a keyboard key or shortcut.",
             model=TutorialPressKeyArguments,
         ),
         build_openai_tool(
             name="tutorial_wait",
-            description="Tell the overlay to wait for a short deterministic UI transition.",
+            description="Pause briefly for a deterministic on-screen transition.",
             model=TutorialWaitArguments,
         ),
         build_openai_tool(
             name="tutorial_confirm",
-            description="Ask the user to confirm that the screen matches the expected state.",
+            description="Ask the user to confirm that what is on screen matches what was expected.",
             model=TutorialConfirmArguments,
         ),
     ]

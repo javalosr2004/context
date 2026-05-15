@@ -171,6 +171,12 @@ final class MarkdownTextRendererTests: XCTestCase {
         XCTAssertEqual(rendered, "First\nSecond")
     }
 
+    func testRendererPreservesEscapedIndentedListAfterColon() {
+        let rendered = renderedText(from: "Defines:\\n  - multiple services\\n  - ports\\n")
+
+        XCTAssertEqual(rendered, "Defines:\n\n• multiple services\n• ports")
+    }
+
     private func renderedText(from source: String) -> String {
         String(MarkdownTextRenderer.attributedString(from: source).characters)
     }

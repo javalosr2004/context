@@ -106,6 +106,10 @@ enum MarkdownTextRenderer {
 
 enum MarkdownNewlineNormalizer {
     static func normalize(_ source: String) -> String {
+        normalizeIndentedListMarkers(in: normalizeEscapedNewlines(source))
+    }
+
+    private static func normalizeEscapedNewlines(_ source: String) -> String {
         var result = ""
         var index = source.startIndex
 
@@ -163,6 +167,37 @@ enum MarkdownNewlineNormalizer {
         }
 
         return result
+    }
+
+    private static func normalizeIndentedListMarkers(in source: String) -> String {
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+        var normalizedLines: [String] = []
+        normalizedLines.reserveCapacity(lines.count)
+
+        var previousContentLineEndedWithColon = false
+        var isNormalizingIndentedListRun = false
+        for line in lines {
+            let lineText = String(line)
+            if (previousContentLineEndedWithColon || isNormalizingIndentedListRun),
+               isIndentedDashListMarker(lineText) {
+                normalizedLines.append(String(lineText.dropFirst(2)))
+                isNormalizingIndentedListRun = true
+            } else {
+                normalizedLines.append(lineText)
+                isNormalizingIndentedListRun = false
+            }
+
+            let trimmedLine = lineText.trimmingCharacters(in: .whitespaces)
+            if !trimmedLine.isEmpty {
+                previousContentLineEndedWithColon = trimmedLine.hasSuffix(":")
+            }
+        }
+
+        return normalizedLines.joined(separator: "\n")
+    }
+
+    private static func isIndentedDashListMarker(_ line: String) -> Bool {
+        line.hasPrefix("  - ")
     }
 
     private static func escapedNewlineStarts(at index: String.Index, in source: String) -> Bool {

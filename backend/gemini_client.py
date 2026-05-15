@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 
 from backend.images import UploadedImage
-from backend.llm import LLMRequest
+from backend.llm import LLMRequest, LLMStreamEvent, LLMToolCallEvent
 from backend.tutorial_tools import (
     TutorialToolCall,
     parse_tutorial_tool_call_list,
@@ -54,6 +54,11 @@ class GeminiClient:
                 yield chunk.text
 
     def stream_tutorial_tool_calls(self, request: LLMRequest) -> Iterator[TutorialToolCall]:
+        for event in self.stream_tutorial_events(request):
+            if isinstance(event, LLMToolCallEvent):
+                yield event.tool_call
+
+    def stream_tutorial_events(self, request: LLMRequest) -> Iterator[LLMStreamEvent]:
         response_text = self.complete_text(
             LLMRequest(
                 system_prompt=request.system_prompt,
@@ -65,7 +70,8 @@ class GeminiClient:
                 temperature=request.temperature,
             )
         )
-        yield from parse_tutorial_tool_call_list(response_text)
+        for tool_call in parse_tutorial_tool_call_list(response_text):
+            yield LLMToolCallEvent(tool_call=tool_call)
 
 
 def build_user_parts(text: str, images: list[UploadedImage]) -> list[types.Part]:

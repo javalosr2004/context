@@ -7,7 +7,7 @@ from typing import Any
 from openai import OpenAI
 
 from backend.images import UploadedImage
-from backend.llm import LLMRequest
+from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
 from backend.tutorial_tools import TutorialToolCall, openai_tutorial_tool_definitions
 
 
@@ -58,6 +58,11 @@ class OpenAIClient:
                 yield delta
 
     def stream_tutorial_tool_calls(self, request: LLMRequest) -> Iterator[TutorialToolCall]:
+        for event in self.stream_tutorial_events(request):
+            if isinstance(event, LLMToolCallEvent):
+                yield event.tool_call
+
+    def stream_tutorial_events(self, request: LLMRequest) -> Iterator[LLMStreamEvent]:
         stream = self._client.responses.create(
             model=self._model,
             input=build_input(request),
@@ -73,9 +78,9 @@ class OpenAIClient:
         )
 
         for event in stream:
-            tool_call = tool_call_from_response_event(event)
-            if tool_call is not None:
-                yield tool_call
+            stream_event = stream_event_from_response_event(event)
+            if stream_event is not None:
+                yield stream_event
 
 
 def build_input(request: LLMRequest) -> list[dict[str, Any]]:
@@ -131,6 +136,19 @@ def tool_call_from_response_event(event: object) -> TutorialToolCall | None:
     if not name:
         return None
     return TutorialToolCall(name=name, arguments=arguments)
+
+
+def stream_event_from_response_event(event: object) -> LLMStreamEvent | None:
+    if getattr(event, "type", "") == "response.output_text.delta":
+        delta = getattr(event, "delta", None)
+        if delta:
+            return LLMTextDelta(text=delta)
+
+    tool_call = tool_call_from_response_event(event)
+    if tool_call is not None:
+        return LLMToolCallEvent(tool_call=tool_call)
+
+    return None
 
 
 def build_text_format(

@@ -19,6 +19,19 @@ class LLMRequest:
     temperature: float | None = None
 
 
+@dataclass(frozen=True)
+class LLMTextDelta:
+    text: str
+
+
+@dataclass(frozen=True)
+class LLMToolCallEvent:
+    tool_call: TutorialToolCall
+
+
+LLMStreamEvent = LLMTextDelta | LLMToolCallEvent
+
+
 class MultimodalLLM(Protocol):
     def complete_text(self, request: LLMRequest) -> str:
         """Return one complete text response from a multimodal model."""
@@ -31,3 +44,9 @@ class MultimodalLLM(Protocol):
         request: LLMRequest,
     ) -> Iterator[TutorialToolCall]:
         """Stream typed tutorial tool calls from a multimodal model."""
+
+    def stream_tutorial_events(
+        self,
+        request: LLMRequest,
+    ) -> Iterator[LLMStreamEvent]:
+        """Stream provider-native tutorial events, including text when available."""

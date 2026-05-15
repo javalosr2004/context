@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from backend.openai_client import build_response_params, build_text_format, tool_call_from_response_event
+from backend.llm import LLMTextDelta, LLMToolCallEvent
+from backend.openai_client import (
+    build_response_params,
+    build_text_format,
+    stream_event_from_response_event,
+    tool_call_from_response_event,
+)
 from backend.tutorial_schema import tutorial_planner_reply_response_schema
 
 
@@ -77,6 +83,29 @@ class OpenAIClientSchemaTests(unittest.TestCase):
         self.assertIsNotNone(call)
         self.assertEqual(call.name, "tutorial_click")
         self.assertIn("Click New", call.arguments)
+
+    def test_stream_event_from_response_text_delta(self) -> None:
+        event = SimpleNamespace(type="response.output_text.delta", delta="Thinking...")
+
+        stream_event = stream_event_from_response_event(event)
+
+        self.assertIsInstance(stream_event, LLMTextDelta)
+        self.assertEqual(stream_event.text, "Thinking...")
+
+    def test_stream_event_from_response_native_tool_call(self) -> None:
+        event = SimpleNamespace(
+            type="response.output_item.done",
+            item=SimpleNamespace(
+                type="function_call",
+                name="tutorial_confirm",
+                arguments='{"human_text":"Confirm the screen looks correct."}',
+            ),
+        )
+
+        stream_event = stream_event_from_response_event(event)
+
+        self.assertIsInstance(stream_event, LLMToolCallEvent)
+        self.assertEqual(stream_event.tool_call.name, "tutorial_confirm")
 
 
 def assert_openai_strict_objects(value: object) -> None:

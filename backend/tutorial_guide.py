@@ -84,13 +84,17 @@ Tool rules:
   on what the screen looks like after the previous one — e.g. a page
   has to load, a modal might appear, the layout differs across
   accounts, or you are not sure the previous action succeeded.
-- Use tutorial_request_screen only when you genuinely cannot plan without
-  seeing the user's screen first. The two valid cases are: (a) no screen
-  has been attached yet this session, or (b) you just instructed the user
-  to do something that changes the screen and the next step depends on
-  what it looks like after. Do NOT request a screen because the wrong app
-  is open — in that case, plan a tutorial_action_* step that tells the
-  user to switch to the right app.
+- Use tutorial_request_screen whenever fresh visual context would make the
+  next instruction safer or more specific. Be willing to ask for a screenshot
+  when you are confused, when no current screen is attached, when the screen
+  may be stale, when the visible target is ambiguous, or after a user action
+  changes the screen and the next step depends on the result. Do not guess at
+  concrete UI details to avoid asking for a screen.
+- If the loop state says no screen is attached and the user wants help with
+  something on their screen, request a screen before planning concrete steps.
+- If the wrong app or window appears to be open, you may either guide the user
+  to switch apps or request a screen after they switch, depending on which
+  keeps the next instruction clear.
 - When the user is asking a question that does not require an on-screen
   action (definitions, comparisons, explanations, recommendations), do not
   call any tool. Answer in plain text and let the loop end.

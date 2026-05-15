@@ -146,6 +146,16 @@ final class TutorialSessionController: ObservableObject {
         clearSocket()
     }
 
+    func startNewChat() {
+        clearSocket()
+        currentStepID = nil
+        awaitingConfirmationStepID = nil
+        pendingContinuePromptStepID = nil
+        status = .ready
+        messageStore.removeAll()
+        messages = messageStore.messages
+    }
+
     func setTutorialActionHandler(_ handler: @escaping (TutorialStep) async -> String) {
         tutorialActionHandler = handler
     }
@@ -226,7 +236,7 @@ final class TutorialSessionController: ObservableObject {
         do {
             try await client.send(event, on: socket)
         } catch {
-            clearSocketIfCurrent(socket)
+            _ = clearSocketIfCurrent(socket)
             throw error
         }
     }

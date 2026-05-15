@@ -36,7 +36,7 @@ Last verification attempt on 2026-05-05:
 ## Manual Validation
 
 - US1: Launch the app and confirm the popup appears within 2 seconds, stays above app windows, drags smoothly, minifies to an icon, restores at the prior position, and clicks outside panels reach underlying apps.
-- US2: Minify the popup, right-click or Control-click the icon, select Debug > Test green bbox, and confirm one 500x500 green outline appears fully on screen and is replaced on repeated selections.
+- US2: Select Bounding Boxes > Configure Bounding Boxes from the macOS app menu and confirm one 500x500 green outline appears fully on screen and is replaced on repeated selections.
 - US3: Submit several messages, confirm they appear in insertion order, minify and restore, then confirm the messages remain.
 
 SC-001 through SC-007 still need live validation after the local Xcode installation can build and launch the app.

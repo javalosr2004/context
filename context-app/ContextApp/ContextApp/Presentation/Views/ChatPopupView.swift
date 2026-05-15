@@ -93,6 +93,15 @@ struct ChatPopupView: View {
 
             Spacer()
 
+            Button(action: startNewChat) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("New chat")
+
             Button(action: onMinify) {
                 Image(systemName: "minus")
                     .font(.system(size: 12, weight: .semibold))
@@ -616,6 +625,20 @@ struct ChatPopupView: View {
         Task {
             await sessionController.sendComposerText(trimmedDraft)
         }
+    }
+
+    private func startNewChat() {
+        activeStepID = nil
+        draft = ""
+        instructionDraft = ""
+        isSendingInstruction = false
+        referenceImageData = nil
+        referenceImageName = nil
+        rejectionNote = ""
+        selectedConfirmationStepID = nil
+        stepJSONPreview = nil
+        loadingWordIndex = 0
+        sessionController.startNewChat()
     }
 
     private func selectTutorialStep(_ step: TutorialStep) {

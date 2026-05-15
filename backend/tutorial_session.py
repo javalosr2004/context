@@ -40,6 +40,7 @@ from backend.tutorial_session_events import (
     SessionCompletedEvent,
     StatusChangedEvent,
     StepReadyEvent,
+    TutorialTextDeltaEvent,
     TextResponseEventLike,
     TutorialActionEvent,
 )
@@ -230,7 +231,7 @@ class TutorialSession:
         last_screen_reason = ""
 
         for turn in range(MAX_AGENT_TURNS):
-            tool_calls, text = await asyncio.to_thread(self._call_llm_once)
+            tool_calls, text = await self._stream_llm_once()
             logger.info(
                 "Agent loop turn",
                 extra={
@@ -304,7 +305,41 @@ class TutorialSession:
         self.status = "ready"
         await self.emit(StatusChangedEvent(status="ready", label="Ready"))
 
-    def _call_llm_once(self) -> tuple[list[TutorialToolCall], str]:
+    async def _stream_llm_once(self) -> tuple[list[TutorialToolCall], str]:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[LLMStreamEvent | Exception | None] = asyncio.Queue()
+
+        def produce_events() -> None:
+            try:
+                for event in self.llm.stream_tutorial_events(self._build_llm_request()):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception as error:  # noqa: BLE001 — re-raise on the session task
+                loop.call_soon_threadsafe(queue.put_nowait, error)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        producer = asyncio.create_task(asyncio.to_thread(produce_events))
+        tool_calls: list[TutorialToolCall] = []
+        text_parts: list[str] = []
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                if isinstance(event, Exception):
+                    raise event
+                if isinstance(event, LLMTextDelta):
+                    text_parts.append(event.text)
+                    await self.emit(TutorialTextDeltaEvent(text=event.text))
+                elif isinstance(event, LLMToolCallEvent):
+                    tool_calls.append(event.tool_call)
+        finally:
+            await producer
+
+        return tool_calls, "".join(text_parts)
+
+    def _build_llm_request(self) -> LLMRequest:
         request = LLMRequest(
             system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
             user_text=render_history(self.goal or "", self.history),
@@ -312,14 +347,7 @@ class TutorialSession:
             enable_search_grounding=False,
             temperature=0,
         )
-        tool_calls: list[TutorialToolCall] = []
-        text_parts: list[str] = []
-        for event in self.llm.stream_tutorial_events(request):
-            if isinstance(event, LLMTextDelta):
-                text_parts.append(event.text)
-            elif isinstance(event, LLMToolCallEvent):
-                tool_calls.append(event.tool_call)
-        return tool_calls, "".join(text_parts)
+        return request
 
     async def _execute_action_call(self, call: TutorialToolCall) -> None:
         try:

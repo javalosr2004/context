@@ -53,6 +53,10 @@ final class ChatMessageStore {
         append(role: .tutorial, content: .tutorialPlan(plan), now: now)
     }
 
+    func removeAll() {
+        messages.removeAll()
+    }
+
     private func normalized(_ content: ChatMessageContent) -> ChatMessageContent? {
         switch content {
         case .text(let text):

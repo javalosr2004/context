@@ -65,6 +65,7 @@
 		A80000000000000000000002 /* TutorialSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000012 /* TutorialSessionController.swift */; };
 		A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */; };
 		A90000000000000000000001 /* TutorialTooltipController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90000000000000000000011 /* TutorialTooltipController.swift */; };
+		AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ApplicationMenuController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -140,6 +141,7 @@
 		A80000000000000000000012 /* TutorialSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionController.swift; sourceTree = "<group>"; };
 		A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialSessionAPIClientTests.swift; sourceTree = "<group>"; };
 		A90000000000000000000011 /* TutorialTooltipController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialTooltipController.swift; sourceTree = "<group>"; };
+		AA0000000000000000000011 /* ApplicationMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationMenuController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -243,6 +245,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000038 /* OverlayCoordinator.swift */,
+				AA0000000000000000000011 /* ApplicationMenuController.swift */,
 				A20000000000000000000039 /* PopupController.swift */,
 				A2000000000000000000003A /* IconMenuController.swift */,
 				A2000000000000000000003B /* DebugBboxController.swift */,
@@ -465,6 +468,7 @@
 				A80000000000000000000002 /* TutorialSessionController.swift in Sources */,
 				A90000000000000000000001 /* TutorialTooltipController.swift in Sources */,
 				A70000000000000000000003 /* TutorialAPISettingsView.swift in Sources */,
+				AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -53,6 +53,16 @@ final class ChatMessageStoreTests: XCTestCase {
         XCTAssertEqual(store.messages.dropFirst().first?.content, .text("second"))
     }
 
+    func testRemoveAllClearsMessages() {
+        let store = ChatMessageStore()
+
+        store.appendUserText("first")
+        store.appendTutorialText("second")
+        store.removeAll()
+
+        XCTAssertTrue(store.messages.isEmpty)
+    }
+
     private func tutorialPlan() -> TutorialPlan {
         TutorialPlan(
             goal: "Send a message",

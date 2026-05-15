@@ -8,6 +8,7 @@ final class OverlayCoordinator {
     private let screenProvider: () -> NSScreen?
     private let tutorialEndpointStore = TutorialAPIEndpointStore()
 
+    private var applicationMenuController: ApplicationMenuController?
     private var debugBboxController: DebugBboxController?
     private var focusMaskController: FocusMaskController?
     private var iconMenuController: IconMenuController?
@@ -175,6 +176,9 @@ final class OverlayCoordinator {
         ))
 
         self.debugBboxController = debugController
+        self.applicationMenuController = ApplicationMenuController(
+            onConfigureBoundingBoxes: { debugController.showReplacementBbox() }
+        )
         self.focusMaskController = focusMaskController
         self.iconMenuController = menuController
         self.popupController = popupController
@@ -197,6 +201,7 @@ final class OverlayCoordinator {
     func stop() {
         screenObserver.map(NotificationCenter.default.removeObserver)
         screenObserver = nil
+        applicationMenuController?.stop()
         statusBarController?.stop()
         debugBboxController?.hide()
         focusMaskController?.hide()
@@ -204,6 +209,7 @@ final class OverlayCoordinator {
         tutorialTooltipController?.hide()
         tutorialSessionController?.stop()
         popupController = nil
+        applicationMenuController = nil
         iconMenuController = nil
         debugBboxController = nil
         focusMaskController = nil

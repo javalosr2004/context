@@ -198,16 +198,25 @@ class TutorialSession:
             raise
 
     def _record_walk_outcome(self) -> None:
-        completed = list(self.completed_step_ids)
-        if not completed:
+        completed_ids = list(self.completed_step_ids)
+        if not completed_ids:
+            return
+        steps_by_id = {step.step_id: step for step in self.plan_steps}
+        lines = [
+            f"- {sid}: {steps_by_id[sid].instruction}"
+            for sid in completed_ids
+            if sid in steps_by_id
+        ]
+        if not lines:
             return
         summary = (
-            "Previous tutorial step(s) finished: "
-            + ", ".join(completed)
-            + ". Decide whether the user's goal is now met. If yes, answer "
-            "with a short confirmation in plain text and stop. If more work "
-            "is needed, plan the next steps with the action tools — request "
-            "a fresh screen first if you need to see the result."
+            "The user has already completed these tutorial steps:\n"
+            + "\n".join(lines)
+            + "\n\nDo NOT repeat any of the above. Decide what to do next: "
+            "if the user's goal is now met, answer with a short confirmation "
+            "in plain text and stop. Otherwise, request a fresh screen to "
+            "see the current state, then plan only the next step(s) with the "
+            "action tools."
         )
         self.history.append(HistoryEntry(role="user", content=summary))
 
@@ -235,8 +244,7 @@ class TutorialSession:
             )
 
             if not tool_calls:
-                text = text.strip()
-                if text:
+                if text.strip():
                     self.history.append(HistoryEntry(role="assistant", content=text))
                     await self.emit(TextResponseEventLike(text=text))
                 self.status = "ready"

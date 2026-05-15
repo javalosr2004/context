@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from backend.images import UploadedImage
+from backend.tutorial_tools import TutorialToolCall
 
 
 @dataclass(frozen=True)
@@ -24,3 +25,9 @@ class MultimodalLLM(Protocol):
 
     def stream_text(self, request: LLMRequest) -> Iterator[str]:
         """Stream text from a multimodal model for one request."""
+
+    def stream_tutorial_tool_calls(
+        self,
+        request: LLMRequest,
+    ) -> Iterator[TutorialToolCall]:
+        """Stream typed tutorial tool calls from a multimodal model."""

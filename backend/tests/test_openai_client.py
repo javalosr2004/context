@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
-from backend.openai_client import build_text_format
+from backend.openai_client import build_response_params, build_text_format, tool_call_from_response_event
 from backend.tutorial_schema import tutorial_planner_reply_response_schema
 
 
@@ -42,6 +43,40 @@ class OpenAIClientSchemaTests(unittest.TestCase):
                 "additionalProperties": False,
             },
         )
+
+    def test_response_params_can_include_tutorial_tools_and_search(self) -> None:
+        params = build_response_params(
+            reasoning_effort="medium",
+            verbosity="medium",
+            enable_search_grounding=True,
+            response_mime_type=None,
+            response_schema=None,
+            tools=[{"type": "function", "name": "tutorial_click"}],
+        )
+
+        self.assertEqual(
+            params["tools"],
+            [
+                {"type": "function", "name": "tutorial_click"},
+                {"type": "web_search"},
+            ],
+        )
+
+    def test_tool_call_from_response_output_item_done_event(self) -> None:
+        event = SimpleNamespace(
+            type="response.output_item.done",
+            item=SimpleNamespace(
+                type="function_call",
+                name="tutorial_click",
+                arguments='{"human_text":"Click New.","agent_description":"New button."}',
+            ),
+        )
+
+        call = tool_call_from_response_event(event)
+
+        self.assertIsNotNone(call)
+        self.assertEqual(call.name, "tutorial_click")
+        self.assertIn("Click New", call.arguments)
 
 
 def assert_openai_strict_objects(value: object) -> None:

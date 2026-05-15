@@ -4,6 +4,7 @@ import unittest
 from collections.abc import Iterator
 
 from backend.llm import LLMRequest
+from backend.tutorial_tools import TutorialToolCall
 from backend.tutorial_guide import (
     TUTORIAL_CREATOR_SYSTEM_PROMPT,
     TUTORIAL_PLAN_SYSTEM_PROMPT,
@@ -55,8 +56,15 @@ VALID_NEEDS_CONTEXT_REPLY_JSON = """
 
 
 class FakeLLM:
-    def __init__(self, complete_responses: list[str] | None = None) -> None:
-        self.complete_responses = complete_responses or [VALID_PLAN_JSON]
+    def __init__(
+        self,
+        complete_responses: list[str] | None = None,
+        tool_calls: list[TutorialToolCall] | None = None,
+    ) -> None:
+        self.complete_responses = (
+            [VALID_PLAN_JSON] if complete_responses is None else complete_responses
+        )
+        self.tool_calls = tool_calls or []
         self.requests: list[LLMRequest] = []
 
     def complete_text(self, request: LLMRequest) -> str:
@@ -66,6 +74,13 @@ class FakeLLM:
     def stream_text(self, request: LLMRequest) -> Iterator[str]:
         self.requests.append(request)
         return iter(["first", " second"])
+
+    def stream_tutorial_tool_calls(
+        self,
+        request: LLMRequest,
+    ) -> Iterator[TutorialToolCall]:
+        self.requests.append(request)
+        return iter(self.tool_calls)
 
 
 class TutorialGuideTests(unittest.TestCase):
@@ -148,14 +163,45 @@ class TutorialGuideTests(unittest.TestCase):
         )
 
         self.assertEqual(reply.type, "ready")
-        self.assertEqual(len(llm.requests), 1)
+        self.assertEqual(len(llm.requests), 2)
         self.assertEqual(
-            llm.requests[0].system_prompt,
+            llm.requests[1].system_prompt,
             TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
         )
-        self.assertIn("Show me how to create a repo.", llm.requests[0].user_text)
-        self.assertEqual(llm.requests[0].response_mime_type, "application/json")
-        self.assertIsNotNone(llm.requests[0].response_schema)
+        self.assertIn("Show me how to create a repo.", llm.requests[1].user_text)
+        self.assertEqual(llm.requests[1].response_mime_type, "application/json")
+        self.assertIsNotNone(llm.requests[1].response_schema)
+
+    def test_create_session_planner_reply_uses_streamed_tool_calls(self) -> None:
+        llm = FakeLLM(
+            complete_responses=[],
+            tool_calls=[
+                TutorialToolCall(
+                    name="tutorial_click",
+                    arguments=(
+                        '{"human_text":"Click New.","agent_description":"A green New button."}'
+                    ),
+                )
+            ],
+        )
+        guide = TutorialGuide(llm)
+
+        reply = guide.create_session_planner_reply(
+            TutorialSessionPlanRequest(
+                session_id="session-1",
+                goal="Create a repo.",
+                messages=[{"role": "user", "content": "Create a repo."}],
+                latest_screen=None,
+            )
+        )
+
+        self.assertEqual(reply.type, "ready")
+        self.assertEqual(reply.plan.steps[0].instruction, "Click New.")
+        self.assertEqual(reply.plan.steps[0].action.type, "click")
+        self.assertEqual(
+            reply.plan.steps[0].action.target.description,
+            "A green New button.",
+        )
 
     def test_create_session_planner_reply_accepts_context_question(self) -> None:
         llm = FakeLLM(complete_responses=[VALID_NEEDS_CONTEXT_REPLY_JSON])
@@ -172,6 +218,26 @@ class TutorialGuideTests(unittest.TestCase):
 
         self.assertEqual(reply.type, "needs_context")
         self.assertEqual(reply.question, "Which repository should I use?")
+
+    def test_create_session_planner_reply_includes_all_session_messages(self) -> None:
+        llm = FakeLLM(complete_responses=[VALID_READY_REPLY_JSON])
+        guide = TutorialGuide(llm)
+        messages = [
+            {"role": "user", "content": f"message {index}"}
+            for index in range(1, 11)
+        ]
+
+        guide.create_session_planner_reply(
+            TutorialSessionPlanRequest(
+                session_id="session-1",
+                goal="Show me how to create a repo.",
+                messages=messages,
+                latest_screen=None,
+            )
+        )
+
+        self.assertIn("- user: message 1", llm.requests[0].user_text)
+        self.assertIn("- user: message 10", llm.requests[0].user_text)
 
     def test_plan_generation_prompt_does_not_duplicate_json_schema(self) -> None:
         prompt = plan_generation_prompt(

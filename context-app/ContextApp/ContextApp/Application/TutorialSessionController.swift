@@ -72,6 +72,7 @@ final class TutorialSessionController: ObservableObject {
     private let screenCaptureTimeoutNanoseconds: UInt64
     private let screenProvider: () -> NSScreen?
 
+    private var tutorialActionHandler: ((TutorialStep) async -> String)?
     private var listenTask: Task<Void, Never>?
     private var sessionID: String?
     private var socket: URLSessionWebSocketTask?
@@ -158,6 +159,10 @@ final class TutorialSessionController: ObservableObject {
 
     func stop() {
         clearSocket()
+    }
+
+    func setTutorialActionHandler(_ handler: @escaping (TutorialStep) async -> String) {
+        tutorialActionHandler = handler
     }
 
     private func sendUserMessage(_ text: String) async {
@@ -298,6 +303,8 @@ final class TutorialSessionController: ObservableObject {
             pendingQuestion = nil
             appendTutorialPlan(plan)
             status = .ready
+        case .tutorialAction(let step):
+            applyTutorialAction(step)
         case .stepReady(let stepID):
             currentStepID = stepID
             status = .ready
@@ -332,6 +339,17 @@ final class TutorialSessionController: ObservableObject {
     private func appendTutorialPlan(_ plan: TutorialPlan) {
         guard messageStore.appendTutorialPlan(plan) != nil else { return }
         messages = messageStore.messages
+    }
+
+    private func applyTutorialAction(_ step: TutorialStep) {
+        currentStepID = step.stepId
+        guard let tutorialActionHandler else { return }
+        Task { [weak self] in
+            _ = await tutorialActionHandler(step)
+            await MainActor.run {
+                self?.status = .ready
+            }
+        }
     }
 
     private func applyFailure(_ message: String) {

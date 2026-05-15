@@ -75,8 +75,14 @@ final class TutorialActionConsumerTests: XCTestCase {
     func testConsumeDispatchesGroundingInstruction() async {
         let step = TutorialStep(
             stepId: "step-3",
-            instruction: "Press Command K.",
-            action: .pressKey(PressKeyAction(key: "Command+K")),
+            instruction: "Click the search field.",
+            action: .click(ClickAction(target: ActionTarget(
+                kind: .element,
+                label: "Search",
+                role: "text field",
+                description: nil,
+                textNearby: nil
+            ))),
             confidence: 0.91,
             requiresConfirmation: false
         )
@@ -89,6 +95,6 @@ final class TutorialActionConsumerTests: XCTestCase {
         let result = await consumer.consume(step: step)
 
         XCTAssertEqual(result, "highlighted")
-        XCTAssertEqual(receivedText, "Press Command K.")
+        XCTAssertEqual(receivedText, "Click the search field.")
     }
 }

@@ -9,6 +9,7 @@ from backend.images import UploadedImage
 from backend.llm import LLMRequest, MultimodalLLM
 from backend.tutorial_schema import (
     PlannerReply,
+    PlannerReady,
     TutorialPlan,
     TutorialPlannerReplyValidationError,
     TutorialPlanValidationError,
@@ -16,6 +17,10 @@ from backend.tutorial_schema import (
     parse_tutorial_plan,
     tutorial_planner_reply_response_schema,
     tutorial_plan_response_schema,
+)
+from backend.tutorial_tools import (
+    plan_from_steps,
+    steps_from_tool_calls,
 )
 
 
@@ -52,6 +57,18 @@ Keep each instruction short and readable for a human overlay.
 Use semantic targets, not coordinates, unless coordinates were provided.
 Use confirmation when confidence is low, the target is ambiguous, or the
 screen may not match the expected state.
+""".strip()
+
+TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT = """
+You are a tutorial planner for a macOS overlay teaching system.
+Stream the next runnable tutorial steps as typed tool calls only.
+Use tutorial_click for visible click targets, tutorial_type for text entry,
+and tutorial_scroll when the user needs to move the viewport. Use keyboard,
+wait, or confirm tools only when those actions are required.
+Each human_text must be a concise user-facing overlay instruction.
+Each agent_description must describe where to look and how the target looks.
+Do not use coordinates unless the user provided coordinates.
+If the screen or goal is too unclear for concrete actions, do not call tools.
 """.strip()
 
 MAX_TUTORIAL_PLAN_RETRIES = 2
@@ -94,6 +111,16 @@ class TutorialGuide:
         self,
         request: TutorialSessionPlanRequest,
     ) -> PlannerReply:
+        streamed_reply = self.create_streamed_session_planner_reply(request)
+        if streamed_reply is not None:
+            return streamed_reply
+
+        return self.create_structured_session_planner_reply(request)
+
+    def create_structured_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+    ) -> PlannerReply:
         return generate_tutorial_planner_reply(
             llm=self._llm,
             prompt=build_tutorial_session_user_prompt(request),
@@ -109,6 +136,38 @@ class TutorialGuide:
                 enable_search_grounding=True,
             )
         )
+
+    def create_streamed_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+    ) -> PlannerReady | None:
+        steps = list(
+            steps_from_tool_calls(
+                self._llm.stream_tutorial_tool_calls(
+                    LLMRequest(
+                        system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
+                        user_text=build_tutorial_session_user_prompt(request),
+                        images=[request.latest_screen]
+                        if request.latest_screen is not None
+                        else [],
+                        enable_search_grounding=False,
+                        temperature=0,
+                    )
+                )
+            )
+        )
+        if not steps:
+            logger.info(
+                "Tutorial tool stream produced no steps; falling back to planner reply",
+                extra={"session_id": request.session_id},
+            )
+            return None
+
+        logger.info(
+            "Tutorial tool stream produced steps",
+            extra={"session_id": request.session_id, "step_count": len(steps)},
+        )
+        return PlannerReady(type="ready", plan=plan_from_steps(request.goal, steps))
 
 
 RAW_OUTPUT_LOG_LIMIT = 2000
@@ -323,7 +382,7 @@ def format_session_messages(messages: list[dict[str, str]]) -> str:
         return "- <none>"
 
     lines = []
-    for message in messages[-8:]:
+    for message in messages:
         role = message.get("role", "unknown")
         content = message.get("content", "")
         lines.append(f"- {role}: {content}")

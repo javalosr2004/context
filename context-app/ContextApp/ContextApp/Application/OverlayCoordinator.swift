@@ -135,22 +135,26 @@ final class OverlayCoordinator {
                 return "Showing instruction card for \(step.action.type)."
             }
         )
+        let handleTutorialStep: (TutorialStep) async -> String = { step in
+            let result = await tutorialActionConsumer.consume(step: step)
+            if case .type(let action) = step.action, !action.text.isEmpty {
+                await MainActor.run {
+                    instructionCardController.show(
+                        stepID: step.stepId,
+                        title: "Type",
+                        message: step.instruction,
+                        copyableText: action.text
+                    )
+                }
+            }
+            return result
+        }
+        tutorialSessionController.setTutorialActionHandler(handleTutorialStep)
 
         popupPanel.contentView = NSHostingView(rootView: ChatPopupView(
             sessionController: tutorialSessionController,
             onTutorialStepSelected: { step in
-                let result = await tutorialActionConsumer.consume(step: step)
-                if case .type(let action) = step.action, !action.text.isEmpty {
-                    await MainActor.run {
-                        instructionCardController.show(
-                            stepID: step.stepId,
-                            title: "Type",
-                            message: step.instruction,
-                            copyableText: action.text
-                        )
-                    }
-                }
-                return result
+                await handleTutorialStep(step)
             },
             onInputInstruction: { input in
                 await screenGroundingController.submit(GroundingInstruction(

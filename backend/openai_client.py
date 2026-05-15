@@ -8,6 +8,7 @@ from openai import OpenAI
 
 from backend.images import UploadedImage
 from backend.llm import LLMRequest
+from backend.tutorial_tools import TutorialToolCall, openai_tutorial_tool_definitions
 
 
 class OpenAIClient:
@@ -56,6 +57,26 @@ class OpenAIClient:
             if delta and getattr(event, "type", "") == "response.output_text.delta":
                 yield delta
 
+    def stream_tutorial_tool_calls(self, request: LLMRequest) -> Iterator[TutorialToolCall]:
+        stream = self._client.responses.create(
+            model=self._model,
+            input=build_input(request),
+            stream=True,
+            **build_response_params(
+                reasoning_effort=self._reasoning_effort,
+                verbosity=self._verbosity,
+                enable_search_grounding=request.enable_search_grounding,
+                response_mime_type=request.response_mime_type,
+                response_schema=request.response_schema,
+                tools=openai_tutorial_tool_definitions(),
+            ),
+        )
+
+        for event in stream:
+            tool_call = tool_call_from_response_event(event)
+            if tool_call is not None:
+                yield tool_call
+
 
 def build_input(request: LLMRequest) -> list[dict[str, Any]]:
     return [
@@ -84,14 +105,32 @@ def build_response_params(
     enable_search_grounding: bool,
     response_mime_type: str | None,
     response_schema: dict[str, Any] | None,
+    tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
         "reasoning": {"effort": reasoning_effort},
         "text": {"format": build_text_format(response_mime_type, response_schema), "verbosity": verbosity},
     }
+    if tools:
+        params["tools"] = tools.copy()
     if enable_search_grounding:
-        params["tools"] = [{"type": "web_search"}]
+        params["tools"] = [*params.get("tools", []), {"type": "web_search"}]
     return params
+
+
+def tool_call_from_response_event(event: object) -> TutorialToolCall | None:
+    if getattr(event, "type", "") != "response.output_item.done":
+        return None
+
+    item = getattr(event, "item", None)
+    if getattr(item, "type", "") != "function_call":
+        return None
+
+    name = getattr(item, "name", "")
+    arguments = getattr(item, "arguments", "")
+    if not name:
+        return None
+    return TutorialToolCall(name=name, arguments=arguments)
 
 
 def build_text_format(

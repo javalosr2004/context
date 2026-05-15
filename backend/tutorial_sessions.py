@@ -120,13 +120,18 @@ class TutorialSessionManager:
         session = self._require_session(session_id)
         session.goal = event.text.strip()
         session.status = "planning"
+        session.plan_emitted = False
         session.updated_at = datetime.now(UTC)
+        messages = messages_with_user_turn(
+            self._graph.state_for(session_id).get("messages", []),
+            session.goal,
+        )
 
         result = self._graph.start(
             TutorialSessionState(
                 session_id=session_id,
                 goal=session.goal,
-                messages=[{"role": "user", "content": session.goal}],
+                messages=messages,
                 latest_screen=screen_to_state(event.screen),
                 current_plan=None,
                 current_step_id=None,
@@ -274,6 +279,16 @@ def screen_to_state(screen: ScreenSnapshot | None) -> dict[str, str] | None:
     if screen is None:
         return None
     return screen.model_dump(mode="json")
+
+
+def messages_with_user_turn(
+    messages: list[dict[str, str]],
+    text: str,
+) -> list[dict[str, str]]:
+    trimmed_text = text.strip()
+    if not trimmed_text:
+        return messages
+    return messages + [{"role": "user", "content": trimmed_text}]
 
 
 def update_session_from_state(

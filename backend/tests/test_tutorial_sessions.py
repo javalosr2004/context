@@ -8,6 +8,7 @@ from backend.main import create_app, get_tutorial_session_manager
 from backend.tutorial_guide import TutorialSessionPlanRequest
 from backend.tutorial_schema import PlannerReply, parse_tutorial_planner_reply
 from backend.tutorial_sessions import TutorialSessionManager
+from backend.tutorial_tools import INVALID_TOOL_ARGUMENTS, TutorialToolCallError
 
 
 VALID_PLAN_JSON = """
@@ -77,6 +78,30 @@ class StubTutorialGuide:
     ) -> PlannerReply:
         self.requests.append(request)
         return self.replies.pop(0)
+
+    def create_structured_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+    ) -> PlannerReply:
+        return self.create_session_planner_reply(request)
+
+
+class ErroringToolTutorialGuide(StubTutorialGuide):
+    def create_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+    ) -> PlannerReply:
+        self.requests.append(request)
+        raise TutorialToolCallError(
+            INVALID_TOOL_ARGUMENTS,
+            "Invalid arguments for tutorial_type: missing copiable_text",
+        )
+
+    def create_structured_session_planner_reply(
+        self,
+        request: TutorialSessionPlanRequest,
+    ) -> PlannerReply:
+        return StubTutorialGuide.create_session_planner_reply(self, request)
 
 
 class TutorialSessionTests(unittest.TestCase):
@@ -149,18 +174,59 @@ class TutorialSessionTests(unittest.TestCase):
                 {"type": "user_message", "text": "Show me how to create a repo."},
                 mode="binary",
             )
-            events = [websocket.receive_json() for _ in range(7)]
+            events = [websocket.receive_json() for _ in range(8)]
 
         self.assertEqual(events[0]["type"], "request_received")
         self.assertEqual(events[1]["status"], "planning")
         self.assertEqual(events[1]["label"], "Planning tutorial")
         self.assertEqual(events[2]["label"], "Analyzing screen")
-        self.assertEqual(events[3]["label"], "Validating targets")
-        self.assertEqual(events[4]["type"], "plan_ready")
-        self.assertEqual(events[5], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(events[3]["type"], "tutorial_action")
+        self.assertEqual(events[3]["step"]["step_id"], "step_001")
+        self.assertEqual(events[4]["label"], "Validating targets")
+        self.assertEqual(events[5]["type"], "plan_ready")
+        self.assertEqual(events[6], {"type": "step_ready", "step_id": "step_001"})
         self.assertEqual(
-            events[6],
+            events[7],
             {"type": "awaiting_confirmation", "step_id": "step_001"},
+        )
+
+    def test_second_user_message_emits_fresh_plan_with_full_session_context(self) -> None:
+        guide = StubTutorialGuide(
+            [ready_reply(VALID_PLAN_JSON), ready_reply(UPDATED_PLAN_JSON)]
+        )
+        client = client_with_manager(
+            TutorialSessionManager(
+                guide,
+                session_id_factory=lambda: "session-1",
+            )
+        )
+        session_id = client.post("/tutorial-sessions").json()["session_id"]
+
+        with client.websocket_connect(f"/tutorial-sessions/{session_id}/socket") as websocket:
+            websocket.receive_json()
+            websocket.send_json(
+                {"type": "user_message", "text": "Show me how to create a repo."}
+            )
+            for _ in range(8):
+                websocket.receive_json()
+
+            websocket.send_json(
+                {"type": "user_message", "text": "Actually create it under Context."}
+            )
+            events = [websocket.receive_json() for _ in range(8)]
+
+        self.assertEqual(events[3]["type"], "tutorial_action")
+        self.assertEqual(events[5]["type"], "plan_ready")
+        self.assertEqual(
+            events[5]["plan"]["summary"],
+            "Use the visible Create button instead.",
+        )
+        self.assertEqual(
+            guide.requests[1].messages,
+            [
+                {"role": "user", "content": "Show me how to create a repo."},
+                {"role": "user", "content": "Actually create it under Context."},
+            ],
         )
 
     def test_user_answer_resumes_context_interrupt(self) -> None:
@@ -187,18 +253,43 @@ class TutorialSessionTests(unittest.TestCase):
                     "text": "Use the context repo.",
                 }
             )
-            events = [websocket.receive_json() for _ in range(6)]
+            events = [websocket.receive_json() for _ in range(7)]
 
         self.assertEqual(events[0]["status"], "planning")
         self.assertEqual(events[0]["label"], "Planning tutorial")
         self.assertEqual(events[1]["label"], "Analyzing screen")
-        self.assertEqual(events[2]["label"], "Validating targets")
-        self.assertEqual(events[3]["type"], "plan_ready")
-        self.assertEqual(events[4], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(events[2]["type"], "tutorial_action")
+        self.assertEqual(events[3]["label"], "Validating targets")
+        self.assertEqual(events[4]["type"], "plan_ready")
+        self.assertEqual(events[5], {"type": "step_ready", "step_id": "step_001"})
         self.assertEqual(
-            events[5],
+            events[6],
             {"type": "awaiting_confirmation", "step_id": "step_001"},
         )
+
+    def test_tool_stream_validation_error_emits_error_then_falls_back(self) -> None:
+        client = client_with_manager(
+            TutorialSessionManager(
+                ErroringToolTutorialGuide([ready_reply(VALID_PLAN_JSON)]),
+                session_id_factory=lambda: "session-1",
+            )
+        )
+        session_id = client.post("/tutorial-sessions").json()["session_id"]
+
+        with client.websocket_connect(f"/tutorial-sessions/{session_id}/socket") as websocket:
+            websocket.receive_json()
+            websocket.send_json(
+                {"type": "user_message", "text": "Show me how to create a repo."}
+            )
+            events = [websocket.receive_json() for _ in range(9)]
+
+        self.assertEqual(events[0]["type"], "request_received")
+        self.assertEqual(events[1]["label"], "Planning tutorial")
+        self.assertEqual(events[2]["label"], "Analyzing screen")
+        self.assertEqual(events[3]["type"], "error")
+        self.assertEqual(events[3]["code"], INVALID_TOOL_ARGUMENTS)
+        self.assertEqual(events[4]["type"], "tutorial_action")
+        self.assertEqual(events[6]["type"], "plan_ready")
 
     def test_user_confirmation_true_completes_single_step_plan(self) -> None:
         client = client_with_manager(
@@ -214,7 +305,7 @@ class TutorialSessionTests(unittest.TestCase):
             websocket.send_json(
                 {"type": "user_message", "text": "Show me how to create a repo."}
             )
-            for _ in range(7):
+            for _ in range(8):
                 websocket.receive_json()
 
             websocket.send_json(
@@ -246,7 +337,7 @@ class TutorialSessionTests(unittest.TestCase):
             websocket.send_json(
                 {"type": "user_message", "text": "Show me how to create a repo."}
             )
-            for _ in range(7):
+            for _ in range(8):
                 websocket.receive_json()
 
             websocket.send_json(
@@ -258,17 +349,18 @@ class TutorialSessionTests(unittest.TestCase):
                     "screen": None,
                 }
             )
-            events = [websocket.receive_json() for _ in range(6)]
+            events = [websocket.receive_json() for _ in range(7)]
 
         self.assertEqual(events[0]["status"], "planning")
         self.assertEqual(events[0]["label"], "Replanning from current screen")
         self.assertEqual(events[1]["label"], "Analyzing screen")
-        self.assertEqual(events[2]["label"], "Validating targets")
-        self.assertEqual(events[3]["type"], "plan_updated")
-        self.assertEqual(events[3]["plan"]["summary"], "Use the visible Create button instead.")
-        self.assertEqual(events[4], {"type": "step_ready", "step_id": "step_001"})
+        self.assertEqual(events[2]["type"], "tutorial_action")
+        self.assertEqual(events[3]["label"], "Validating targets")
+        self.assertEqual(events[4]["type"], "plan_updated")
+        self.assertEqual(events[4]["plan"]["summary"], "Use the visible Create button instead.")
+        self.assertEqual(events[5], {"type": "step_ready", "step_id": "step_001"})
         self.assertEqual(
-            events[5],
+            events[6],
             {"type": "awaiting_confirmation", "step_id": "step_001"},
         )
 

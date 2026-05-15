@@ -84,6 +84,37 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         XCTAssertEqual(plan.steps.first?.stepId, "step_001")
     }
 
+    func testServerEventDecodingTutorialAction() throws {
+        let data = Data("""
+        {
+          "type": "tutorial_action",
+          "step": {
+            "step_id": "step_001",
+            "instruction": "Click the message field.",
+            "action": {
+              "type": "click",
+              "target": {
+                "kind": "element",
+                "label": "Message",
+                "role": "text field",
+                "description": "A rounded input at the bottom of the chat."
+              }
+            },
+            "confidence": 0.93,
+            "requires_confirmation": false
+          }
+        }
+        """.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .tutorialAction(let step) = event else {
+            return XCTFail("Expected tutorialAction, got \(event)")
+        }
+        XCTAssertEqual(step.stepId, "step_001")
+        XCTAssertEqual(step.action.type, "click")
+    }
+
     func testStatusLabelsAndBusyStates() {
         XCTAssertEqual(TutorialSessionUIStatus.preparingScreen.label, "Preparing screen")
         XCTAssertTrue(TutorialSessionUIStatus.sending.isBusy)

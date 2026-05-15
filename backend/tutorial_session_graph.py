@@ -13,7 +13,13 @@ from langgraph.types import Command, interrupt
 from backend.images import UploadedImage
 from backend.tutorial_guide import TutorialGuide, TutorialSessionPlanRequest
 from backend.tutorial_schema import PlannerNeedsContext, PlannerReady, TutorialPlan
-from backend.tutorial_session_events import ServerSessionEvent, StatusChangedEvent
+from backend.tutorial_session_events import (
+    ErrorEvent,
+    ServerSessionEvent,
+    StatusChangedEvent,
+    TutorialActionEvent,
+)
+from backend.tutorial_tools import TutorialToolCallError
 
 logger = logging.getLogger(__name__)
 
@@ -140,14 +146,27 @@ class TutorialSessionGraph:
                 "has_screen": state.get("latest_screen") is not None,
             },
         )
-        reply = self._tutorial_guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id=state["session_id"],
-                goal=state["goal"],
-                messages=state.get("messages", []),
-                latest_screen=uploaded_image_from_screen(state.get("latest_screen")),
-            )
+        request = TutorialSessionPlanRequest(
+            session_id=state["session_id"],
+            goal=state["goal"],
+            messages=state.get("messages", []),
+            latest_screen=uploaded_image_from_screen(state.get("latest_screen")),
         )
+        try:
+            reply = self._tutorial_guide.create_session_planner_reply(request)
+        except TutorialToolCallError as error:
+            emit_event(ErrorEvent(code=error.code, message=error.message))
+            logger.warning(
+                "Tutorial tool stream failed; falling back to structured planner",
+                extra={
+                    "session_id": state.get("session_id"),
+                    "code": error.code,
+                    "detail": error.message,
+                },
+            )
+            reply = self._tutorial_guide.create_structured_session_planner_reply(
+                request
+            )
 
         if isinstance(reply, PlannerNeedsContext):
             question = {
@@ -163,6 +182,8 @@ class TutorialSessionGraph:
             )
 
         if isinstance(reply, PlannerReady):
+            for step in reply.plan.steps:
+                emit_event(TutorialActionEvent(step=step))
             return TutorialSessionState(
                 current_plan=reply.plan.model_dump(mode="json"),
                 current_step_id=None,

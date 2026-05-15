@@ -132,6 +132,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case assistantQuestion(questionID: String, prompt: String)
     case planReady(TutorialPlan)
     case planUpdated(TutorialPlan)
+    case tutorialAction(TutorialStep)
     case stepReady(stepID: String)
     case awaitingConfirmation(stepID: String)
     case sessionCompleted
@@ -145,6 +146,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case questionID = "question_id"
         case prompt
         case plan
+        case step
         case stepID = "step_id"
         case code
         case message
@@ -173,6 +175,8 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .planReady(try container.decode(TutorialPlan.self, forKey: .plan))
         case "plan_updated":
             self = .planUpdated(try container.decode(TutorialPlan.self, forKey: .plan))
+        case "tutorial_action":
+            self = .tutorialAction(try container.decode(TutorialStep.self, forKey: .step))
         case "step_ready":
             self = .stepReady(stepID: try container.decode(String.self, forKey: .stepID))
         case "awaiting_confirmation":
@@ -216,6 +220,9 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case .planUpdated(let plan):
             try container.encode("plan_updated", forKey: .type)
             try container.encode(plan, forKey: .plan)
+        case .tutorialAction(let step):
+            try container.encode("tutorial_action", forKey: .type)
+            try container.encode(step, forKey: .step)
         case .stepReady(let stepID):
             try container.encode("step_ready", forKey: .type)
             try container.encode(stepID, forKey: .stepID)

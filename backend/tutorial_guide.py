@@ -78,8 +78,7 @@ Tool rules:
   to do something that changes the screen and the next step depends on
   what it looks like after. Do NOT request a screen because the wrong app
   is open — in that case, plan a tutorial_action_* step that tells the
-  user to switch to the right app. Do NOT re-request a screen you already
-  have just because it isn't ideal; work with what's there.
+  user to switch to the right app.
 - When the user is asking a question that does not require an on-screen
   action (definitions, comparisons, explanations, recommendations), do not
   call any tool. Answer in plain text and let the loop end.

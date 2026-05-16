@@ -33,6 +33,7 @@
 		A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000048 /* GroundingBoundingBox.swift */; };
 		A20000000000000000000019 /* GroundingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000049 /* GroundingClient.swift */; };
 		A2000000000000000000001A /* ScreenFrameCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004A /* ScreenFrameCapture.swift */; };
+		AC0000000000000000000001 /* ScreenStabilityWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000011 /* ScreenStabilityWatcher.swift */; };
 		A2000000000000000000001B /* ScreenGroundingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004B /* ScreenGroundingController.swift */; };
 		A2000000000000000000001C /* GroundingBoundingBoxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004C /* GroundingBoundingBoxTests.swift */; };
 		A2000000000000000000001D /* GroundingEndpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004D /* GroundingEndpointStore.swift */; };
@@ -111,6 +112,7 @@
 		A20000000000000000000048 /* GroundingBoundingBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingBoundingBox.swift; sourceTree = "<group>"; };
 		A20000000000000000000049 /* GroundingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingClient.swift; sourceTree = "<group>"; };
 		A2000000000000000000004A /* ScreenFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameCapture.swift; sourceTree = "<group>"; };
+		AC0000000000000000000011 /* ScreenStabilityWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenStabilityWatcher.swift; sourceTree = "<group>"; };
 		A2000000000000000000004B /* ScreenGroundingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGroundingController.swift; sourceTree = "<group>"; };
 		A2000000000000000000004C /* GroundingBoundingBoxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingBoundingBoxTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000004D /* GroundingEndpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingEndpointStore.swift; sourceTree = "<group>"; };
@@ -255,6 +257,7 @@
 				A2000000000000000000003B /* DebugBboxController.swift */,
 				A20000000000000000000049 /* GroundingClient.swift */,
 				A2000000000000000000004A /* ScreenFrameCapture.swift */,
+				AC0000000000000000000011 /* ScreenStabilityWatcher.swift */,
 				A20000000000000000000051 /* ScreenFrameMasker.swift */,
 				A2000000000000000000004B /* ScreenGroundingController.swift */,
 				A2000000000000000000004F /* StatusBarController.swift */,
@@ -459,6 +462,7 @@
 				A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */,
 				A20000000000000000000019 /* GroundingClient.swift in Sources */,
 				A2000000000000000000001A /* ScreenFrameCapture.swift in Sources */,
+				AC0000000000000000000001 /* ScreenStabilityWatcher.swift in Sources */,
 				A30000000000000000000001 /* ScreenFrameMasker.swift in Sources */,
 				A2000000000000000000001B /* ScreenGroundingController.swift in Sources */,
 				A2000000000000000000001D /* GroundingEndpointStore.swift in Sources */,

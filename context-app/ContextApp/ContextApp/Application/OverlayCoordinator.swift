@@ -19,6 +19,7 @@ final class OverlayCoordinator {
     private var tutorialActionConsumer: TutorialActionConsumer?
     private var tutorialPlanController: TutorialPlanController?
     private var tutorialSessionController: TutorialSessionController?
+    private let stabilityWatcher = ScreenStabilityWatcher()
 
     init(screenProvider: @escaping () -> NSScreen?) {
         self.screenProvider = screenProvider
@@ -40,11 +41,14 @@ final class OverlayCoordinator {
             onExit: { [weak bboxPanel] in
                 bboxPanel?.orderOut(nil)
             },
-            onInsideClick: { [weak bboxPanel] in
+            onInsideClick: { [weak bboxPanel, weak self, screenProvider] in
                 bboxPanel?.orderOut(nil)
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID else { return }
                 Task { @MainActor in
+                    if let screen = screenProvider() {
+                        await self?.stabilityWatcher.waitUntilStable(on: screen)
+                    }
                     await sessionController.confirmStep(stepID: stepID, confirmed: true, note: nil)
                 }
             },

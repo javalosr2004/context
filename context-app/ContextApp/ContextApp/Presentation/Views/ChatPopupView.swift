@@ -102,15 +102,15 @@ struct ChatPopupView: View {
             askBar
         }
         .frame(width: 340)
-        .background(.ultraThinMaterial)
+        .background(overlayBackground)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous)
-                .stroke(Color.black.opacity(0.10), lineWidth: 0.5)
+                .stroke(Color.white.opacity(0.24), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
-        .shadow(color: .black.opacity(0.22), radius: 40, y: 12)
-        .shadow(color: .black.opacity(0.18), radius: 80, y: 24)
+        .shadow(color: .black.opacity(0.16), radius: 2, y: 1)
+        .shadow(color: .black.opacity(0.20), radius: 34, y: 12)
+        .shadow(color: .black.opacity(0.14), radius: 70, y: 24)
         .onReceive(Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()) { _ in
             guard sessionController.status.isBusy else { return }
             loadingWordIndex = (loadingWordIndex + 1) % Self.loadingWords.count
@@ -123,6 +123,44 @@ struct ChatPopupView: View {
                 DraftPlanPreviewSheet(plan: plan)
             }
         }
+    }
+
+    private var overlayBackground: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+
+            LinearGradient(
+                colors: [
+                    Color(red: 0.86, green: 0.63, blue: 0.50).opacity(0.92),
+                    Color(red: 0.58, green: 0.40, blue: 0.49).opacity(0.90),
+                    Color(red: 0.34, green: 0.27, blue: 0.40).opacity(0.88)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            RadialGradient(
+                colors: [
+                    Color.white.opacity(0.28),
+                    Color.white.opacity(0.00)
+                ],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 260
+            )
+
+            RadialGradient(
+                colors: [
+                    Color(red: 0.96, green: 0.72, blue: 0.60).opacity(0.26),
+                    Color.clear
+                ],
+                center: .topTrailing,
+                startRadius: 10,
+                endRadius: 220
+            )
+        }
+        .saturation(1.18)
     }
 
     private var handoffChrome: some View {
@@ -161,18 +199,18 @@ struct ChatPopupView: View {
     private var tutorialMeta: some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text(tutorialName)
-                    .font(.system(size: 11, weight: .medium))
-                    .tracking(0.44)
-                    .textCase(.uppercase)
-                    .foregroundStyle(Color.black.opacity(0.50))
-                    .lineLimit(1)
+            Text(tutorialName)
+                .font(.system(size: 11, weight: .medium))
+                .tracking(0.44)
+                .textCase(.uppercase)
+                .foregroundStyle(OverlayTheme.tertiaryText)
+                .lineLimit(1)
 
                 Spacer()
 
                 Text(metaRightText)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.black.opacity(0.50))
+                    .foregroundStyle(OverlayTheme.tertiaryText)
                     .lineLimit(1)
             }
             .padding(.horizontal, 16)
@@ -182,10 +220,10 @@ struct ChatPopupView: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.black.opacity(0.07))
+                        .fill(Color.white.opacity(0.16))
 
                     Capsule()
-                        .fill(Color.black.opacity(0.55))
+                        .fill(Color.white.opacity(0.76))
                         .frame(width: max(0, geometry.size.width * tutorialProgress))
                 }
             }
@@ -225,7 +263,7 @@ struct ChatPopupView: View {
 
                 Text(title)
                     .font(.system(size: kind == .now ? 14 : 13, weight: kind == .now ? .semibold : .regular))
-                    .strikethrough(kind == .done, color: Color.black.opacity(0.25))
+                    .strikethrough(kind == .done, color: Color.white.opacity(0.34))
                     .foregroundStyle(stepTextColor(kind))
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
@@ -240,7 +278,7 @@ struct ChatPopupView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(kind == .now ? Color.black.opacity(0.05) : Color.clear)
+            .background(kind == .now ? Color.white.opacity(0.12) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -281,26 +319,26 @@ struct ChatPopupView: View {
         case .done:
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.40))
+                .foregroundStyle(OverlayTheme.quaternaryText)
                 .frame(width: 18, height: 18)
         case .now:
             ZStack {
                 Circle()
                     .fill(OverlayTheme.invertedAccent)
                     .frame(width: 18, height: 18)
-                    .shadow(color: Color.black.opacity(0.06), radius: 0, x: 0, y: 0)
+                    .shadow(color: Color.white.opacity(0.18), radius: 0, x: 0, y: 0)
 
                 Circle()
                     .fill(OverlayTheme.invertedForeground)
                     .frame(width: 5, height: 5)
             }
-            .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 3))
+            .overlay(Circle().stroke(Color.white.opacity(0.16), lineWidth: 3))
         case .next:
             Image(systemName: "arrow.right")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color.black.opacity(0.35))
+                .foregroundStyle(OverlayTheme.quaternaryText)
                 .frame(width: 18, height: 18)
-                .overlay(Circle().stroke(Color.black.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+                .overlay(Circle().stroke(Color.white.opacity(0.34), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
         }
     }
 
@@ -325,6 +363,7 @@ struct ChatPopupView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(OverlayTheme.primaryText)
+                .tint(OverlayTheme.primaryText)
                 .focused($isMessageFieldFocused)
                 .disabled(sessionController.status.isBusy)
                 .onSubmit(submitDraft)
@@ -361,10 +400,10 @@ struct ChatPopupView: View {
     private func keyboardHint(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 10.5, weight: .regular, design: .monospaced))
-            .foregroundStyle(Color.black.opacity(0.40))
+            .foregroundStyle(OverlayTheme.tertiaryText)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Color.black.opacity(0.04))
+            .background(Color.white.opacity(0.10))
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -469,9 +508,11 @@ struct ChatPopupView: View {
             TextField("Optional note for Not right", text: $rejectionNote)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .tint(OverlayTheme.primaryText)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(Color.black.opacity(0.04))
+                .background(Color.white.opacity(0.10))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -566,7 +607,7 @@ struct ChatPopupView: View {
                 .font(.system(size: 12, weight: .medium))
                 .tracking(0.48)
                 .textCase(.uppercase)
-                .foregroundStyle(Color.black.opacity(0.50))
+                .foregroundStyle(OverlayTheme.tertiaryText)
                 .padding(.top, 4)
 
             Button("Start new tutorial", action: startNewChat)

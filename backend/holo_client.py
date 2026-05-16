@@ -96,10 +96,6 @@ def build_localization_prompt(
         "and output the tight bounding box around that element on image 1.\n"
         "Use the same coordinate scale for every field: 0 is the top/left edge "
         "of image 1, and 1000 is the bottom/right edge of image 1.\n"
-        "The box must enclose visible area, not a single point or line: "
-        "x1 is the left edge, y1 is the top edge, x2 is the right edge, "
-        "and y2 is the bottom edge. x2 must be greater than x1, and y2 "
-        "must be greater than y1. Never set y2 equal to y1.\n"
         f" * You must output a valid JSON following the format: {schema}\n"
         f" Your target is:\n{target}"
     )

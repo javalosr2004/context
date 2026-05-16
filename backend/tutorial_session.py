@@ -98,6 +98,9 @@ class TutorialSession:
     current_task: asyncio.Task[None] | None = None
     plan_emitted: bool = False
     screen_request_counter: int = 0
+    step_counter: int = 0
+    last_action_kind: str | None = None
+    screen_captured_at: datetime | None = None
     draft_plan: DraftPlan | None = None
     draft_plan_task: asyncio.Task[None] | None = None
     status: str = "created"
@@ -117,6 +120,8 @@ class TutorialSession:
         self.completed_step_ids = []
         self.plan_emitted = False
         self.draft_plan = None
+        self.step_counter = 0
+        self.last_action_kind = None
         self.history.append(HistoryEntry(role="user", content=text))
         self._kick_off_draft_plan()
         await self._start_task(self._run_session())
@@ -139,6 +144,7 @@ class TutorialSession:
             return
         image = uploaded_image_from_snapshot(screen)
         self.latest_screen = image
+        self.screen_captured_at = datetime.now(UTC)
         if not future.done():
             future.set_result(image)
 
@@ -191,24 +197,25 @@ class TutorialSession:
             any_steps_walked = False
             while True:
                 await self._run_agent_loop()
-                if not self.plan_steps:
+                unwalked = self._unwalked_steps()
+                if not unwalked:
                     if any_steps_walked:
                         await self.emit(SessionCompletedEvent())
                         self.status = "completed"
                     return
-                walked_steps = list(self.plan_steps)
+                walk_started_completed = set(self.completed_step_ids)
                 replan_requested = await self._walk_steps()
                 any_steps_walked = True
-                needs_fresh_screen = replan_requested or has_screen_changing_step(
-                    walked_steps,
-                    self.completed_step_ids,
+                newly_completed = [
+                    sid
+                    for sid in self.completed_step_ids
+                    if sid not in walk_started_completed
+                ]
+                needs_fresh_screen = replan_requested or self._completed_changed_screen(
+                    newly_completed
                 )
-                self._record_walk_outcome()
                 if needs_fresh_screen:
                     await self._request_fresh_screen_after_user_action()
-                self.plan_steps = []
-                self.completed_step_ids = []
-                self.plan_emitted = False
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -218,28 +225,19 @@ class TutorialSession:
             )
             raise
 
-    def _record_walk_outcome(self) -> None:
-        completed_ids = list(self.completed_step_ids)
-        if not completed_ids:
-            return
+    def _unwalked_steps(self) -> list[TutorialStep]:
+        completed = set(self.completed_step_ids)
+        return [s for s in self.plan_steps if s.step_id not in completed]
+
+    def _completed_changed_screen(self, completed_step_ids: list[str]) -> bool:
+        if not completed_step_ids:
+            return False
         steps_by_id = {step.step_id: step for step in self.plan_steps}
-        lines = [
-            f"- {sid}: {steps_by_id[sid].instruction}"
-            for sid in completed_ids
-            if sid in steps_by_id
-        ]
-        if not lines:
-            return
-        summary = (
-            "The user has already completed these tutorial steps:\n"
-            + "\n".join(lines)
-            + "\n\nDo NOT repeat any of the above. Decide what to do next: "
-            "if the user's goal is now met, answer with a short confirmation "
-            "in plain text and stop. Otherwise, request a fresh screen to "
-            "see the current state, then plan only the next step(s) with the "
-            "action tools."
+        return any(
+            sid in steps_by_id
+            and steps_by_id[sid].action.type in SCREEN_CHANGING_ACTION_TYPES
+            for sid in completed_step_ids
         )
-        self.history.append(HistoryEntry(role="user", content=summary))
 
     # -------- Agent loop --------
 
@@ -398,6 +396,9 @@ class TutorialSession:
                 history=self.history,
                 has_latest_screen=self.latest_screen is not None,
                 draft_plan=self.draft_plan,
+                plan_steps=self.plan_steps,
+                completed_step_ids=self.completed_step_ids,
+                last_action_kind=self.last_action_kind,
             ),
             images=[self.latest_screen] if self.latest_screen is not None else [],
             enable_search_grounding=False,
@@ -453,7 +454,7 @@ class TutorialSession:
 
     async def _execute_action_call(self, call: TutorialToolCall) -> None:
         try:
-            step = step_from_tool_call(call, len(self.plan_steps))
+            step = step_from_tool_call(call, self.step_counter)
         except TutorialToolCallError as error:
             logger.warning(
                 "Discarding invalid tool call",
@@ -472,6 +473,7 @@ class TutorialSession:
             return
 
         self.plan_steps.append(step)
+        self.step_counter += 1
         await self.emit(TutorialActionEvent(step=step))
         self.history.append(
             HistoryEntry(
@@ -559,7 +561,9 @@ class TutorialSession:
         else:
             await self.emit(PlanUpdatedEvent(plan=plan))
 
-        for step in self.plan_steps:
+        # Snapshot the pending steps. New steps added later (e.g. after a
+        # replan) will be walked in the next outer iteration.
+        for step in list(self.plan_steps):
             if step.step_id in self.completed_step_ids:
                 continue
             replan_note = await self._await_step(step)
@@ -567,9 +571,13 @@ class TutorialSession:
                 self.history.append(
                     HistoryEntry(role="user", content=replan_note)
                 )
-                # Reset accumulated plan so the agent loop builds fresh.
-                self.plan_steps = []
-                self.completed_step_ids = []
+                # Truncate the plan to what was actually completed; keep
+                # completion history and step_counter so re-planned steps
+                # get fresh IDs that don't collide with rejected ones.
+                completed = set(self.completed_step_ids)
+                self.plan_steps = [
+                    s for s in self.plan_steps if s.step_id in completed
+                ]
                 return True
 
         return False
@@ -606,6 +614,7 @@ class TutorialSession:
 
         if confirmed:
             self.completed_step_ids.append(step.step_id)
+            self.last_action_kind = step.action.type
             return None
 
         message = f"Step {step.step_id} was rejected."
@@ -675,6 +684,9 @@ def render_history(
     history: list[HistoryEntry],
     has_latest_screen: bool = False,
     draft_plan: DraftPlan | None = None,
+    plan_steps: list[TutorialStep] | None = None,
+    completed_step_ids: list[str] | None = None,
+    last_action_kind: str | None = None,
 ) -> str:
     lines: list[str] = []
     if goal:
@@ -685,6 +697,8 @@ def render_history(
         lines.append("- latest_screen: attached to this request")
     else:
         lines.append("- latest_screen: not attached yet")
+    if last_action_kind is not None:
+        lines.append(f"- last_completed_action: {last_action_kind}")
     lines.append("")
     if draft_plan is not None:
         lines.append(
@@ -693,6 +707,18 @@ def render_history(
         )
         for index, step in enumerate(draft_plan.steps, start=1):
             lines.append(f"  {index}. [{step.kind}] {step.instruction}")
+        lines.append("")
+    if plan_steps:
+        completed = set(completed_step_ids or [])
+        lines.append(
+            "Current plan state (do NOT re-emit completed steps; append only "
+            "what comes next):"
+        )
+        for step in plan_steps:
+            status = "done" if step.step_id in completed else "pending"
+            lines.append(
+                f"  - {step.step_id} [{status}] {step.action.type}: {step.instruction}"
+            )
         lines.append("")
     lines.append("Conversation so far:")
     if not history:

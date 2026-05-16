@@ -108,7 +108,7 @@ class TutorialPlan(TutorialSchemaModel):
     )
     steps: list[TutorialStep] = Field(
         min_length=1,
-        max_length=8,
+        max_length=32,
         description="Ordered tutorial steps for the overlay player.",
     )
 

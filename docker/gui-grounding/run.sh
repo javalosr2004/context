@@ -3,9 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-if [ ! -x ".venv/bin/uvicorn" ]; then
-  uv venv
-  uv pip install -r requirements.txt
+if [ ! -x ".venv/bin/python" ]; then
+  uv venv .venv
 fi
 
-exec .venv/bin/uvicorn app:app --host 0.0.0.0 --port "${PORT:-8080}"
+uv pip install --python .venv/bin/python -r requirements.txt
+
+exec .venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port "${PORT:-8080}"

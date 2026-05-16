@@ -265,13 +265,13 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
 
 
 async def wait_for_idle(session: TutorialSession) -> None:
-    task = session.current_task
-    if task is None:
-        return
-    try:
-        await asyncio.wait_for(task, timeout=2.0)
-    except asyncio.CancelledError:
-        pass
+    for task in (session.current_task, session.draft_plan_task):
+        if task is None:
+            continue
+        try:
+            await asyncio.wait_for(task, timeout=2.0)
+        except asyncio.CancelledError:
+            pass
 
 
 async def wait_until(predicate, timeout: float = 2.0, interval: float = 0.01) -> None:

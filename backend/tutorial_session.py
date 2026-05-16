@@ -28,10 +28,14 @@ from datetime import UTC, datetime
 
 from backend.images import UploadedImage
 from backend.llm import LLMRequest, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
-from backend.tutorial_guide import TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
-from backend.tutorial_schema import TutorialPlan, TutorialStep
+from backend.tutorial_guide import (
+    TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
+    generate_draft_plan,
+)
+from backend.tutorial_schema import DraftPlan, TutorialPlan, TutorialStep
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
+    DraftPlanReadyEvent,
     PlanReadyEvent,
     PlanUpdatedEvent,
     ScreenRequestedEvent,
@@ -94,6 +98,8 @@ class TutorialSession:
     current_task: asyncio.Task[None] | None = None
     plan_emitted: bool = False
     screen_request_counter: int = 0
+    draft_plan: DraftPlan | None = None
+    draft_plan_task: asyncio.Task[None] | None = None
     status: str = "created"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -105,11 +111,14 @@ class TutorialSession:
         if not text:
             return
         await self._cancel_current_task()
+        await self._cancel_draft_task()
         self.goal = text
         self.plan_steps = []
         self.completed_step_ids = []
         self.plan_emitted = False
+        self.draft_plan = None
         self.history.append(HistoryEntry(role="user", content=text))
+        self._kick_off_draft_plan()
         await self._start_task(self._run_session())
 
     async def handle_user_screen(
@@ -173,6 +182,7 @@ class TutorialSession:
 
     async def shutdown(self) -> None:
         await self._cancel_current_task()
+        await self._cancel_draft_task()
 
     # -------- Top-level session coroutine --------
 
@@ -387,12 +397,59 @@ class TutorialSession:
                 goal=self.goal or "",
                 history=self.history,
                 has_latest_screen=self.latest_screen is not None,
+                draft_plan=self.draft_plan,
             ),
             images=[self.latest_screen] if self.latest_screen is not None else [],
             enable_search_grounding=False,
             temperature=0,
         )
         return request
+
+    # -------- Draft plan (Slice A) --------
+
+    def _kick_off_draft_plan(self) -> None:
+        if self.goal is None:
+            return
+        goal = self.goal
+        image = self.latest_screen
+        self.draft_plan_task = asyncio.create_task(
+            self._run_draft_plan(goal, image)
+        )
+
+    async def _run_draft_plan(
+        self, goal: str, image: UploadedImage | None
+    ) -> None:
+        try:
+            plan = await asyncio.to_thread(
+                generate_draft_plan, self.llm, goal, image
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Draft plan generation failed",
+                extra={"session_id": self.session_id},
+            )
+            return
+        # The session may have moved on to a new goal while we were
+        # generating. Only adopt the draft if the goal still matches.
+        if self.goal != goal:
+            return
+        self.draft_plan = plan
+        await self.emit(DraftPlanReadyEvent(plan=plan))
+
+    async def _cancel_draft_task(self) -> None:
+        task = self.draft_plan_task
+        if task is None or task.done():
+            self.draft_plan_task = None
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        finally:
+            self.draft_plan_task = None
 
     async def _execute_action_call(self, call: TutorialToolCall) -> None:
         try:
@@ -617,6 +674,7 @@ def render_history(
     goal: str,
     history: list[HistoryEntry],
     has_latest_screen: bool = False,
+    draft_plan: DraftPlan | None = None,
 ) -> str:
     lines: list[str] = []
     if goal:
@@ -628,6 +686,14 @@ def render_history(
     else:
         lines.append("- latest_screen: not attached yet")
     lines.append("")
+    if draft_plan is not None:
+        lines.append(
+            "Draft plan hypothesis (refine against the screen, batch confidently "
+            "when the screen agrees, deviate when it does not):"
+        )
+        for index, step in enumerate(draft_plan.steps, start=1):
+            lines.append(f"  {index}. [{step.kind}] {step.instruction}")
+        lines.append("")
     lines.append("Conversation so far:")
     if not history:
         lines.append("- <none yet>")

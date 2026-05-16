@@ -113,6 +113,53 @@ class TutorialPlan(TutorialSchemaModel):
     )
 
 
+DraftStepKind = Literal[
+    "click",
+    "type",
+    "press_key",
+    "scroll",
+    "wait",
+    "navigate",
+    "verify",
+    "other",
+]
+
+
+class DraftStep(TutorialSchemaModel):
+    instruction: str = Field(
+        min_length=1,
+        description="One short human-readable sentence for the user.",
+    )
+    kind: DraftStepKind = Field(
+        description="Coarse action kind hint; refiner may override.",
+    )
+
+
+class DraftPlan(TutorialSchemaModel):
+    """Coarse hypothesis plan generated up-front from the goal.
+
+    Not executable on its own — the agent loop refines each step against
+    the live screen before emitting a TutorialStep.
+    """
+
+    schema_version: Literal["draft_plan.v1"] = "draft_plan.v1"
+    goal: str = Field(min_length=1)
+    steps: list[DraftStep] = Field(min_length=1, max_length=20)
+
+
+def parse_draft_plan(raw_json: str) -> DraftPlan:
+    try:
+        return DraftPlan.model_validate_json(raw_json)
+    except ValidationError as error:
+        raise TutorialPlanValidationError(
+            "LLM returned an invalid draft plan."
+        ) from error
+
+
+def draft_plan_response_schema() -> dict[str, Any]:
+    return remove_gemini_unsupported_schema_keys(DraftPlan.model_json_schema())
+
+
 def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
     try:
         plan = TutorialPlan.model_validate_json(raw_json)

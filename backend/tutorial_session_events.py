@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from backend.tutorial_schema import TutorialPlan, TutorialStep
+from backend.tutorial_schema import DraftPlan, TutorialPlan, TutorialStep
 
 
 class TutorialSessionEventModel(BaseModel):
@@ -94,6 +94,11 @@ class AssistantQuestionEvent(TutorialSessionEventModel):
     prompt: str
 
 
+class DraftPlanReadyEvent(TutorialSessionEventModel):
+    type: Literal["draft_plan_ready"] = "draft_plan_ready"
+    plan: DraftPlan
+
+
 class PlanReadyEvent(TutorialSessionEventModel):
     type: Literal["plan_ready"] = "plan_ready"
     plan: TutorialPlan
@@ -155,6 +160,7 @@ ServerSessionEvent = (
     | RequestReceivedEvent
     | StatusChangedEvent
     | AssistantQuestionEvent
+    | DraftPlanReadyEvent
     | PlanReadyEvent
     | PlanUpdatedEvent
     | TutorialActionEvent

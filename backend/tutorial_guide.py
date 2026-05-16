@@ -8,8 +8,11 @@ from dataclasses import dataclass
 from backend.images import UploadedImage
 from backend.llm import LLMRequest, MultimodalLLM
 from backend.tutorial_schema import (
+    DraftPlan,
     TutorialPlan,
     TutorialPlanValidationError,
+    draft_plan_response_schema,
+    parse_draft_plan,
     parse_tutorial_plan,
     tutorial_plan_response_schema,
 )
@@ -68,18 +71,22 @@ Help the user understand and complete what is on their screen. You operate
 in an agent loop: each turn you may call tools, see their results, and call
 more tools, or you may answer the user in plain text and stop.
 
+You may be given a "Draft plan hypothesis" — a coarse, pre-generated list
+of plausible steps toward the user's goal. Treat it as scaffolding, not
+truth: refine each step against the live screen, batch confidently when
+the draft and screen agree, and deviate when the screen contradicts it.
+Do not narrate the draft to the user.
+
 Tool rules:
 - Use the tutorial_action_* tools to walk the user through concrete
   clicks, keystrokes, scrolls, or waits on their current screen. These
   are the ONLY way to express tutorial steps. Never list steps as plain
   text.
 - Batch steps in a single turn when the sequence is predictable from
-  what you can already see or from common, well-known flows (e.g.
-  "focus the address bar → type the URL → press Enter", or a stable
-  multi-click path through a known app). Emit them as multiple
+  what you can already see, from common well-known flows, or from the
+  draft plan when the current screen confirms it. Emit multiple
   tutorial_action_* calls in the same turn. Do not artificially limit
-  yourself to one step at a time when you are confident about what
-  comes next.
+  yourself to one step at a time.
 - Fall back to one step at a time when the next step genuinely depends
   on what the screen looks like after the previous one — e.g. a page
   has to load, a modal might appear, the layout differs across
@@ -113,6 +120,27 @@ Do not narrate your reasoning. Do not announce what you are about to do.
 Do not refer to yourself as a planner, generator, tutorial, or overlay.
 Just answer, or just act.
 """.strip()
+
+DRAFT_PLAN_SYSTEM_PROMPT = """
+You are sketching a coarse hypothesis plan for a macOS overlay tutorial.
+
+Produce up to 20 short, human-readable instructions that map a plausible
+path from the user's current context to their goal. This is a hypothesis,
+not a contract — another agent will refine each step against the live
+screen, batch confidently when the path is predictable, and deviate when
+the screen contradicts the draft. Cover the full path, not just the first
+step.
+
+Each instruction is one short sentence written for the end user
+("Open the Courses menu", "Type your search query", "Click Sign in").
+Tag each with a kind hint. Use "verify" sparingly — only when a step
+genuinely hinges on a state check.
+
+Never invent specific UI labels, menu items, or button names that you have
+no reason to expect. When unsure, describe the target generically. Do not
+include reasoning, preambles, or commentary — only the structured plan.
+""".strip()
+
 
 MAX_TUTORIAL_PLAN_RETRIES = 2
 
@@ -235,6 +263,41 @@ def generate_tutorial_plan(
         f"Last error: {format_validation_error(last_error) if last_error else 'unknown'}. "
         f"Last output: {truncate(last_text, 500)}"
     ) from last_error
+
+
+def generate_draft_plan(
+    llm: MultimodalLLM,
+    goal: str,
+    image: UploadedImage | None = None,
+) -> DraftPlan:
+    """One-shot coarse plan generation. Image is optional context."""
+    images = [image] if image is not None else []
+    started_at = time.perf_counter()
+    raw = llm.complete_text(
+        LLMRequest(
+            system_prompt=DRAFT_PLAN_SYSTEM_PROMPT,
+            user_text=(
+                f"User goal: {goal}\n\n"
+                "Return a draft plan as JSON matching the provided schema."
+            ),
+            images=images,
+            enable_search_grounding=False,
+            response_mime_type="application/json",
+            response_schema=draft_plan_response_schema(),
+            temperature=0,
+        )
+    )
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    plan = parse_draft_plan(raw)
+    logger.info(
+        "Draft plan generated",
+        extra={
+            "elapsed_ms": elapsed_ms,
+            "step_count": len(plan.steps),
+            "has_image": image is not None,
+        },
+    )
+    return plan
 
 
 def truncate(text: str, limit: int) -> str:

@@ -80,6 +80,7 @@ truth: refine each step against the live screen, batch confidently when
 the draft and screen agree, and deviate when the screen contradicts it.
 Do not narrate the draft to the user.
 
+You are to always try to maximize how many tools you call. Do not be afraid. Be eager with helping and being optimistic. 
 Tool rules:
 - Use the tutorial_action_* tools to walk the user through concrete
   clicks, keystrokes, scrolls, or waits on their current screen. These
@@ -250,7 +251,8 @@ def generate_tutorial_plan(
 
     logger.info(
         "Generating tutorial plan",
-        extra={"image_count": len(request_images), "max_attempts": max_retries + 1},
+        extra={"image_count": len(request_images),
+               "max_attempts": max_retries + 1},
     )
 
     for attempt in range(max_retries + 1):
@@ -287,7 +289,8 @@ def generate_tutorial_plan(
             plan = parse_tutorial_plan(raw_plan)
             logger.info(
                 "Tutorial plan validated",
-                extra={"attempt": attempt_number, "step_count": len(plan.steps)},
+                extra={"attempt": attempt_number,
+                       "step_count": len(plan.steps)},
             )
             return plan
         except TutorialPlanValidationError as error:
@@ -322,9 +325,12 @@ def generate_draft_plan(
     llm: MultimodalLLM,
     goal: str,
     image: UploadedImage | None = None,
+    images: list[UploadedImage] | None = None,
 ) -> DraftPlan:
-    """One-shot coarse plan generation. Image is optional context."""
-    images = [image] if image is not None else []
+    """One-shot coarse plan generation. Images are optional visual context."""
+    request_images = images if images is not None else []
+    if image is not None:
+        request_images = [image, *request_images]
     started_at = time.perf_counter()
     raw = llm.complete_text(
         LLMRequest(
@@ -333,7 +339,7 @@ def generate_draft_plan(
                 f"User goal: {goal}\n\n"
                 "Return a draft plan as JSON matching the provided schema."
             ),
-            images=images,
+            images=request_images,
             enable_search_grounding=False,
             response_mime_type="application/json",
             response_schema=draft_plan_response_schema(),
@@ -347,7 +353,7 @@ def generate_draft_plan(
         extra={
             "elapsed_ms": elapsed_ms,
             "step_count": len(plan.steps),
-            "has_image": image is not None,
+            "image_count": len(request_images),
         },
     )
     return plan

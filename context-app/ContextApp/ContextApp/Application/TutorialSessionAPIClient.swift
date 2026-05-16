@@ -50,7 +50,7 @@ struct CreateTutorialSessionResponse: Codable, Equatable {
 }
 
 enum TutorialSessionClientEvent: Codable, Equatable {
-    case userMessage(text: String)
+    case userMessage(text: String, uploadedImages: [TutorialSessionScreenSnapshot] = [])
     case stepStarted(stepID: String)
     case userConfirmation(stepID: String, confirmed: Bool, note: String?)
     case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
@@ -58,6 +58,7 @@ enum TutorialSessionClientEvent: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case type
         case text
+        case uploadedImages = "uploaded_images"
         case screen
         case stepID = "step_id"
         case requestID = "request_id"
@@ -71,7 +72,13 @@ enum TutorialSessionClientEvent: Codable, Equatable {
 
         switch type {
         case "user_message":
-            self = .userMessage(text: try container.decode(String.self, forKey: .text))
+            self = .userMessage(
+                text: try container.decode(String.self, forKey: .text),
+                uploadedImages: try container.decodeIfPresent(
+                    [TutorialSessionScreenSnapshot].self,
+                    forKey: .uploadedImages
+                ) ?? []
+            )
         case "step_started":
             self = .stepStarted(stepID: try container.decode(String.self, forKey: .stepID))
         case "user_confirmation":
@@ -98,9 +105,12 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
         switch self {
-        case .userMessage(let text):
+        case .userMessage(let text, let uploadedImages):
             try container.encode("user_message", forKey: .type)
             try container.encode(text, forKey: .text)
+            if !uploadedImages.isEmpty {
+                try container.encode(uploadedImages, forKey: .uploadedImages)
+            }
         case .stepStarted(let stepID):
             try container.encode("step_started", forKey: .type)
             try container.encode(stepID, forKey: .stepID)

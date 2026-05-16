@@ -244,7 +244,7 @@ def create_app() -> FastAPI:
 
 async def dispatch_client_event(session, event) -> None:  # type: ignore[no-untyped-def]
     if isinstance(event, UserMessageEvent):
-        await session.handle_user_message(event.text)
+        await session.handle_user_message(event.text, event.uploaded_images)
         return
     if isinstance(event, UserScreenEvent):
         await session.handle_user_screen(event.request_id, event.screen)

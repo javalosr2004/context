@@ -17,6 +17,7 @@ from backend.tutorial_session_events import (
     TextResponseEventLike,
     TutorialActionEvent,
     TutorialTextDeltaEvent,
+    client_session_event_adapter,
 )
 from backend.tutorial_tools import TutorialToolCall
 
@@ -67,6 +68,20 @@ async def collect_events(emit_target: list[Any]) -> Any:
 
 
 class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_user_message_event_accepts_uploaded_images(self) -> None:
+        event = client_session_event_adapter.validate_python(
+            {
+                "type": "user_message",
+                "text": "Use this image.",
+                "uploaded_images": [
+                    {"mime_type": "image/png", "data_base64": tiny_png_base64()}
+                ],
+            }
+        )
+
+        self.assertEqual(event.text, "Use this image.")
+        self.assertEqual(len(event.uploaded_images), 1)
+
     async def test_text_only_response_emits_text_response_and_no_plan(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM([[LLMTextDelta(text="RunPod is a cloud GPU host.")]])
@@ -75,6 +90,7 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("What is RunPod?")
+        await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
         text_events = [e for e in events if isinstance(e, TextResponseEventLike)]
@@ -92,6 +108,7 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("Format this.")
+        await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
         text_events = [e for e in events if isinstance(e, TextResponseEventLike)]
@@ -108,6 +125,7 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("Explain this.")
+        await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
         delta_events = [e for e in events if isinstance(e, TutorialTextDeltaEvent)]
@@ -130,6 +148,7 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
 
         action_events = [e for e in events if isinstance(e, TutorialActionEvent)]
@@ -164,12 +183,13 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
         await session.handle_step_started("step_001")
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation("step_001", confirmed=True, note=None)
         await wait_until(
-            lambda: any(isinstance(e, ScreenRequestedEvent) for e in events)
+            lambda: session.pending_screen_request_id is not None
         )
 
         self.assertEqual(len(llm.requests), 1)
@@ -195,8 +215,12 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
-        self.assertFalse(any(isinstance(e, ScreenRequestedEvent) for e in events))
+        screen_requests_before_action = [
+            e for e in events if isinstance(e, ScreenRequestedEvent)
+        ]
+        self.assertEqual(len(screen_requests_before_action), 1)
 
         await session.handle_step_started("step_001")
         await wait_until(lambda: session.status == "awaiting_confirmation")
@@ -220,17 +244,8 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("Help me deploy.")
-        await wait_until(
-            lambda: any(isinstance(e, ScreenRequestedEvent) for e in events)
-        )
-
-        screen_event = next(
-            e for e in events if isinstance(e, ScreenRequestedEvent)
-        )
-        await session.handle_user_screen(
-            screen_event.request_id,
-            ScreenSnapshot(mime_type="image/png", data_base64=tiny_png_base64()),
-        )
+        await send_next_requested_screen(session, events)
+        await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
         text_events = [e for e in events if isinstance(e, TextResponseEventLike)]
@@ -238,6 +253,31 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(llm.requests), 2)
         # Second LLM call should have received the latest screen as an image.
         self.assertEqual(len(llm.requests[1].images), 1)
+
+    async def test_user_uploaded_images_are_attached_to_planner_request(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM([[LLMTextDelta(text="I can use that reference.")]])
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message(
+            "Use this reference image.",
+            [
+                ScreenSnapshot(
+                    mime_type="image/png",
+                    data_base64=tiny_png_base64(),
+                )
+            ],
+        )
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertEqual(len(llm.requests), 1)
+        self.assertEqual(len(llm.requests[0].images), 2)
+        self.assertEqual(llm.requests[0].images[0].filename, "screen")
+        self.assertEqual(llm.requests[0].images[1].filename, "uploaded_image_001")
+        self.assertIn("uploaded_reference_images", llm.requests[0].user_text)
 
     async def test_step_rejection_reruns_agent_loop(self) -> None:
         events: list[Any] = []
@@ -253,6 +293,7 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
         await session.handle_step_started("step_001")
         await wait_until(lambda: session.status == "awaiting_confirmation")
@@ -297,16 +338,18 @@ async def send_next_requested_screen(
             for e in events
         )
     )
+    request_id = session.pending_screen_request_id
     screen_event = next(
         e
         for e in events
         if isinstance(e, ScreenRequestedEvent)
-        and e.request_id == session.pending_screen_request_id
+        and e.request_id == request_id
     )
     await session.handle_user_screen(
         screen_event.request_id,
         ScreenSnapshot(mime_type="image/png", data_base64=tiny_png_base64()),
     )
+    await wait_until(lambda: session.pending_screen_request_id != request_id)
 
 
 def tiny_png_base64() -> str:

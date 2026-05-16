@@ -28,7 +28,7 @@ enum StabilityProgress {
 final class ScreenStabilityWatcher {
     static let initialDelay: TimeInterval = 0.2
     static let pollInterval: TimeInterval = 0.1
-    static let comparisonWindow: TimeInterval = 0.1
+    static let comparisonWindow: TimeInterval = 0.2
     static let timeout: TimeInterval = 5.0
     static let stabilityThreshold: Double = 0.004
     static let downscaleFactor: CGFloat = 3.0
@@ -196,7 +196,7 @@ final class ScreenStabilityWatcher {
         config.width = halfWidth
         config.height = halfHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-        config.queueDepth = 2
+        config.queueDepth = 8
         config.showsCursor = true
 
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
@@ -220,7 +220,7 @@ final class ScreenStabilityWatcher {
 }
 
 private struct TimedFrame {
-    let image: CIImage
+    let image: CGImage
     /// Capture-side presentation timestamp in seconds. Stable against burst
     /// delivery from SCStream's internal queue.
     let timestampSeconds: Double
@@ -230,6 +230,10 @@ private final class FrameCollector: NSObject, SCStreamOutput {
     private let lock = NSLock()
     private var frames: [TimedFrame] = []
     private let maxAge: TimeInterval = 2.0
+    // Owned context for copying SCK-backed pixel buffers into independent
+    // CGImages. Without this copy, CIImages retain the stream's IOSurfaces,
+    // queueDepth fills, and SCStream stops delivering new frames.
+    private let renderContext = CIContext(options: [.useSoftwareRenderer: false])
 
     func frameCount() -> Int {
         lock.lock()
@@ -241,9 +245,12 @@ private final class FrameCollector: NSObject, SCStreamOutput {
         lock.lock()
         defer { lock.unlock() }
         guard let latest = frames.last else { return nil }
+        if let first = frames.first, let last = frames.last {
+            print("frame span:", last.timestampSeconds - first.timestampSeconds, "count:", frames.count)
+        }
         let cutoff = latest.timestampSeconds - window
         guard let past = frames.last(where: { $0.timestampSeconds <= cutoff }) else { return nil }
-        return (latest.image, past.image)
+        return (CIImage(cgImage: latest.image), CIImage(cgImage: past.image))
     }
 
     func stream(
@@ -254,9 +261,10 @@ private final class FrameCollector: NSObject, SCStreamOutput {
         guard type == .screen, let pixelBuffer = sampleBuffer.imageBuffer else { return }
         let pts = CMTimeGetSeconds(sampleBuffer.presentationTimeStamp)
         guard pts.isFinite else { return }
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let copied = renderContext.createCGImage(ciImage, from: ciImage.extent) else { return }
         lock.lock()
-        frames.append(TimedFrame(image: image, timestampSeconds: pts))
+        frames.append(TimedFrame(image: copied, timestampSeconds: pts))
         let cutoff = pts - maxAge
         frames.removeAll(where: { $0.timestampSeconds < cutoff })
         lock.unlock()

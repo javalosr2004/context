@@ -60,6 +60,28 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         XCTAssertEqual(screen["data_base64"] as? String, "abc123")
     }
 
+    func testUserMessageEventEncodingIncludesUploadedImagesWhenPresent() throws {
+        let event = TutorialSessionClientEvent.userMessage(
+            text: "Use this reference.",
+            uploadedImages: [
+                TutorialSessionScreenSnapshot(
+                    mimeType: "image/png",
+                    dataBase64: "abc123"
+                )
+            ]
+        )
+
+        let data = try JSONEncoder().encode(event)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let uploadedImages = try XCTUnwrap(object["uploaded_images"] as? [[String: Any]])
+
+        XCTAssertEqual(object["type"] as? String, "user_message")
+        XCTAssertEqual(object["text"] as? String, "Use this reference.")
+        XCTAssertEqual(uploadedImages.count, 1)
+        XCTAssertEqual(uploadedImages[0]["mime_type"] as? String, "image/png")
+        XCTAssertEqual(uploadedImages[0]["data_base64"] as? String, "abc123")
+    }
+
     func testServerEventDecodingPlanReady() throws {
         let data = Data("""
         {

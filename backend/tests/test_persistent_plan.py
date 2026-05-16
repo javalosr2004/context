@@ -115,6 +115,7 @@ async def send_screen(session: TutorialSession, events: list[Any]) -> None:
         request_id,
         ScreenSnapshot(mime_type="image/png", data_base64=tiny_png()),
     )
+    await wait_until(lambda: session.pending_screen_request_id != request_id)
 
 
 class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
@@ -138,6 +139,7 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         session = TutorialSession(session_id="s1", llm=llm, emit=emit)
 
         await session.handle_user_message("Walk me through it.")
+        await send_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
         await session.handle_step_started("step_001")
         await wait_until(
@@ -186,6 +188,7 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         session = TutorialSession(session_id="s1", llm=llm, emit=emit)
 
         await session.handle_user_message("Walk me through it.")
+        await send_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
         await session.handle_step_started("step_001")
         await wait_until(lambda: session.status == "awaiting_confirmation")

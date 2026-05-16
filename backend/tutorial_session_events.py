@@ -35,6 +35,7 @@ class TutorialSessionResponse(TutorialSessionEventModel):
 class UserMessageEvent(TutorialSessionEventModel):
     type: Literal["user_message"]
     text: str = Field(min_length=1)
+    uploaded_images: list[ScreenSnapshot] = Field(default_factory=list)
 
 
 class UserAnswerEvent(TutorialSessionEventModel):

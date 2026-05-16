@@ -10,6 +10,13 @@ enum ScreenStabilityWatcherError: Error {
     case noDisplay
 }
 
+enum StabilityProgress {
+    case streamFailed
+    case warmingUp(frameCount: Int)
+    case comparing(diff: Double)
+    case comparisonFailed
+}
+
 /// Waits for the screen to visually stabilize after a click before letting
 /// the caller proceed. After an initial 500 ms delay, polls every 100 ms and
 /// compares the latest captured frame against a frame ~500 ms older. The
@@ -19,9 +26,9 @@ enum ScreenStabilityWatcherError: Error {
 /// guarantees we never block the tutorial indefinitely.
 @MainActor
 final class ScreenStabilityWatcher {
-    static let initialDelay: TimeInterval = 0.5
+    static let initialDelay: TimeInterval = 0.2
     static let pollInterval: TimeInterval = 0.1
-    static let comparisonWindow: TimeInterval = 0.5
+    static let comparisonWindow: TimeInterval = 0.1
     static let timeout: TimeInterval = 5.0
     static let stabilityThreshold: Double = 0.004
     static let downscaleFactor: CGFloat = 3.0
@@ -32,12 +39,13 @@ final class ScreenStabilityWatcher {
     func waitUntilStable(
         on screen: NSScreen,
         excludingWindows: [NSWindow] = [],
-        onProgress: ((Double) -> Void)? = nil
+        onProgress: ((StabilityProgress) -> Void)? = nil
     ) async {
         let displayID: CGDirectDisplayID
         do {
             displayID = try Self.displayID(for: screen)
         } catch {
+            onProgress?(.streamFailed)
             return
         }
 
@@ -50,6 +58,7 @@ final class ScreenStabilityWatcher {
                 collector: collector
             )
         } catch {
+            onProgress?(.streamFailed)
             return
         }
 
@@ -62,13 +71,15 @@ final class ScreenStabilityWatcher {
         let start = Date()
         while Date().timeIntervalSince(start) < (Self.timeout - Self.initialDelay) {
             try? await Task.sleep(nanoseconds: UInt64(Self.pollInterval * 1_000_000_000))
-            guard
-                let pair = collector.framePair(window: Self.comparisonWindow),
-                let diff = meanDifference(current: pair.current, past: pair.past)
-            else {
+            guard let pair = collector.framePair(window: Self.comparisonWindow) else {
+                onProgress?(.warmingUp(frameCount: collector.frameCount()))
                 continue
             }
-            onProgress?(diff)
+            guard let diff = meanDifference(current: pair.current, past: pair.past) else {
+                onProgress?(.comparisonFailed)
+                continue
+            }
+            onProgress?(.comparing(diff: diff))
             if diff <= Self.stabilityThreshold {
                 return
             }
@@ -174,6 +185,12 @@ private final class FrameCollector: NSObject, SCStreamOutput {
     private let lock = NSLock()
     private var frames: [TimedFrame] = []
     private let maxAge: TimeInterval = 2.0
+
+    func frameCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return frames.count
+    }
 
     func framePair(window: TimeInterval) -> (current: CIImage, past: CIImage)? {
         lock.lock()

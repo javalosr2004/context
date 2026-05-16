@@ -6,7 +6,7 @@ import SwiftUI
 /// next backend event fires.
 @MainActor
 final class StabilityIndicatorController: ObservableObject {
-    @Published private(set) var diff: Double?
+    @Published private(set) var progress: StabilityProgress?
     @Published private(set) var isVisible: Bool = false
 
     private let screenProvider: () -> NSScreen?
@@ -21,7 +21,7 @@ final class StabilityIndicatorController: ObservableObject {
     func show() {
         guard let screen = screenProvider() else { return }
         if panel == nil {
-            let size = CGSize(width: 200, height: 36)
+            let size = CGSize(width: 240, height: 36)
             let margin: CGFloat = 18
             let frame = CGRect(
                 x: screen.frame.maxX - size.width - margin,
@@ -34,13 +34,13 @@ final class StabilityIndicatorController: ObservableObject {
             newPanel.contentView = NSHostingView(rootView: StabilityIndicatorView(controller: self))
             panel = newPanel
         }
-        diff = nil
+        progress = nil
         isVisible = true
         panel?.orderFrontRegardless()
     }
 
-    func update(diff: Double) {
-        self.diff = diff
+    func update(progress: StabilityProgress) {
+        self.progress = progress
     }
 
     func hide() {
@@ -94,9 +94,17 @@ struct StabilityIndicatorView: View {
     }
 
     private var label: String {
-        guard let diff = controller.diff else {
+        switch controller.progress {
+        case .none:
             return "Settling…"
+        case .streamFailed:
+            return "Capture failed"
+        case .warmingUp(let count):
+            return "Warming up (\(count))"
+        case .comparing(let diff):
+            return String(format: "diff %.4f", diff)
+        case .comparisonFailed:
+            return "Comparison failed"
         }
-        return String(format: "Settling… diff %.4f", diff)
     }
 }

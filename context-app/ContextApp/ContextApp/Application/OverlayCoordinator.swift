@@ -56,8 +56,8 @@ final class OverlayCoordinator {
                         await self.stabilityWatcher.waitUntilStable(
                             on: screen,
                             excludingWindows: excluded,
-                            onProgress: { [weak self] diff in
-                                Task { @MainActor in self?.stabilityIndicator?.update(diff: diff) }
+                            onProgress: { [weak self] progress in
+                                Task { @MainActor in self?.stabilityIndicator?.update(progress: progress) }
                             }
                         )
                         self.stabilityIndicator?.hide()

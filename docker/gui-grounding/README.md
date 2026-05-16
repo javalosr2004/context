@@ -1,0 +1,50 @@
+# Holo GUI Grounding
+
+Flask service that adapts H Company Holo3 element localization to the `context-app` grounding response schema.
+
+## Run
+
+```bash
+export HAI_API_KEY="your-api-key"
+cd docker/gui-grounding
+flask --app app run --host 0.0.0.0 --port 8000
+```
+
+Point `context-app` at:
+
+```bash
+CONTEXT_GROUNDING_ENDPOINT=http://localhost:8000
+```
+
+The frontend appends `/predict` when needed.
+
+## API
+
+`POST /predict` accepts multipart form data:
+
+- `input_image`: screenshot image file
+- `instruction`: text description of the target element
+
+Holo returns a point in `[0, 1000]`. This service returns the frontend-compatible schema and creates a deterministic bounding box centered on that point:
+
+```json
+{
+  "point": {"x": 0.5, "y": 0.5},
+  "point_pixel": {"x": 640, "y": 360},
+  "bbox": {"x1": 0.46, "y1": 0.47, "x2": 0.54, "y2": 0.53},
+  "bbox_pixel": {"x1": 588.8, "y1": 338.4, "x2": 691.2, "y2": 381.6},
+  "bbox_score": null,
+  "bbox_label": "the Sign in button",
+  "bbox_source": "holo3_point_box",
+  "image_size": {"width": 1280, "height": 720},
+  "num_detections": 1
+}
+```
+
+## Configuration
+
+- `HAI_API_KEY`: required H Company API key
+- `HAI_BASE_URL`: optional, defaults to `https://api.hcompany.ai/v1/`
+- `HOLO_MODEL`: optional, defaults to `holo3-35b-a3b`
+- `HOLO_BBOX_WIDTH_RATIO`: optional, defaults to `0.08`
+- `HOLO_BBOX_HEIGHT_RATIO`: optional, defaults to `0.06`

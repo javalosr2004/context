@@ -37,6 +37,7 @@ docker run --env-file .env -p 8080:8080 gui-grounding
 `POST /predict` accepts multipart form data:
 
 - `input_image`: screenshot image file
+- `reference_image`: optional image file showing the target UI element from the recorded step
 - `instruction`: text description of the target element
 
 Holo returns a point in `[0, 1000]`. This service returns the frontend-compatible schema and creates a deterministic bounding box centered on that point:

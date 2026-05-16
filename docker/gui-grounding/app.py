@@ -35,18 +35,25 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
     @app.post("/predict")
     async def predict(
         input_image: UploadFile = File(...),
+        reference_image: UploadFile | None = File(None),
         instruction: str = Form(DEFAULT_INSTRUCTION),
     ):
         request_id = str(uuid.uuid4())
         total_started = time.perf_counter()
         instruction_text = instruction or DEFAULT_INSTRUCTION
         upload_bytes = 0
+        reference_upload_bytes = 0
 
         try:
             decode_started = time.perf_counter()
             image_bytes = await input_image.read()
             upload_bytes = len(image_bytes)
             image_size, screenshot_data_uri = read_image(image_bytes)
+            reference_image_data_uri = None
+            if reference_image is not None:
+                reference_bytes = await reference_image.read()
+                reference_upload_bytes = len(reference_bytes)
+                _, reference_image_data_uri = read_image(reference_bytes)
             decode_ms = elapsed_ms(decode_started)
 
             localizer_instance = app.state.localizer or HoloLocalizer()
@@ -54,6 +61,7 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
             point_1000 = localizer_instance.locate(
                 screenshot_data_uri=screenshot_data_uri,
                 target=instruction_text,
+                reference_image_data_uri=reference_image_data_uri,
             )
             holo_ms = elapsed_ms(holo_started)
 
@@ -79,6 +87,7 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
                 request_id=request_id,
                 instruction=instruction_text,
                 upload_bytes=upload_bytes,
+                reference_upload_bytes=reference_upload_bytes,
                 status_code=400,
                 error=exc,
                 total_started=total_started,
@@ -89,6 +98,7 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
                 request_id=request_id,
                 instruction=instruction_text,
                 upload_bytes=upload_bytes,
+                reference_upload_bytes=reference_upload_bytes,
                 status_code=502,
                 error=exc,
                 total_started=total_started,
@@ -102,6 +112,7 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
                 request_id=request_id,
                 instruction=instruction_text,
                 upload_bytes=upload_bytes,
+                reference_upload_bytes=reference_upload_bytes,
                 status_code=502,
                 error=exc,
                 total_started=total_started,
@@ -116,6 +127,8 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
             model=os.environ.get("HOLO_MODEL", "holo3-35b-a3b"),
             instruction=instruction_text,
             upload_bytes=upload_bytes,
+            reference_upload_bytes=reference_upload_bytes,
+            has_reference_image=reference_image_data_uri is not None,
             image_size={"width": image_size.width, "height": image_size.height},
             holo_point_1000={"x": point_1000.x, "y": point_1000.y},
             normalized_point=response["point"],
@@ -141,6 +154,7 @@ def log_predict_error(
     request_id: str,
     instruction: str,
     upload_bytes: int,
+    reference_upload_bytes: int,
     status_code: int,
     error: Exception,
     total_started: float,
@@ -152,6 +166,8 @@ def log_predict_error(
         status_code=status_code,
         instruction=instruction,
         upload_bytes=upload_bytes,
+        reference_upload_bytes=reference_upload_bytes,
+        has_reference_image=reference_upload_bytes > 0,
         error_type=type(error).__name__,
         error=str(error),
         timings_ms={"total": elapsed_ms(total_started)},

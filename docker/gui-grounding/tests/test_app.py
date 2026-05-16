@@ -11,14 +11,30 @@ from logging_config import LOGGER_NAME
 
 
 class FakeLocalizer:
-    def locate(self, *, screenshot_data_uri: str, target: str) -> VisualLocalizerOutput:
+    def __init__(self) -> None:
+        self.reference_image_data_uri = None
+
+    def locate(
+        self,
+        *,
+        screenshot_data_uri: str,
+        target: str,
+        reference_image_data_uri: str | None = None,
+    ) -> VisualLocalizerOutput:
         assert screenshot_data_uri.startswith("data:image/png;base64,")
         assert target == "Submit button"
+        self.reference_image_data_uri = reference_image_data_uri
         return VisualLocalizerOutput(x=250, y=750)
 
 
 class FailingLocalizer:
-    def locate(self, *, screenshot_data_uri: str, target: str) -> VisualLocalizerOutput:
+    def locate(
+        self,
+        *,
+        screenshot_data_uri: str,
+        target: str,
+        reference_image_data_uri: str | None = None,
+    ) -> VisualLocalizerOutput:
         raise RuntimeError("provider unavailable")
 
 
@@ -47,6 +63,24 @@ def test_predict_returns_context_app_schema():
     assert body["num_detections"] == 1
 
 
+def test_predict_accepts_reference_image():
+    localizer = FakeLocalizer()
+    client = TestClient(create_app(localizer))
+
+    response = client.post(
+        "/predict",
+        files={
+            "input_image": ("screen.png", png_bytes(), "image/png"),
+            "reference_image": ("reference.png", png_bytes(), "image/png"),
+        },
+        data={"instruction": "Submit button"},
+    )
+
+    assert response.status_code == 200
+    assert localizer.reference_image_data_uri is not None
+    assert localizer.reference_image_data_uri.startswith("data:image/png;base64,")
+
+
 def test_predict_logs_success_without_image_payload(caplog):
     client = TestClient(create_app(FakeLocalizer()))
 
@@ -62,11 +96,13 @@ def test_predict_logs_success_without_image_payload(caplog):
     event = next(record for record in records if record["event"] == "predict_success")
     assert event["status_code"] == 200
     assert event["instruction"] == "Submit button"
+    assert event["has_reference_image"] is False
     assert event["image_size"] == {"width": 200, "height": 100}
     assert event["holo_point_1000"] == {"x": 250, "y": 750}
     assert event["normalized_point"] == {"x": 0.25, "y": 0.75}
     assert "total" in event["timings_ms"]
     assert "screenshot_data_uri" not in event
+    assert "reference_image_data_uri" not in event
 
 
 def test_predict_logs_errors(caplog):

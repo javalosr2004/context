@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 
-from grounding import bbox_center, gui_actor_response, holo_bbox_to_normalized_bbox
+from grounding import NormalizedPoint, gui_actor_response, holo_coordinate_to_normalized, point_to_bbox
 from holo_client import HoloLocalizer
 from image_io import read_image
 from logging_config import configure_logging, log_event
@@ -58,7 +58,7 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
 
             localizer_instance = app.state.localizer or HoloLocalizer()
             holo_started = time.perf_counter()
-            bbox_1000 = localizer_instance.locate(
+            point_1000 = localizer_instance.locate(
                 screenshot_data_uri=screenshot_data_uri,
                 target=instruction_text,
                 reference_image_data_uri=reference_image_data_uri,
@@ -66,14 +66,17 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
             holo_ms = elapsed_ms(holo_started)
 
             post_started = time.perf_counter()
-            bbox = holo_bbox_to_normalized_bbox(
-                x1=bbox_1000.x1,
-                y1=bbox_1000.y1,
-                x2=bbox_1000.x2,
-                y2=bbox_1000.y2,
+            point = NormalizedPoint(
+                x=holo_coordinate_to_normalized(point_1000.x),
+                y=holo_coordinate_to_normalized(point_1000.y),
+            )
+            bbox = point_to_bbox(
+                point,
+                width_ratio=float(os.environ.get("HOLO_BBOX_WIDTH_RATIO", "0.08")),
+                height_ratio=float(os.environ.get("HOLO_BBOX_HEIGHT_RATIO", "0.06")),
             )
             response = gui_actor_response(
-                point=bbox_center(bbox),
+                point=point,
                 bbox=bbox,
                 image_size=image_size,
                 label=instruction_text,
@@ -127,15 +130,9 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
             reference_upload_bytes=reference_upload_bytes,
             has_reference_image=reference_image_data_uri is not None,
             image_size={"width": image_size.width, "height": image_size.height},
-            holo_bbox_1000={
-                "x1": bbox_1000.x1,
-                "y1": bbox_1000.y1,
-                "x2": bbox_1000.x2,
-                "y2": bbox_1000.y2,
-            },
+            holo_point_1000={"x": point_1000.x, "y": point_1000.y},
             normalized_point=response["point"],
             bbox=response["bbox"],
-            bbox_xywh=response["bbox_xywh"],
             timings_ms={
                 "decode": decode_ms,
                 "holo": holo_ms,

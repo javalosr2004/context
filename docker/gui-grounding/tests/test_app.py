@@ -4,7 +4,6 @@ import logging
 
 from PIL import Image
 from fastapi.testclient import TestClient
-import pytest
 
 from app import create_app
 from holo_client import VisualLocalizerOutput
@@ -25,7 +24,7 @@ class FakeLocalizer:
         assert screenshot_data_uri.startswith("data:image/png;base64,")
         assert target == "Submit button"
         self.reference_image_data_uri = reference_image_data_uri
-        return VisualLocalizerOutput(x1=200, y1=600, x2=300, y2=900)
+        return VisualLocalizerOutput(x=250, y=750)
 
 
 class FailingLocalizer:
@@ -59,16 +58,7 @@ def test_predict_returns_context_app_schema():
     body = response.json()
     assert body["point"] == {"x": 0.25, "y": 0.75}
     assert body["point_pixel"] == {"x": 50.0, "y": 75.0}
-    assert body["bbox"] == {"x1": 0.2, "y1": 0.6, "x2": 0.3, "y2": 0.9}
-    assert body["bbox_xywh"]["x"] == 0.2
-    assert body["bbox_xywh"]["y"] == 0.6
-    assert body["bbox_xywh"]["width"] == pytest.approx(0.1)
-    assert body["bbox_xywh"]["height"] == pytest.approx(0.3)
-    assert body["bbox_xywh_pixel"]["x"] == 40.0
-    assert body["bbox_xywh_pixel"]["y"] == 60.0
-    assert body["bbox_xywh_pixel"]["width"] == pytest.approx(20.0)
-    assert body["bbox_xywh_pixel"]["height"] == pytest.approx(30.0)
-    assert body["bbox_source"] == "holo3_bbox"
+    assert body["bbox_source"] == "holo3_point_box"
     assert body["image_size"] == {"width": 200, "height": 100}
     assert body["num_detections"] == 1
 
@@ -108,12 +98,8 @@ def test_predict_logs_success_without_image_payload(caplog):
     assert event["instruction"] == "Submit button"
     assert event["has_reference_image"] is False
     assert event["image_size"] == {"width": 200, "height": 100}
-    assert event["holo_bbox_1000"] == {"x1": 200, "y1": 600, "x2": 300, "y2": 900}
+    assert event["holo_point_1000"] == {"x": 250, "y": 750}
     assert event["normalized_point"] == {"x": 0.25, "y": 0.75}
-    assert event["bbox_xywh"]["x"] == 0.2
-    assert event["bbox_xywh"]["y"] == 0.6
-    assert event["bbox_xywh"]["width"] == pytest.approx(0.1)
-    assert event["bbox_xywh"]["height"] == pytest.approx(0.3)
     assert "total" in event["timings_ms"]
     assert "screenshot_data_uri" not in event
     assert "reference_image_data_uri" not in event

@@ -1,10 +1,13 @@
 import io
+import json
+import logging
 
 from PIL import Image
 from fastapi.testclient import TestClient
 
 from app import create_app
 from holo_client import VisualLocalizerOutput
+from logging_config import LOGGER_NAME
 
 
 class FakeLocalizer:
@@ -12,6 +15,11 @@ class FakeLocalizer:
         assert screenshot_data_uri.startswith("data:image/png;base64,")
         assert target == "Submit button"
         return VisualLocalizerOutput(x=250, y=750)
+
+
+class FailingLocalizer:
+    def locate(self, *, screenshot_data_uri: str, target: str) -> VisualLocalizerOutput:
+        raise RuntimeError("provider unavailable")
 
 
 def png_bytes() -> bytes:
@@ -37,6 +45,47 @@ def test_predict_returns_context_app_schema():
     assert body["bbox_source"] == "holo3_point_box"
     assert body["image_size"] == {"width": 200, "height": 100}
     assert body["num_detections"] == 1
+
+
+def test_predict_logs_success_without_image_payload(caplog):
+    client = TestClient(create_app(FakeLocalizer()))
+
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        response = client.post(
+            "/predict",
+            files={"input_image": ("screen.png", png_bytes(), "image/png")},
+            data={"instruction": "Submit button"},
+        )
+
+    assert response.status_code == 200
+    records = [json.loads(record.message) for record in caplog.records]
+    event = next(record for record in records if record["event"] == "predict_success")
+    assert event["status_code"] == 200
+    assert event["instruction"] == "Submit button"
+    assert event["image_size"] == {"width": 200, "height": 100}
+    assert event["holo_point_1000"] == {"x": 250, "y": 750}
+    assert event["normalized_point"] == {"x": 0.25, "y": 0.75}
+    assert "total" in event["timings_ms"]
+    assert "screenshot_data_uri" not in event
+
+
+def test_predict_logs_errors(caplog):
+    client = TestClient(create_app(FailingLocalizer()))
+
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        response = client.post(
+            "/predict",
+            files={"input_image": ("screen.png", png_bytes(), "image/png")},
+            data={"instruction": "Submit button"},
+        )
+
+    assert response.status_code == 502
+    records = [json.loads(record.message) for record in caplog.records]
+    event = next(record for record in records if record["event"] == "predict_error")
+    assert event["status_code"] == 502
+    assert event["error_type"] == "RuntimeError"
+    assert event["error"] == "provider unavailable"
+    assert "total" in event["timings_ms"]
 
 
 def test_predict_requires_input_image():

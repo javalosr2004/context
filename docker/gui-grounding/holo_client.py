@@ -5,6 +5,8 @@ import os
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from logging_config import configure_logging, log_event
+
 
 class VisualLocalizerOutput(BaseModel):
     x: int = Field(ge=0, le=1000, description="X coordinate as integer in [0, 1000]")
@@ -52,4 +54,11 @@ class HoloLocalizer:
             temperature=0.0,
         )
         content = response.choices[0].message.content
+        if os.environ.get("LOG_HOLO_RAW_OUTPUT", "0") == "1":
+            log_event(
+                configure_logging(),
+                "holo_raw_output",
+                model=self.model_name,
+                content=content,
+            )
         return VisualLocalizerOutput.model_validate_json(content)

@@ -62,3 +62,14 @@ Holo returns a point in `[0, 1000]`. This service returns the frontend-compatibl
 - `HOLO_MODEL`: optional, defaults to `holo3-35b-a3b`
 - `HOLO_BBOX_WIDTH_RATIO`: optional, defaults to `0.08`
 - `HOLO_BBOX_HEIGHT_RATIO`: optional, defaults to `0.06`
+- `LOG_LEVEL`: optional, defaults to `INFO`
+- `LOG_HOLO_RAW_OUTPUT`: optional, defaults to `0`; set to `1` to log raw Holo JSON content
+
+## Logging
+
+`/predict` emits one structured JSON log event per request:
+
+- `predict_success`: request ID, instruction, upload size, image size, Holo point, normalized point, bbox, model, and decode/Holo/post/total timings.
+- `predict_error`: request ID, instruction, upload size, status code, exception type/message, and total timing.
+
+Image bytes, base64 data URIs, and API keys are never logged.

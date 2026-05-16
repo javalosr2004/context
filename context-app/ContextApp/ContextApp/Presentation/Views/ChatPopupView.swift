@@ -23,6 +23,7 @@ struct ChatPopupView: View {
     let onMinify: () -> Void
 
     @State private var activeStepID: String?
+    @State private var expandedStepID: String?
     @State private var draft = ""
     @State private var stepJSONPreview: StepJSONPreview?
     @State private var instructionDraft = ""
@@ -521,48 +522,180 @@ struct ChatPopupView: View {
 
     private func tutorialStepButton(_ step: TutorialStep) -> some View {
         let isActive = activeStepID == step.stepId
+        let isExpanded = expandedStepID == step.stepId
+        let isHighlighted = isActive || isExpanded
 
-        return Button {
-            selectTutorialStep(step)
-        } label: {
-            HStack(alignment: .center, spacing: 9) {
-                Image(systemName: iconName(for: step.action))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 20, height: 20)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                toggleStepExpansion(step)
+            } label: {
+                HStack(alignment: .center, spacing: 9) {
+                    Image(systemName: iconName(for: step.action))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 20, height: 20)
 
-                Text(step.instruction)
-                    .font(.system(size: 13))
-                    .lineSpacing(2)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .multilineTextAlignment(.leading)
+                    Text(step.instruction)
+                        .font(.system(size: 13))
+                        .lineSpacing(2)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(isExpanded ? nil : 2)
 
-                if isActive {
-                    ProgressView()
-                        .controlSize(.small)
+                    if isActive {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                            .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button {
+                    showStepJSONPreview(for: step)
+                } label: {
+                    Label("Show step JSON", systemImage: "curlybraces")
                 }
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(OverlayTheme.strongerFill)
-            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
-                    .stroke(isActive ? Color.accentColor.opacity(0.45) : OverlayTheme.hairline, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                showStepJSONPreview(for: step)
-            } label: {
-                Label("Show step JSON", systemImage: "curlybraces")
+            .disabled(!canToggleStep(step))
+            .help(isExpanded ? "Collapse" : "Show on screen")
+
+            if isExpanded {
+                stepDropdown(step)
             }
         }
-        .disabled(activeStepID != nil || !canSelectTutorialStep(step))
-        .help("Show on screen")
+        .background(OverlayTheme.strongerFill)
+        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                .stroke(isHighlighted ? Color.accentColor.opacity(0.45) : OverlayTheme.hairline, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func stepDropdown(_ step: TutorialStep) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Rectangle()
+                .fill(OverlayTheme.separator)
+                .frame(height: 1)
+
+            if let target = stepTargetDescription(for: step), !target.isEmpty {
+                Label(target, systemImage: "scope")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+
+            if let typeText = stepCopyableText(for: step), !typeText.isEmpty {
+                HStack(spacing: 8) {
+                    Text(typeText)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(OverlayTheme.quietFill)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+
+                    Button {
+                        copyTypeTextToPasteboard(typeText)
+                    } label: {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Copy to clipboard")
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    submitInlineConfirm(stepID: step.stepId, confirmed: true)
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(activeStepID == step.stepId)
+
+                Button {
+                    submitInlineConfirm(stepID: step.stepId, confirmed: false)
+                } label: {
+                    Label("Not right", systemImage: "xmark")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(activeStepID == step.stepId)
+
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func canToggleStep(_ step: TutorialStep) -> Bool {
+        if expandedStepID == step.stepId { return true }
+        return !sessionController.status.isBusy && activeStepID == nil
+    }
+
+    private func stepCopyableText(for step: TutorialStep) -> String? {
+        if case .type(let action) = step.action { return action.text }
+        return nil
+    }
+
+    private func stepTargetDescription(for step: TutorialStep) -> String? {
+        switch step.action {
+        case .click(let a): return a.target.description
+        case .doubleClick(let a): return a.target.description
+        case .rightClick(let a): return a.target.description
+        case .hover(let a): return a.target.description
+        case .drag(let a): return a.target.description
+        case .type(let a): return a.target?.description
+        case .scroll(let a): return a.target?.description
+        case .pressKey(let a): return "Key: \(a.key)"
+        case .wait, .confirm: return nil
+        }
+    }
+
+    private func toggleStepExpansion(_ step: TutorialStep) {
+        if expandedStepID == step.stepId {
+            expandedStepID = nil
+            return
+        }
+        expandedStepID = step.stepId
+        guard canSelectTutorialStep(step), activeStepID == nil else { return }
+        selectTutorialStep(step)
+    }
+
+    private func submitInlineConfirm(stepID: String, confirmed: Bool) {
+        selectedConfirmationStepID = nil
+        expandedStepID = nil
+        Task {
+            await sessionController.confirmStep(stepID: stepID, confirmed: confirmed, note: nil)
+        }
+    }
+
+    private func copyTypeTextToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func canSelectTutorialStep(_ step: TutorialStep) -> Bool {

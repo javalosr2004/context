@@ -4,8 +4,15 @@ Flask service that adapts H Company Holo3 element localization to the `context-a
 
 ## Run
 
+Create a local env file:
+
 ```bash
-export HAI_API_KEY="your-api-key"
+cp .env.example .env
+```
+
+Then set `HAI_API_KEY` in `.env`.
+
+```bash
 cd docker/gui-grounding
 flask --app app run --host 0.0.0.0 --port 8000
 ```
@@ -17,6 +24,13 @@ CONTEXT_GROUNDING_ENDPOINT=http://localhost:8000
 ```
 
 The frontend appends `/predict` when needed.
+
+For Docker, pass the same file at runtime:
+
+```bash
+docker build -t gui-grounding .
+docker run --env-file .env -p 8000:8000 gui-grounding
+```
 
 ## API
 

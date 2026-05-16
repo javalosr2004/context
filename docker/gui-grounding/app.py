@@ -4,12 +4,15 @@ import os
 from http import HTTPStatus
 
 from flask import Flask, jsonify, request
+from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from grounding import NormalizedPoint, gui_actor_response, holo_coordinate_to_normalized, point_to_bbox
 from holo_client import HoloLocalizer
 from image_io import read_image
 
+
+load_dotenv()
 
 DEFAULT_INSTRUCTION = "Locate the matching UI element."
 

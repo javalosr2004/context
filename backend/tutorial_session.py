@@ -690,10 +690,31 @@ class TutorialSession:
         await self.emit(StatusChangedEvent(status="planning", label="Thinking"))
 
     async def _request_fresh_screen_after_user_action(self) -> None:
-        await self._request_screen(
-            "Need to verify the current screen after the user action "
-            "before planning the next instruction."
-        )
+        last_step = self._last_completed_step()
+        if last_step is not None:
+            reason = (
+                f"Verifying the result of completed {last_step.step_id} "
+                f"({last_step.action.type}: {last_step.instruction}). "
+                "The attached screen is the post-action state — confirm the "
+                "action achieved its goal before planning the next move, "
+                "and switch strategy rather than re-emitting an equivalent "
+                "action."
+            )
+        else:
+            reason = (
+                "Need to verify the current screen after the user action "
+                "before planning the next instruction."
+            )
+        await self._request_screen(reason)
+
+    def _last_completed_step(self) -> TutorialStep | None:
+        if not self.completed_step_ids:
+            return None
+        last_id = self.completed_step_ids[-1]
+        for step in reversed(self.plan_steps):
+            if step.step_id == last_id:
+                return step
+        return None
 
     async def _request_screen(self, reason: str) -> None:
         self.latest_screen = None
@@ -769,6 +790,18 @@ class TutorialSession:
             self.last_action_kind = step.action.type
             if step.action.type in SCREEN_CHANGING_ACTION_TYPES:
                 self.screen_is_stale = True
+            self.history.append(
+                HistoryEntry(
+                    role="user",
+                    content=(
+                        f"confirmed {step.step_id} ({step.action.type}): "
+                        f"{step.instruction}. The next attached screen is "
+                        "the post-action state — verify the action achieved "
+                        "its goal before emitting another step, and do not "
+                        "re-emit any action equivalent to this one."
+                    ),
+                )
+            )
             return None
 
         message = f"Step {step.step_id} was rejected."

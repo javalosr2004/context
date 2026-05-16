@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
@@ -101,6 +102,7 @@ class TutorialSession:
     screen_request_counter: int = 0
     step_counter: int = 0
     last_action_kind: str | None = None
+    screen_is_stale: bool = False
     screen_captured_at: datetime | None = None
     draft_plan: DraftPlan | None = None
     draft_plan_task: asyncio.Task[None] | None = None
@@ -157,6 +159,7 @@ class TutorialSession:
         self.draft_plan = None
         self.step_counter = 0
         self.last_action_kind = None
+        self.screen_is_stale = False
         self.history.append(HistoryEntry(role="user", content=text))
         self._kick_off_draft_plan()
 
@@ -178,6 +181,7 @@ class TutorialSession:
             return
         image = uploaded_image_from_snapshot(screen)
         self.latest_screen = image
+        self.screen_is_stale = False
         self.screen_captured_at = datetime.now(UTC)
         if not future.done():
             future.set_result(image)
@@ -308,6 +312,52 @@ class TutorialSession:
             action_calls = [
                 call for call in tool_calls if call.name != REQUEST_SCREEN_TOOL_NAME
             ]
+
+            # Hard guard: if the screen is stale (user just performed a
+            # screen-changing action) and the model is about to emit more
+            # actions without first asking for a fresh screen, override.
+            # Otherwise the agent keeps re-emitting scrolls/clicks based on
+            # a pre-action view it cannot verify.
+            if (
+                self.screen_is_stale
+                and action_calls
+                and request_screen_call is None
+            ):
+                logger.info(
+                    "Forcing tutorial_request_screen due to stale screen",
+                    extra={
+                        "session_id": self.session_id,
+                        "last_action_kind": self.last_action_kind,
+                        "dropped_action_names": [c.name for c in action_calls],
+                    },
+                )
+                self.history.append(
+                    HistoryEntry(
+                        role="tool",
+                        content=(
+                            "Loop guard: dropped action calls "
+                            f"{[c.name for c in action_calls]} because the "
+                            f"screen is stale after a {self.last_action_kind}. "
+                            "Requesting a fresh screen first."
+                        ),
+                    )
+                )
+                synthetic_reason = (
+                    f"verifying the result of the last {self.last_action_kind} "
+                    "before continuing"
+                )
+                consecutive_screen_requests += 1
+                if consecutive_screen_requests >= MAX_CONSECUTIVE_SCREEN_REQUESTS:
+                    await self._emit_screen_request_stall(synthetic_reason)
+                    return
+                await self._execute_screen_request(
+                    TutorialToolCall(
+                        name=REQUEST_SCREEN_TOOL_NAME,
+                        arguments=json.dumps({"reason": synthetic_reason}),
+                    )
+                )
+                continue
+
             for call in action_calls:
                 await self._execute_action_call(call)
 
@@ -433,6 +483,7 @@ class TutorialSession:
                 plan_steps=self.plan_steps,
                 completed_step_ids=self.completed_step_ids,
                 last_action_kind=self.last_action_kind,
+                screen_is_stale=self.screen_is_stale,
             ),
             images=[self.latest_screen] if self.latest_screen is not None else [],
             enable_search_grounding=False,
@@ -649,6 +700,8 @@ class TutorialSession:
         if confirmed:
             self.completed_step_ids.append(step.step_id)
             self.last_action_kind = step.action.type
+            if step.action.type in SCREEN_CHANGING_ACTION_TYPES:
+                self.screen_is_stale = True
             return None
 
         message = f"Step {step.step_id} was rejected."
@@ -721,6 +774,7 @@ def render_history(
     plan_steps: list[TutorialStep] | None = None,
     completed_step_ids: list[str] | None = None,
     last_action_kind: str | None = None,
+    screen_is_stale: bool = False,
 ) -> str:
     lines: list[str] = []
     if goal:
@@ -728,7 +782,14 @@ def render_history(
         lines.append("")
     lines.append("Loop state:")
     if has_latest_screen:
-        lines.append("- latest_screen: attached to this request")
+        if screen_is_stale:
+            lines.append(
+                "- latest_screen: attached but STALE — taken before the last "
+                "action. Call tutorial_request_screen before emitting another "
+                "action; do not trust the attached image for verification."
+            )
+        else:
+            lines.append("- latest_screen: attached to this request")
     else:
         lines.append("- latest_screen: not attached yet")
     if last_action_kind is not None:

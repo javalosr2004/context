@@ -50,6 +50,10 @@ class HoloClientTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             VisualLocalizerOutput(x1=300, y1=200, x2=100, y2=400)
 
+    def test_visual_localizer_output_rejects_zero_height_bbox(self) -> None:
+        with self.assertRaises(ValidationError):
+            VisualLocalizerOutput(x1=100, y1=200, x2=300, y2=200)
+
     def test_build_user_content_adds_reference_image_after_screenshot(self) -> None:
         content = build_user_content(
             screenshot_data_uri="data:image/png;base64,screen",
@@ -104,6 +108,9 @@ class HoloClientTests(unittest.TestCase):
         self.assertIn("tight bounding box around that element on image 1", prompt)
         self.assertIn("0 is the top/left edge", prompt)
         self.assertIn("1000 is the bottom/right edge", prompt)
+        self.assertIn("y2 is the bottom edge", prompt)
+        self.assertIn("y2 must be greater than y1", prompt)
+        self.assertIn("Never set y2 equal to y1", prompt)
         self.assertIn("Submit", prompt)
 
     def test_locate_uses_openai_compatible_chat_completion(self) -> None:

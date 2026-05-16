@@ -256,7 +256,7 @@ struct ChatPopupView: View {
                     Image(systemName: isInstructionInputVisible ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
 
-                    Text("Screen instruction")
+                    Text("Ask or correct")
                         .font(.caption)
 
                     Spacer()
@@ -278,7 +278,7 @@ struct ChatPopupView: View {
         Group {
             if isInstructionInputVisible {
                 VStack(alignment: .leading, spacing: 10) {
-                    TextField("Instruction", text: $instructionDraft)
+                    TextField("Tell Context what changed...", text: $instructionDraft)
                         .textFieldStyle(.plain)
                         .disabled(isSendingInstruction)
                         .padding(.horizontal, 10)
@@ -512,18 +512,28 @@ struct ChatPopupView: View {
     }
 
     private func tutorialPlanRow(_ plan: TutorialPlan) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(plan.summary)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineSpacing(2)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        let display = TutorialPlanDisplay.make(from: plan, currentStepID: sessionController.currentStepID)
 
-                VStack(spacing: 8) {
-                    ForEach(plan.steps, id: \.stepId) { step in
-                        tutorialStepButton(step)
-                    }
+        return HStack {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(display.goal.isEmpty ? plan.summary : display.goal)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    Text(display.progressText)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let currentStep = display.currentStep {
+                    tutorialCurrentStepCard(currentStep)
+                }
+
+                if !display.upcomingSteps.isEmpty {
+                    upcomingStepList(display.upcomingSteps)
                 }
             }
             .padding(10)
@@ -540,7 +550,8 @@ struct ChatPopupView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func tutorialStepButton(_ step: TutorialStep) -> some View {
+    private func tutorialCurrentStepCard(_ item: TutorialStepDisplayItem) -> some View {
+        let step = item.step
         let isActive = activeStepID == step.stepId
         let isExpanded = expandedStepID == step.stepId
         let isHighlighted = isActive || isExpanded
@@ -549,33 +560,40 @@ struct ChatPopupView: View {
             Button {
                 toggleStepExpansion(step)
             } label: {
-                HStack(alignment: .center, spacing: 9) {
-                    Image(systemName: iconName(for: step.action))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 20, height: 20)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .center, spacing: 9) {
+                        Image(systemName: iconName(for: step.action))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 22, height: 22)
 
-                    Text(step.instruction)
-                        .font(.system(size: 13))
-                        .lineSpacing(2)
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(isExpanded ? nil : 2)
+                        Text(item.title)
+                            .font(.system(size: 16, weight: .semibold))
+                            .lineSpacing(2)
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
 
-                    if isActive {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
+                        if isActive {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                                .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                        }
+                    }
+
+                    if step.requiresConfirmation || step.confidence < 0.7 {
+                        Label("Confirm when the screen looks right", systemImage: "checkmark.circle")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                            .animation(.easeInOut(duration: 0.15), value: isExpanded)
                     }
                 }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -600,6 +618,32 @@ struct ChatPopupView: View {
             RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
                 .stroke(isHighlighted ? Color.accentColor.opacity(0.45) : OverlayTheme.hairline, lineWidth: 1)
         )
+    }
+
+    private func upcomingStepList(_ steps: [TutorialStepDisplayItem]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Next")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(steps) { item in
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text("\(item.stepNumber).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary.opacity(0.8))
+                            .frame(width: 18, alignment: .trailing)
+
+                        Text(item.title)
+                            .font(.system(size: 12))
+                            .lineLimit(2)
+                            .foregroundStyle(.secondary.opacity(0.78))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

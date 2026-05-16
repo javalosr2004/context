@@ -1,6 +1,7 @@
 import io
 
 from PIL import Image
+from fastapi.testclient import TestClient
 
 from app import create_app
 from holo_client import VisualLocalizerOutput
@@ -21,19 +22,16 @@ def png_bytes() -> bytes:
 
 
 def test_predict_returns_context_app_schema():
-    client = create_app(FakeLocalizer()).test_client()
+    client = TestClient(create_app(FakeLocalizer()))
 
     response = client.post(
         "/predict",
-        data={
-            "input_image": (io.BytesIO(png_bytes()), "screen.png"),
-            "instruction": "Submit button",
-        },
-        content_type="multipart/form-data",
+        files={"input_image": ("screen.png", png_bytes(), "image/png")},
+        data={"instruction": "Submit button"},
     )
 
     assert response.status_code == 200
-    body = response.get_json()
+    body = response.json()
     assert body["point"] == {"x": 0.25, "y": 0.75}
     assert body["point_pixel"] == {"x": 50.0, "y": 75.0}
     assert body["bbox_source"] == "holo3_point_box"
@@ -42,9 +40,9 @@ def test_predict_returns_context_app_schema():
 
 
 def test_predict_requires_input_image():
-    client = create_app(FakeLocalizer()).test_client()
+    client = TestClient(create_app(FakeLocalizer()))
 
-    response = client.post("/predict", data={}, content_type="multipart/form-data")
+    response = client.post("/predict", data={})
 
-    assert response.status_code == 400
-    assert response.get_json()["error"] == "Missing multipart file field: input_image"
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "input_image"]

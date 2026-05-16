@@ -1,6 +1,6 @@
 # Holo GUI Grounding
 
-Flask service that adapts H Company Holo3 element localization to the `context-app` grounding response schema.
+FastAPI service that adapts H Company Holo3 element localization to the `context-app` grounding response schema.
 
 ## Run
 
@@ -14,13 +14,13 @@ Then set `HAI_API_KEY` in `.env`.
 
 ```bash
 cd docker/gui-grounding
-flask --app app run --host 0.0.0.0 --port 8000
+./run.sh
 ```
 
 Point `context-app` at:
 
 ```bash
-CONTEXT_GROUNDING_ENDPOINT=http://localhost:8000
+CONTEXT_GROUNDING_ENDPOINT=http://localhost:8080
 ```
 
 The frontend appends `/predict` when needed.
@@ -29,7 +29,7 @@ For Docker, pass the same file at runtime:
 
 ```bash
 docker build -t gui-grounding .
-docker run --env-file .env -p 8000:8000 gui-grounding
+docker run --env-file .env -p 8080:8080 gui-grounding
 ```
 
 ## API

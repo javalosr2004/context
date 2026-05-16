@@ -72,6 +72,23 @@ final class TutorialActionConsumerTests: XCTestCase {
         )
     }
 
+    func testSkipsGroundingForTypeWithoutTarget() {
+        let action: TutorialAction = .type(TypeAction(target: nil, text: "cmd+a"))
+        XCTAssertTrue(TutorialActionConsumer.skipsGrounding(action: action))
+    }
+
+    func testGroundsTypeWithTarget() {
+        let target = ActionTarget(
+            kind: .element,
+            label: "Search",
+            role: "text field",
+            description: nil,
+            textNearby: nil
+        )
+        let action: TutorialAction = .type(TypeAction(target: target, text: "hello"))
+        XCTAssertFalse(TutorialActionConsumer.skipsGrounding(action: action))
+    }
+
     func testConsumeDispatchesGroundingInstruction() async {
         let step = TutorialStep(
             stepId: "step-3",

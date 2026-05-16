@@ -9,7 +9,11 @@ from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta
 from backend.tutorial_guide import generate_draft_plan
 from backend.tutorial_schema import DraftPlan, parse_draft_plan
 from backend.tutorial_session import TutorialSession, render_history, HistoryEntry
-from backend.tutorial_session_events import DraftPlanReadyEvent
+from backend.tutorial_session_events import (
+    DraftPlanReadyEvent,
+    ScreenRequestedEvent,
+    ScreenSnapshot,
+)
 
 
 VALID_DRAFT_JSON = (
@@ -106,6 +110,7 @@ class SessionDraftPlanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         llm = FakeLLMReturningDraft()
         session = TutorialSession(session_id="s1", llm=llm, emit=emit)
         await session.handle_user_message("open my Canvas course")
+        await send_screen_if_requested(session, events)
 
         for task in (session.current_task, session.draft_plan_task):
             if task is not None:
@@ -118,6 +123,27 @@ class SessionDraftPlanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(draft_events), 1)
         self.assertEqual(draft_events[0].plan.goal, "open my Canvas course")
         self.assertIs(session.draft_plan, draft_events[0].plan)
+
+    async def test_draft_plan_waits_for_fresh_screen(self) -> None:
+        events: list[Any] = []
+
+        async def emit(event: Any) -> None:
+            events.append(event)
+
+        llm = FakeLLMReturningDraft()
+        session = TutorialSession(session_id="s1", llm=llm, emit=emit)
+        await session.handle_user_message("open my Canvas course")
+
+        await wait_until(lambda: session.pending_screen_request_id is not None)
+        self.assertEqual(llm.complete_text_requests, [])
+
+        await send_screen_if_requested(session, events)
+
+        if session.draft_plan_task is not None:
+            await asyncio.wait_for(session.draft_plan_task, timeout=2.0)
+
+        self.assertEqual(len(llm.complete_text_requests), 1)
+        self.assertIs(llm.complete_text_requests[0].images[0], session.latest_screen)
 
     async def test_draft_plan_is_injected_into_llm_request(self) -> None:
         llm = FakeLLMReturningDraft()
@@ -146,6 +172,7 @@ class SessionDraftPlanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         session = TutorialSession(session_id="s1", llm=llm, emit=emit)
         await session.handle_user_message("first goal")
         await session.handle_user_message("second goal")
+        await send_screen_if_requested(session, events)
 
         for task in (session.current_task, session.draft_plan_task):
             if task is not None:
@@ -163,6 +190,43 @@ class SessionDraftPlanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # same JSON), but the session must have only adopted one whose
         # generation observed the latest goal.
         self.assertGreaterEqual(len(adopted), 1)
+
+
+async def send_screen_if_requested(
+    session: TutorialSession,
+    events: list[Any],
+) -> None:
+    await wait_until(
+        lambda: any(
+            isinstance(e, ScreenRequestedEvent)
+            and e.request_id == session.pending_screen_request_id
+            for e in events
+        )
+    )
+    request_id = session.pending_screen_request_id
+    if request_id is None:
+        return
+    await session.handle_user_screen(
+        request_id,
+        ScreenSnapshot(mime_type="image/png", data_base64=tiny_png_base64()),
+    )
+    await wait_until(lambda: session.pending_screen_request_id != request_id)
+
+
+async def wait_until(predicate, timeout: float = 2.0) -> None:
+    elapsed = 0.0
+    while not predicate():
+        await asyncio.sleep(0.01)
+        elapsed += 0.01
+        if elapsed > timeout:
+            raise AssertionError("Timed out waiting for predicate")
+
+
+def tiny_png_base64() -> str:
+    return (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAen"
+        "k1AAAAABJRU5ErkJggg=="
+    )
 
 
 if __name__ == "__main__":

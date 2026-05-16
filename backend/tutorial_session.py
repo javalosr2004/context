@@ -89,6 +89,7 @@ class TutorialSession:
     plan_steps: list[TutorialStep] = field(default_factory=list)
     completed_step_ids: list[str] = field(default_factory=list)
     latest_screen: UploadedImage | None = None
+    uploaded_images: list[UploadedImage] = field(default_factory=list)
     pending_screen: asyncio.Future[UploadedImage] | None = None
     pending_screen_request_id: str | None = None
     pending_step_starts: set[str] = field(default_factory=set)
@@ -112,19 +113,25 @@ class TutorialSession:
 
     # -------- Public entry points (driven by the WS handler) --------
 
-    async def handle_user_message(self, text: str) -> None:
+    async def handle_user_message(
+        self,
+        text: str,
+        uploaded_images: list[ScreenSnapshot] | None = None,
+    ) -> None:
         text = text.strip()
         if not text:
             return
         await self._cancel_current_task()
 
+        message_images = uploaded_images_from_snapshots(uploaded_images or [])
         intent = await self._classify_message_intent(text)
         if intent == "new_goal":
-            await self._reset_for_new_goal(text)
+            await self._reset_for_new_goal(text, message_images)
         else:
+            self.uploaded_images.extend(message_images)
             self.history.append(HistoryEntry(role="user", content=text))
 
-        await self._start_task(self._run_session())
+        await self._start_task(self._run_session(refresh_screen=True))
 
     async def _classify_message_intent(self, text: str) -> str:
         """Decide whether `text` is a new goal or a follow-up.
@@ -150,18 +157,22 @@ class TutorialSession:
             )
             return "follow_up"
 
-    async def _reset_for_new_goal(self, text: str) -> None:
+    async def _reset_for_new_goal(
+        self,
+        text: str,
+        uploaded_images: list[UploadedImage],
+    ) -> None:
         await self._cancel_draft_task()
         self.goal = text
         self.plan_steps = []
         self.completed_step_ids = []
         self.plan_emitted = False
         self.draft_plan = None
+        self.uploaded_images = list(uploaded_images)
         self.step_counter = 0
         self.last_action_kind = None
         self.screen_is_stale = False
         self.history.append(HistoryEntry(role="user", content=text))
-        self._kick_off_draft_plan()
 
     async def handle_user_screen(
         self,
@@ -230,8 +241,13 @@ class TutorialSession:
 
     # -------- Top-level session coroutine --------
 
-    async def _run_session(self) -> None:
+    async def _run_session(self, refresh_screen: bool = False) -> None:
         try:
+            if refresh_screen:
+                await self._request_screen(
+                    "Capturing the current screen alongside the user's message."
+                )
+                self._kick_off_draft_plan()
             any_steps_walked = False
             while True:
                 await self._run_agent_loop()
@@ -518,30 +534,44 @@ class TutorialSession:
                 completed_step_ids=self.completed_step_ids,
                 last_action_kind=self.last_action_kind,
                 screen_is_stale=self.screen_is_stale,
+                uploaded_image_count=len(self.uploaded_images),
             ),
-            images=[self.latest_screen] if self.latest_screen is not None else [],
+            images=self._llm_images(),
             enable_search_grounding=False,
             temperature=0,
         )
         return request
 
+    def _llm_images(self) -> list[UploadedImage]:
+        images: list[UploadedImage] = []
+        if self.latest_screen is not None:
+            images.append(self.latest_screen)
+        images.extend(self.uploaded_images)
+        return images
+
     # -------- Draft plan (Slice A) --------
 
     def _kick_off_draft_plan(self) -> None:
-        if self.goal is None:
+        if self.goal is None or self.draft_plan is not None:
+            return
+        if self.draft_plan_task is not None and not self.draft_plan_task.done():
             return
         goal = self.goal
         image = self.latest_screen
+        images = list(self.uploaded_images)
         self.draft_plan_task = asyncio.create_task(
-            self._run_draft_plan(goal, image)
+            self._run_draft_plan(goal, image, images)
         )
 
     async def _run_draft_plan(
-        self, goal: str, image: UploadedImage | None
+        self,
+        goal: str,
+        image: UploadedImage | None,
+        images: list[UploadedImage],
     ) -> None:
         try:
             plan = await asyncio.to_thread(
-                generate_draft_plan, self.llm, goal, image
+                generate_draft_plan, self.llm, goal, image, images
             )
         except asyncio.CancelledError:
             raise
@@ -660,13 +690,16 @@ class TutorialSession:
         await self.emit(StatusChangedEvent(status="planning", label="Thinking"))
 
     async def _request_fresh_screen_after_user_action(self) -> None:
+        await self._request_screen(
+            "Need to verify the current screen after the user action "
+            "before planning the next instruction."
+        )
+
+    async def _request_screen(self, reason: str) -> None:
         self.latest_screen = None
         call = TutorialToolCall(
             name=REQUEST_SCREEN_TOOL_NAME,
-            arguments=(
-                '{"reason":"Need to verify the current screen after the user action '
-                'before planning the next instruction."}'
-            ),
+            arguments=json.dumps({"reason": reason}),
         )
         await self._execute_screen_request(call)
 
@@ -804,6 +837,7 @@ def render_history(
     goal: str,
     history: list[HistoryEntry],
     has_latest_screen: bool = False,
+    uploaded_image_count: int = 0,
     draft_plan: DraftPlan | None = None,
     plan_steps: list[TutorialStep] | None = None,
     completed_step_ids: list[str] | None = None,
@@ -826,6 +860,18 @@ def render_history(
             lines.append("- latest_screen: attached to this request")
     else:
         lines.append("- latest_screen: not attached yet")
+    if uploaded_image_count:
+        start_index = 2 if has_latest_screen else 1
+        end_index = start_index + uploaded_image_count - 1
+        if start_index == end_index:
+            lines.append(
+                f"- uploaded_reference_images: 1 attached as image {start_index}"
+            )
+        else:
+            lines.append(
+                "- uploaded_reference_images: "
+                f"{uploaded_image_count} attached as images {start_index}-{end_index}"
+            )
     if last_action_kind is not None:
         lines.append(f"- last_completed_action: {last_action_kind}")
     lines.append("")
@@ -899,3 +945,16 @@ def uploaded_image_from_snapshot(snapshot: ScreenSnapshot) -> UploadedImage:
         mime_type=snapshot.mime_type,
         filename="screen",
     )
+
+
+def uploaded_images_from_snapshots(
+    snapshots: list[ScreenSnapshot],
+) -> list[UploadedImage]:
+    return [
+        UploadedImage(
+            data=base64.b64decode(snapshot.data_base64),
+            mime_type=snapshot.mime_type,
+            filename=f"uploaded_image_{index:03}",
+        )
+        for index, snapshot in enumerate(snapshots, start=1)
+    ]

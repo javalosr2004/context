@@ -124,7 +124,9 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case textResponse(String)
     case planReady(TutorialPlan)
     case planUpdated(TutorialPlan)
+    case draftPlanReady(DraftPlan)
     case tutorialAction(TutorialStep)
+    case unknown(type: String)
     case stepReady(stepID: String)
     case awaitingConfirmation(stepID: String)
     case screenRequested(requestID: String, reason: String)
@@ -166,6 +168,8 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .planReady(try container.decode(TutorialPlan.self, forKey: .plan))
         case "plan_updated":
             self = .planUpdated(try container.decode(TutorialPlan.self, forKey: .plan))
+        case "draft_plan_ready":
+            self = .draftPlanReady(try container.decode(DraftPlan.self, forKey: .plan))
         case "tutorial_action":
             self = .tutorialAction(try container.decode(TutorialStep.self, forKey: .step))
         case "step_ready":
@@ -185,11 +189,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
                 message: try container.decode(String.self, forKey: .message)
             )
         default:
-            throw DecodingError.dataCorruptedError(
-                forKey: .type,
-                in: container,
-                debugDescription: "Unknown tutorial session server event type '\(type)'."
-            )
+            self = .unknown(type: type)
         }
     }
 
@@ -216,6 +216,11 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case .planUpdated(let plan):
             try container.encode("plan_updated", forKey: .type)
             try container.encode(plan, forKey: .plan)
+        case .draftPlanReady(let plan):
+            try container.encode("draft_plan_ready", forKey: .type)
+            try container.encode(plan, forKey: .plan)
+        case .unknown(let type):
+            try container.encode(type, forKey: .type)
         case .tutorialAction(let step):
             try container.encode("tutorial_action", forKey: .type)
             try container.encode(step, forKey: .step)

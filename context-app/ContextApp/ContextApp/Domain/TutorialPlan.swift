@@ -46,6 +46,52 @@ struct TutorialPlan: Codable, Equatable {
     }
 }
 
+struct DraftPlan: Codable, Equatable {
+    static let supportedSchemaVersion = "draft_plan.v1"
+
+    let schemaVersion: String
+    let goal: String
+    let steps: [DraftStep]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case goal
+        case steps
+    }
+
+    init(
+        schemaVersion: String = Self.supportedSchemaVersion,
+        goal: String,
+        steps: [DraftStep]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.goal = goal
+        self.steps = steps
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let schemaVersion = try container.decode(String.self, forKey: .schemaVersion)
+
+        guard schemaVersion == Self.supportedSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Unsupported draft plan schema_version '\(schemaVersion)'. Expected '\(Self.supportedSchemaVersion)'."
+            )
+        }
+
+        self.schemaVersion = schemaVersion
+        self.goal = try container.decode(String.self, forKey: .goal)
+        self.steps = try container.decode([DraftStep].self, forKey: .steps)
+    }
+}
+
+struct DraftStep: Codable, Equatable {
+    let instruction: String
+    let kind: String
+}
+
 struct TutorialStep: Codable, Equatable {
     let stepId: String
     let instruction: String

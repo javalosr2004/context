@@ -46,6 +46,7 @@ enum TutorialSessionUIStatus: Equatable {
 final class TutorialSessionController: ObservableObject {
     @Published private(set) var awaitingConfirmationStepID: String?
     @Published private(set) var currentStepID: String?
+    @Published private(set) var draftPlan: DraftPlan?
     @Published private(set) var messages: [ChatMessage]
     @Published private(set) var pendingContinuePromptStepID: String?
     @Published private(set) var status: TutorialSessionUIStatus = .ready
@@ -153,6 +154,7 @@ final class TutorialSessionController: ObservableObject {
         currentStepID = nil
         awaitingConfirmationStepID = nil
         pendingContinuePromptStepID = nil
+        draftPlan = nil
         status = .ready
         messageStore.removeAll()
         messages = messageStore.messages
@@ -299,8 +301,12 @@ final class TutorialSessionController: ObservableObject {
             appendTutorialPlan(plan)
             status = .ready
         case .planUpdated(let plan):
-            appendTutorialPlan(plan)
+            replaceLatestTutorialPlan(plan)
             status = .ready
+        case .draftPlanReady(let plan):
+            draftPlan = plan
+        case .unknown(let type):
+            logger.debug("Ignoring unknown tutorial session event '\(type, privacy: .public)'")
         case .tutorialAction(let step):
             applyTutorialAction(step)
         case .stepReady(let stepID):
@@ -338,6 +344,11 @@ final class TutorialSessionController: ObservableObject {
 
     private func appendTutorialPlan(_ plan: TutorialPlan) {
         guard messageStore.appendTutorialPlan(plan) != nil else { return }
+        messages = messageStore.messages
+    }
+
+    private func replaceLatestTutorialPlan(_ plan: TutorialPlan) {
+        guard messageStore.replaceLatestTutorialPlan(plan) != nil else { return }
         messages = messageStore.messages
     }
 

@@ -25,6 +25,7 @@ struct ChatPopupView: View {
     @State private var activeStepID: String?
     @State private var expandedStepID: String?
     @State private var draft = ""
+    @State private var isDraftPlanPreviewVisible = false
     @State private var stepJSONPreview: StepJSONPreview?
     @State private var instructionDraft = ""
     @State private var isInstructionInputVisible = false
@@ -77,6 +78,11 @@ struct ChatPopupView: View {
         .sheet(item: $stepJSONPreview) { preview in
             StepJSONPreviewSheet(preview: preview)
         }
+        .sheet(isPresented: $isDraftPlanPreviewVisible) {
+            if let plan = sessionController.draftPlan {
+                DraftPlanPreviewSheet(plan: plan)
+            }
+        }
     }
 
     private var header: some View {
@@ -93,6 +99,19 @@ struct ChatPopupView: View {
             }
 
             Spacer()
+
+            if sessionController.draftPlan != nil {
+                Button {
+                    isDraftPlanPreviewVisible = true
+                } label: {
+                    Image(systemName: "book")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Show draft plan")
+            }
 
             Button(action: startNewChat) {
                 Image(systemName: "square.and.pencil")
@@ -931,5 +950,71 @@ private struct StepJSONPreviewSheet: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(preview.json, forType: .string)
+    }
+}
+
+private struct DraftPlanPreviewSheet: View {
+    let plan: DraftPlan
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Draft plan")
+                    .font(.system(size: 14, weight: .semibold))
+
+                Text(plan.goal)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(plan.steps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(index + 1).")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, alignment: .trailing)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(step.instruction)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .multilineTextAlignment(.leading)
+
+                                Text(step.kind)
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(OverlayTheme.quietFill)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(OverlayTheme.strongerFill)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+                    }
+                }
+                .padding(2)
+            }
+            .frame(width: 420, height: 320)
+
+            HStack {
+                Spacer()
+
+                Button("Dismiss") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 452)
     }
 }

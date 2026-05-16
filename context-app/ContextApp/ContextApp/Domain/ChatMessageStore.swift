@@ -106,6 +106,28 @@ final class ChatMessageStore {
         append(role: .tutorial, content: .tutorialPlan(plan), now: now)
     }
 
+    @discardableResult
+    func replaceLatestTutorialPlan(_ plan: TutorialPlan, now: () -> Date = Date.init) -> ChatMessage? {
+        let matchingIndex = messages.lastIndex { message in
+            if case .tutorialPlan = message.content { return true }
+            return false
+        }
+
+        guard let index = matchingIndex else {
+            return appendTutorialPlan(plan, now: now)
+        }
+
+        let existing = messages[index]
+        let updated = ChatMessage(
+            id: existing.id,
+            role: .tutorial,
+            content: .tutorialPlan(plan),
+            createdAt: existing.createdAt
+        )
+        messages[index] = updated
+        return updated
+    }
+
     func removeAll() {
         messages.removeAll()
     }

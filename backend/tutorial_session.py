@@ -301,6 +301,40 @@ class TutorialSession:
             )
 
             if not tool_calls:
+                if self.screen_is_stale:
+                    logger.info(
+                        "Forcing tutorial_request_screen on text-only turn with stale screen",
+                        extra={
+                            "session_id": self.session_id,
+                            "last_action_kind": self.last_action_kind,
+                            "dropped_text_chars": len(text),
+                        },
+                    )
+                    self.history.append(
+                        HistoryEntry(
+                            role="tool",
+                            content=(
+                                "Loop guard: dropped text response because the "
+                                f"screen is stale after a {self.last_action_kind}. "
+                                "Requesting a fresh screen and re-planning."
+                            ),
+                        )
+                    )
+                    synthetic_reason = (
+                        f"verifying the result of the last {self.last_action_kind} "
+                        "before continuing"
+                    )
+                    consecutive_screen_requests += 1
+                    if consecutive_screen_requests >= MAX_CONSECUTIVE_SCREEN_REQUESTS:
+                        await self._emit_screen_request_stall(synthetic_reason)
+                        return
+                    await self._execute_screen_request(
+                        TutorialToolCall(
+                            name=REQUEST_SCREEN_TOOL_NAME,
+                            arguments=json.dumps({"reason": synthetic_reason}),
+                        )
+                    )
+                    continue
                 if text.strip():
                     self.history.append(HistoryEntry(role="assistant", content=text))
                     await self.emit(TextResponseEventLike(text=text))

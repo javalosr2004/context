@@ -597,7 +597,7 @@ class TutorialSession:
         self.history.append(
             HistoryEntry(
                 role="assistant",
-                content=f"called {call.name}({call.arguments})",
+                content=f"called {call.name}({_redact_action_args(call.arguments)})",
             )
         )
         self.history.append(
@@ -856,6 +856,21 @@ def render_history(
     for entry in history:
         lines.append(f"[{entry.role}] {entry.content}")
     return "\n".join(lines)
+
+
+def _redact_action_args(arguments: str) -> str:
+    """Drop perception-shaped fields from a tool-call arg string before it
+    enters history. agent_description and confidence are evidence for a single
+    decision; replaying them as 'facts' in the prompt makes the model anchor
+    on its own prior description rather than the fresh screen."""
+    try:
+        parsed = json.loads(arguments)
+    except (TypeError, ValueError):
+        return arguments
+    if not isinstance(parsed, dict):
+        return arguments
+    keep = {k: v for k, v in parsed.items() if k not in {"agent_description", "confidence"}}
+    return json.dumps(keep, ensure_ascii=False)
 
 
 def first_request_screen_call(

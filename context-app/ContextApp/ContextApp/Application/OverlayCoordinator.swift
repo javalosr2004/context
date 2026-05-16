@@ -20,6 +20,7 @@ final class OverlayCoordinator {
     private var tutorialPlanController: TutorialPlanController?
     private var tutorialSessionController: TutorialSessionController?
     private let stabilityWatcher = ScreenStabilityWatcher()
+    private var stabilityIndicator: StabilityIndicatorController?
 
     init(screenProvider: @escaping () -> NSScreen?) {
         self.screenProvider = screenProvider
@@ -31,6 +32,8 @@ final class OverlayCoordinator {
         let popupPanel = PopupPanel(frame: initialPopupFrame(on: screen.frame))
         let iconPanel = IconPanel(frame: initialIconFrame(on: screen.frame))
         let bboxPanel = DebugBboxPanel(frame: CGRect(origin: .zero, size: DebugBoundingBox.size))
+        let stabilityIndicator = StabilityIndicatorController(screenProvider: screenProvider)
+        self.stabilityIndicator = stabilityIndicator
 
         var sessionControllerRef: TutorialSessionController?
         let focusMaskController = FocusMaskController(
@@ -41,13 +44,23 @@ final class OverlayCoordinator {
             onExit: { [weak bboxPanel] in
                 bboxPanel?.orderOut(nil)
             },
-            onInsideClick: { [weak bboxPanel, weak self, screenProvider] in
+            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak iconPanel, screenProvider] in
                 bboxPanel?.orderOut(nil)
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID else { return }
                 Task { @MainActor in
-                    if let screen = screenProvider() {
-                        await self?.stabilityWatcher.waitUntilStable(on: screen)
+                    if let screen = screenProvider(), let self {
+                        self.stabilityIndicator?.show()
+                        let excluded: [NSWindow] = [popupPanel, iconPanel, self.stabilityIndicator?.window]
+                            .compactMap { $0 }
+                        await self.stabilityWatcher.waitUntilStable(
+                            on: screen,
+                            excludingWindows: excluded,
+                            onProgress: { [weak self] diff in
+                                Task { @MainActor in self?.stabilityIndicator?.update(diff: diff) }
+                            }
+                        )
+                        self.stabilityIndicator?.hide()
                     }
                     await sessionController.confirmStep(stepID: stepID, confirmed: true, note: nil)
                 }

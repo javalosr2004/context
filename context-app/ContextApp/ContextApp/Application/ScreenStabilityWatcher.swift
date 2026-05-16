@@ -29,7 +29,11 @@ final class ScreenStabilityWatcher {
 
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
-    func waitUntilStable(on screen: NSScreen) async {
+    func waitUntilStable(
+        on screen: NSScreen,
+        excludingWindows: [NSWindow] = [],
+        onProgress: ((Double) -> Void)? = nil
+    ) async {
         let displayID: CGDirectDisplayID
         do {
             displayID = try Self.displayID(for: screen)
@@ -40,7 +44,11 @@ final class ScreenStabilityWatcher {
         let collector = FrameCollector()
         let stream: SCStream
         do {
-            stream = try await Self.makeStream(displayID: displayID, collector: collector)
+            stream = try await Self.makeStream(
+                displayID: displayID,
+                excludingWindows: excludingWindows,
+                collector: collector
+            )
         } catch {
             return
         }
@@ -60,6 +68,7 @@ final class ScreenStabilityWatcher {
             else {
                 continue
             }
+            onProgress?(diff)
             if diff <= Self.stabilityThreshold {
                 return
             }
@@ -112,6 +121,7 @@ final class ScreenStabilityWatcher {
 
     private static func makeStream(
         displayID: CGDirectDisplayID,
+        excludingWindows: [NSWindow],
         collector: FrameCollector
     ) async throws -> SCStream {
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -123,7 +133,9 @@ final class ScreenStabilityWatcher {
             throw ScreenStabilityWatcherError.noDisplay
         }
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let excludedIDs = Set(excludingWindows.map { CGWindowID($0.windowNumber) })
+        let excludedSCWindows = content.windows.filter { excludedIDs.contains($0.windowID) }
+        let filter = SCContentFilter(display: display, excludingWindows: excludedSCWindows)
         let config = SCStreamConfiguration()
         let halfWidth = max(1, display.width / 2)
         let halfHeight = max(1, display.height / 2)

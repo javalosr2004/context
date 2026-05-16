@@ -40,12 +40,15 @@ final class ChatMessageStore {
 
     @discardableResult
     func appendUserText(_ text: String, now: () -> Date = Date.init) -> ChatMessage? {
-        append(role: .user, content: .text(text), now: now)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return append(role: .user, content: .text(trimmed), now: now)
     }
 
     @discardableResult
     func appendTutorialText(_ text: String, now: () -> Date = Date.init) -> ChatMessage? {
-        append(role: .tutorial, content: .text(text), now: now)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return append(role: .tutorial, content: .text(text), now: now)
     }
 
     @discardableResult

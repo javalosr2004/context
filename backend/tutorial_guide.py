@@ -100,6 +100,18 @@ Tool rules:
   may be stale, when the visible target is ambiguous, or after a user action
   changes the screen and the next step depends on the result. Do not guess at
   concrete UI details to avoid asking for a screen.
+- After a tutorial_scroll, you MUST call tutorial_request_screen before
+  emitting another scroll, click, or type. The previous view is stale and
+  you cannot tell whether the expected_end_state was reached without a fresh
+  screen. The only exception is when the next step is unconditional
+  regardless of what the scroll revealed (rare).
+- If the same expected_end_state has not been reached after 2 attempts of
+  the same action (e.g. two scrolls in the same direction, two clicks on
+  the same target), stop repeating. Either request a screen, switch
+  strategy (different direction, keyboard shortcut, search field, a
+  different region of the UI), or ask the user in plain text what they
+  currently see. Repeating a failing action a third time is never the
+  right move.
 - If the loop state says no screen is attached and the user wants help with
   something on their screen, request a screen before planning concrete steps.
 - If the wrong app or window appears to be open, you may either guide the user

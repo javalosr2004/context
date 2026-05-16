@@ -12,6 +12,8 @@ from backend.openai_client import OpenAIClient
 DEFAULT_LLM_PROVIDER = "gemini"
 DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+DEFAULT_HOLO_BASE_URL = "https://api.hcompany.ai/v1/"
+DEFAULT_HOLO_MODEL = "holo3-35b-a3b"
 DEFAULT_OPENAI_REASONING_EFFORT = "medium"
 DEFAULT_OPENAI_VERBOSITY = "medium"
 
@@ -34,6 +36,8 @@ class LLMProvider:
             return self._create_gemini_client()
         if provider == "openai":
             return self._create_openai_client()
+        if provider == "holo":
+            return self._create_holo_client()
 
         raise LLMProviderConfigurationError(f"Unsupported LLM_PROVIDER: {provider}")
 
@@ -59,6 +63,25 @@ class LLMProvider:
         return OpenAIClient(
             api_key=api_key,
             model=model,
+            reasoning_effort=self.environment.get(
+                "OPENAI_REASONING_EFFORT", DEFAULT_OPENAI_REASONING_EFFORT
+            ),
+            verbosity=self.environment.get(
+                "OPENAI_VERBOSITY", DEFAULT_OPENAI_VERBOSITY
+            ),
+        )
+
+    def _create_holo_client(self) -> OpenAIClient:
+        api_key = self._required("HAI_API_KEY")
+        model = (
+            self.environment.get("HOLO_MODEL")
+            or self.environment.get("LLM_MODEL")
+            or DEFAULT_HOLO_MODEL
+        )
+        return OpenAIClient(
+            api_key=api_key,
+            model=model,
+            base_url=self.environment.get("HAI_BASE_URL") or DEFAULT_HOLO_BASE_URL,
             reasoning_effort=self.environment.get(
                 "OPENAI_REASONING_EFFORT", DEFAULT_OPENAI_REASONING_EFFORT
             ),

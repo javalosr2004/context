@@ -18,8 +18,12 @@ class OpenAIClient:
         model: str,
         reasoning_effort: str = "medium",
         verbosity: str = "medium",
+        base_url: str | None = None,
     ) -> None:
-        self._client = OpenAI(api_key=api_key)
+        client_options: dict[str, str] = {"api_key": api_key}
+        if base_url is not None:
+            client_options["base_url"] = base_url
+        self._client = OpenAI(**client_options)
         self._model = model
         self._reasoning_effort = reasoning_effort
         self._verbosity = verbosity

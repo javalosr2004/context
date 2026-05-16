@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from backend.llm_provider import (
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_HOLO_BASE_URL,
+    DEFAULT_HOLO_MODEL,
     DEFAULT_OPENAI_MODEL,
     LLMProvider,
     LLMProviderConfigurationError,
@@ -93,6 +95,48 @@ class LLMProviderTests(unittest.TestCase):
             verbosity="medium",
         )
 
+    def test_creates_holo_client_from_openai_compatible_environment(self) -> None:
+        with patch("backend.llm_provider.OpenAIClient") as openai_client:
+            client = object()
+            openai_client.return_value = client
+
+            llm = LLMProvider(
+                {
+                    "LLM_PROVIDER": "holo",
+                    "HAI_API_KEY": "hai-key",
+                    "HAI_BASE_URL": "https://holo.example/v1/",
+                    "HOLO_MODEL": "holo-test-model",
+                    "OPENAI_REASONING_EFFORT": "low",
+                    "OPENAI_VERBOSITY": "high",
+                }
+            ).create_multimodal_llm()
+
+        self.assertIs(llm, client)
+        openai_client.assert_called_once_with(
+            api_key="hai-key",
+            model="holo-test-model",
+            base_url="https://holo.example/v1/",
+            reasoning_effort="low",
+            verbosity="high",
+        )
+
+    def test_defaults_to_holo_model_and_base_url(self) -> None:
+        with patch("backend.llm_provider.OpenAIClient") as openai_client:
+            LLMProvider(
+                {
+                    "LLM_PROVIDER": "holo",
+                    "HAI_API_KEY": "hai-key",
+                }
+            ).create_multimodal_llm()
+
+        openai_client.assert_called_once_with(
+            api_key="hai-key",
+            model=DEFAULT_HOLO_MODEL,
+            base_url=DEFAULT_HOLO_BASE_URL,
+            reasoning_effort="medium",
+            verbosity="medium",
+        )
+
     def test_rejects_unsupported_provider(self) -> None:
         with self.assertRaisesRegex(
             LLMProviderConfigurationError,
@@ -113,6 +157,13 @@ class LLMProviderTests(unittest.TestCase):
             "OPENAI_API_KEY is required",
         ):
             LLMProvider({"LLM_PROVIDER": "openai"}).create_multimodal_llm()
+
+    def test_requires_holo_api_key(self) -> None:
+        with self.assertRaisesRegex(
+            LLMProviderConfigurationError,
+            "HAI_API_KEY is required",
+        ):
+            LLMProvider({"LLM_PROVIDER": "holo"}).create_multimodal_llm()
 
 
 if __name__ == "__main__":

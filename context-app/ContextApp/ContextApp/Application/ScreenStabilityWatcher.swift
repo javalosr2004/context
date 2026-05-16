@@ -221,7 +221,9 @@ final class ScreenStabilityWatcher {
 
 private struct TimedFrame {
     let image: CIImage
-    let timestamp: Date
+    /// Capture-side presentation timestamp in seconds. Stable against burst
+    /// delivery from SCStream's internal queue.
+    let timestampSeconds: Double
 }
 
 private final class FrameCollector: NSObject, SCStreamOutput {
@@ -239,8 +241,8 @@ private final class FrameCollector: NSObject, SCStreamOutput {
         lock.lock()
         defer { lock.unlock() }
         guard let latest = frames.last else { return nil }
-        let cutoff = latest.timestamp.addingTimeInterval(-window)
-        guard let past = frames.last(where: { $0.timestamp <= cutoff }) else { return nil }
+        let cutoff = latest.timestampSeconds - window
+        guard let past = frames.last(where: { $0.timestampSeconds <= cutoff }) else { return nil }
         return (latest.image, past.image)
     }
 
@@ -250,12 +252,13 @@ private final class FrameCollector: NSObject, SCStreamOutput {
         of type: SCStreamOutputType
     ) {
         guard type == .screen, let pixelBuffer = sampleBuffer.imageBuffer else { return }
+        let pts = CMTimeGetSeconds(sampleBuffer.presentationTimeStamp)
+        guard pts.isFinite else { return }
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        let now = Date()
         lock.lock()
-        frames.append(TimedFrame(image: image, timestamp: now))
-        let cutoff = now.addingTimeInterval(-maxAge)
-        frames.removeAll(where: { $0.timestamp < cutoff })
+        frames.append(TimedFrame(image: image, timestampSeconds: pts))
+        let cutoff = pts - maxAge
+        frames.removeAll(where: { $0.timestampSeconds < cutoff })
         lock.unlock()
     }
 }

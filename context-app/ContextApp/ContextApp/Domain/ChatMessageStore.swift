@@ -26,7 +26,7 @@ final class ChatMessageStore {
         content: ChatMessageContent,
         now: () -> Date = Date.init
     ) -> ChatMessage? {
-        guard let normalizedContent = normalized(content) else { return nil }
+        guard let normalizedContent = normalized(content, role: role) else { return nil }
 
         let message = ChatMessage(
             id: UUID(),
@@ -49,6 +49,56 @@ final class ChatMessageStore {
     }
 
     @discardableResult
+    func appendTutorialTextDelta(_ text: String, now: () -> Date = Date.init) -> ChatMessage? {
+        guard
+            let lastIndex = messages.indices.last,
+            messages[lastIndex].role == .tutorial,
+            case .text(let existingText) = messages[lastIndex].content
+        else {
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            return appendTutorialText(text, now: now)
+        }
+
+        guard !text.isEmpty else { return nil }
+
+        let existingMessage = messages[lastIndex]
+        let updatedMessage = ChatMessage(
+            id: existingMessage.id,
+            role: existingMessage.role,
+            content: .text(existingText + text),
+            createdAt: existingMessage.createdAt
+        )
+        messages[lastIndex] = updatedMessage
+        return updatedMessage
+    }
+
+    @discardableResult
+    func replaceLastTutorialText(_ text: String) -> ChatMessage? {
+        guard let normalizedContent = normalized(.text(text), role: .tutorial) else {
+            return nil
+        }
+        guard
+            let lastIndex = messages.indices.last,
+            messages[lastIndex].role == .tutorial,
+            case .text = messages[lastIndex].content
+        else {
+            return appendTutorialText(text)
+        }
+
+        let existingMessage = messages[lastIndex]
+        let updatedMessage = ChatMessage(
+            id: existingMessage.id,
+            role: existingMessage.role,
+            content: normalizedContent,
+            createdAt: existingMessage.createdAt
+        )
+        messages[lastIndex] = updatedMessage
+        return updatedMessage
+    }
+
+    @discardableResult
     func appendTutorialPlan(_ plan: TutorialPlan, now: () -> Date = Date.init) -> ChatMessage? {
         append(role: .tutorial, content: .tutorialPlan(plan), now: now)
     }
@@ -57,12 +107,17 @@ final class ChatMessageStore {
         messages.removeAll()
     }
 
-    private func normalized(_ content: ChatMessageContent) -> ChatMessageContent? {
+    private func normalized(_ content: ChatMessageContent, role: ChatMessageRole) -> ChatMessageContent? {
         switch content {
         case .text(let text):
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedText.isEmpty else { return nil }
-            return .text(trimmedText)
+            guard !trimmedText.isEmpty else {
+                return nil
+            }
+            if role == .user {
+                return .text(trimmedText)
+            }
+            return .text(text)
         case .tutorialPlan:
             return content
         }

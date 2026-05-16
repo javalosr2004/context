@@ -144,6 +144,22 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         XCTAssertEqual(text, "RunPod is a cloud GPU platform.")
     }
 
+    func testServerEventDecodingTutorialTextDelta() throws {
+        let data = Data("""
+        {
+          "type": "tutorial_text_delta",
+          "text": "RunPod"
+        }
+        """.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .textDelta(let text) = event else {
+            return XCTFail("Expected textDelta, got \(event)")
+        }
+        XCTAssertEqual(text, "RunPod")
+    }
+
     func testStatusLabelsAndBusyStates() {
         XCTAssertEqual(TutorialSessionUIStatus.preparingScreen.label, "Preparing screen")
         XCTAssertTrue(TutorialSessionUIStatus.sending.isBusy)

@@ -15,7 +15,7 @@ struct CapturedScreenFrame {
 struct ScreenFrameEncodingConfig {
     static let groundingRequest = ScreenFrameEncodingConfig(
         jpegCompressionQuality: 0.70,
-        maxPixelWidth: 1280
+        maxPixelWidth: 1920
     )
 
     let jpegCompressionQuality: CGFloat

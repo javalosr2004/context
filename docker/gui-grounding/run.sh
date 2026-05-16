@@ -21,4 +21,5 @@ uv pip install --python .venv/bin/python -r requirements.txt
 exec .venv/bin/python -m uvicorn app:app \
   --host "${HOST:-0.0.0.0}" \
   --port "${PORT:-8080}" \
+  --reload \
   --env-file "${ENV_FILE}"

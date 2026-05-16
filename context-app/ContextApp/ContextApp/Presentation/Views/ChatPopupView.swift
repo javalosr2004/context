@@ -482,12 +482,13 @@ struct ChatPopupView: View {
         .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
     }
 
-    private func chatText(_ text: String, role: ChatMessageRole) -> Text {
-        guard role == .tutorial, let markdown = try? AttributedString(markdown: text) else {
-            return Text(text)
+    @ViewBuilder
+    private func chatText(_ text: String, role: ChatMessageRole) -> some View {
+        if role == .tutorial {
+            MarkdownTextView(text: text)
+        } else {
+            Text(text)
         }
-
-        return Text(markdown)
     }
 
     private func tutorialPlanRow(_ plan: TutorialPlan) -> some View {

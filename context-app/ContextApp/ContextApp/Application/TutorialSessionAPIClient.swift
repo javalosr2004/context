@@ -120,6 +120,7 @@ enum TutorialSessionClientEvent: Codable, Equatable {
 enum TutorialSessionServerEvent: Codable, Equatable {
     case sessionReady(sessionID: String)
     case statusChanged(status: String, label: String)
+    case textDelta(String)
     case textResponse(String)
     case planReady(TutorialPlan)
     case planUpdated(TutorialPlan)
@@ -157,6 +158,8 @@ enum TutorialSessionServerEvent: Codable, Equatable {
                 status: try container.decode(String.self, forKey: .status),
                 label: try container.decode(String.self, forKey: .label)
             )
+        case "tutorial_text_delta":
+            self = .textDelta(try container.decode(String.self, forKey: .text))
         case "text_response":
             self = .textResponse(try container.decode(String.self, forKey: .text))
         case "plan_ready":
@@ -201,6 +204,9 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             try container.encode("status_changed", forKey: .type)
             try container.encode(status, forKey: .status)
             try container.encode(label, forKey: .label)
+        case .textDelta(let text):
+            try container.encode("tutorial_text_delta", forKey: .type)
+            try container.encode(text, forKey: .text)
         case .textResponse(let text):
             try container.encode("text_response", forKey: .type)
             try container.encode(text, forKey: .text)

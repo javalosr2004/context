@@ -64,6 +64,7 @@ final class TutorialSessionController: ObservableObject {
     private var listenTask: Task<Void, Never>?
     private var sessionID: String?
     private var socket: URLSessionWebSocketTask?
+    private var isStreamingTutorialText = false
 
     init(
         messageStore: ChatMessageStore,
@@ -134,6 +135,7 @@ final class TutorialSessionController: ObservableObject {
 
     func appendTutorialTextDelta(_ text: String) {
         guard messageStore.appendTutorialTextDelta(text) != nil else { return }
+        isStreamingTutorialText = true
         messages = messageStore.messages
     }
 
@@ -161,6 +163,7 @@ final class TutorialSessionController: ObservableObject {
     }
 
     private func sendUserMessage(_ text: String) async {
+        isStreamingTutorialText = false
         appendUserText(text)
 
         do {
@@ -281,8 +284,16 @@ final class TutorialSessionController: ObservableObject {
             status = .ready
         case .statusChanged(let rawStatus, let label):
             applyStatus(rawStatus, label: label)
+        case .textDelta(let text):
+            appendTutorialTextDelta(text)
         case .textResponse(let text):
-            appendTutorialText(text)
+            if isStreamingTutorialText {
+                _ = messageStore.replaceLastTutorialText(text)
+                messages = messageStore.messages
+                isStreamingTutorialText = false
+            } else {
+                appendTutorialText(text)
+            }
             status = .ready
         case .planReady(let plan):
             appendTutorialPlan(plan)

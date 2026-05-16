@@ -36,7 +36,9 @@ final class TutorialActionConsumer {
         switch action {
         case .scroll, .pressKey, .wait, .confirm:
             return true
-        case .click, .doubleClick, .rightClick, .hover, .type, .drag:
+        case .type(let action):
+            return action.target == nil
+        case .click, .doubleClick, .rightClick, .hover, .drag:
             return false
         }
     }

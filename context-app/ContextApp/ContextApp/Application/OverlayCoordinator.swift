@@ -125,6 +125,9 @@ final class OverlayCoordinator {
                 await screenGroundingController.submit(instruction)
             },
             presentNonSpatial: { step in
+                if case .type = step.action {
+                    return "Type card shown by handler."
+                }
                 await MainActor.run {
                     instructionCardController.show(
                         stepID: step.stepId,
@@ -228,6 +231,8 @@ final class OverlayCoordinator {
             return "Scroll \(action.direction.rawValue)"
         case .pressKey(let action):
             return "Press \(action.key)"
+        case .type:
+            return "Type"
         case .wait:
             return "Wait"
         case .confirm:

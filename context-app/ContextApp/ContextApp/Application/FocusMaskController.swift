@@ -166,13 +166,7 @@ final class InstructionCardController {
         guard let screen = screenProvider() else { return }
         hide()
 
-        let size = CGSize(width: 360, height: copyableText == nil ? 132 : 188)
-        let frame = CGRect(
-            x: screen.frame.midX - size.width / 2,
-            y: screen.frame.midY - size.height / 2,
-            width: size.width,
-            height: size.height
-        )
+        let width: CGFloat = 360
         let view = InstructionCardView(
             title: title,
             message: message,
@@ -188,9 +182,19 @@ final class InstructionCardController {
                 self?.hide()
             }
         )
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = CGRect(x: 0, y: 0, width: width, height: 0)
+        let fittedHeight = max(hostingView.fittingSize.height, 1)
+        let size = CGSize(width: width, height: fittedHeight)
+        let frame = CGRect(
+            x: screen.frame.midX - size.width / 2,
+            y: screen.frame.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
         let newPanel = InstructionCardPanel(frame: frame)
         newPanel.hasShadow = true
-        newPanel.contentView = NSHostingView(rootView: view)
+        newPanel.contentView = hostingView
         newPanel.orderFrontRegardless()
         panel = newPanel
     }
@@ -286,7 +290,7 @@ struct InstructionCardView: View {
             }
         }
         .padding(14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous))
         .overlay(

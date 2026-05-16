@@ -147,6 +147,33 @@ class DraftPlan(TutorialSchemaModel):
     steps: list[DraftStep] = Field(min_length=1, max_length=20)
 
 
+UserMessageIntentKind = Literal["new_goal", "follow_up"]
+
+
+class UserMessageIntent(TutorialSchemaModel):
+    """Classifier output: is the new message a new goal or a follow-up?"""
+
+    intent: UserMessageIntentKind = Field(
+        description=(
+            "'new_goal' if the user is switching to an unrelated task; "
+            "'follow_up' if it refines, answers, or continues the existing goal."
+        ),
+    )
+
+
+def parse_user_message_intent(raw_json: str) -> UserMessageIntent:
+    try:
+        return UserMessageIntent.model_validate_json(raw_json)
+    except ValidationError as error:
+        raise TutorialPlanValidationError(
+            "LLM returned an invalid user message intent."
+        ) from error
+
+
+def user_message_intent_response_schema() -> dict[str, Any]:
+    return remove_gemini_unsupported_schema_keys(UserMessageIntent.model_json_schema())
+
+
 def parse_draft_plan(raw_json: str) -> DraftPlan:
     try:
         return DraftPlan.model_validate_json(raw_json)

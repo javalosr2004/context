@@ -30,6 +30,7 @@ from backend.images import UploadedImage
 from backend.llm import LLMRequest, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
+    classify_user_message_intent,
     generate_draft_plan,
 )
 from backend.tutorial_schema import DraftPlan, TutorialPlan, TutorialStep
@@ -114,6 +115,40 @@ class TutorialSession:
         if not text:
             return
         await self._cancel_current_task()
+
+        intent = await self._classify_message_intent(text)
+        if intent == "new_goal":
+            await self._reset_for_new_goal(text)
+        else:
+            self.history.append(HistoryEntry(role="user", content=text))
+
+        await self._start_task(self._run_session())
+
+    async def _classify_message_intent(self, text: str) -> str:
+        """Decide whether `text` is a new goal or a follow-up.
+
+        First message of the session is always a new goal — no classifier
+        call. Otherwise route through the LLM; fall back to 'follow_up' on
+        any failure so we never accidentally wipe accumulated context.
+        """
+        if self.goal is None:
+            return "new_goal"
+        try:
+            return await asyncio.to_thread(
+                classify_user_message_intent,
+                self.llm,
+                self.goal,
+                self.draft_plan,
+                text,
+            )
+        except Exception:
+            logger.exception(
+                "User message intent classification failed; defaulting to follow_up",
+                extra={"session_id": self.session_id},
+            )
+            return "follow_up"
+
+    async def _reset_for_new_goal(self, text: str) -> None:
         await self._cancel_draft_task()
         self.goal = text
         self.plan_steps = []
@@ -124,7 +159,6 @@ class TutorialSession:
         self.last_action_kind = None
         self.history.append(HistoryEntry(role="user", content=text))
         self._kick_off_draft_plan()
-        await self._start_task(self._run_session())
 
     async def handle_user_screen(
         self,

@@ -11,10 +11,13 @@ from backend.tutorial_schema import (
     DraftPlan,
     TutorialPlan,
     TutorialPlanValidationError,
+    UserMessageIntentKind,
     draft_plan_response_schema,
     parse_draft_plan,
     parse_tutorial_plan,
+    parse_user_message_intent,
     tutorial_plan_response_schema,
+    user_message_intent_response_schema,
 )
 
 
@@ -119,6 +122,24 @@ not use coordinates unless the user provided them.
 Do not narrate your reasoning. Do not announce what you are about to do.
 Do not refer to yourself as a planner, generator, tutorial, or overlay.
 Just answer, or just act.
+""".strip()
+
+USER_MESSAGE_INTENT_SYSTEM_PROMPT = """
+You are a routing classifier inside a macOS tutorial system.
+
+A session already has an active goal and (optionally) a draft plan. A new
+user message just arrived. Decide whether the message is:
+
+- "follow_up": it refines, clarifies, answers, confirms, or continues the
+  active goal in any way — including adjustments ("with mustard"), answers
+  to the agent's questions, requests to skip/redo a step, or general
+  conversation about the same task.
+- "new_goal": the user is switching to an unrelated task that has nothing
+  to do with the active goal or the drafted steps.
+
+Default to "follow_up" when unsure. Only return "new_goal" when the new
+message clearly describes a different task. Return only the JSON object
+matching the provided schema; no prose, no reasoning.
 """.strip()
 
 DRAFT_PLAN_SYSTEM_PROMPT = """
@@ -298,6 +319,51 @@ def generate_draft_plan(
         },
     )
     return plan
+
+
+def classify_user_message_intent(
+    llm: MultimodalLLM,
+    prior_goal: str,
+    prior_draft: DraftPlan | None,
+    new_message: str,
+) -> UserMessageIntentKind:
+    """Decide whether `new_message` is a follow-up or a new goal."""
+    draft_block = _format_draft_for_classifier(prior_draft)
+    started_at = time.perf_counter()
+    raw = llm.complete_text(
+        LLMRequest(
+            system_prompt=USER_MESSAGE_INTENT_SYSTEM_PROMPT,
+            user_text=(
+                f"Active goal: {prior_goal}\n\n"
+                f"{draft_block}"
+                f"New user message: {new_message}\n\n"
+                "Return the intent as JSON matching the provided schema."
+            ),
+            images=[],
+            enable_search_grounding=False,
+            response_mime_type="application/json",
+            response_schema=user_message_intent_response_schema(),
+            temperature=0,
+        )
+    )
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    intent = parse_user_message_intent(raw).intent
+    logger.info(
+        "User message intent classified",
+        extra={
+            "elapsed_ms": elapsed_ms,
+            "intent": intent,
+            "has_draft": prior_draft is not None,
+        },
+    )
+    return intent
+
+
+def _format_draft_for_classifier(draft: DraftPlan | None) -> str:
+    if draft is None:
+        return ""
+    bullets = "\n".join(f"- {step.instruction}" for step in draft.steps)
+    return f"Draft plan so far:\n{bullets}\n\n"
 
 
 def truncate(text: str, limit: int) -> str:

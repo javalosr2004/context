@@ -16,6 +16,7 @@ from backend.tutorial_session_events import (
     StepReadyEvent,
     TextResponseEventLike,
     TutorialActionEvent,
+    TutorialTextDeltaEvent,
 )
 from backend.tutorial_tools import TutorialToolCall
 
@@ -80,6 +81,39 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan_events, [])
         self.assertEqual(session.plan_steps, [])
 
+    async def test_text_only_response_preserves_boundary_whitespace(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM([[LLMTextDelta(text="\n\nA formatted answer.\n\n")]])
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Format this.")
+        await wait_for_idle(session)
+
+        text_events = [e for e in events if isinstance(e, TextResponseEventLike)]
+        self.assertEqual(len(text_events), 1)
+        self.assertEqual(text_events[0].text, "\n\nA formatted answer.\n\n")
+
+    async def test_text_deltas_stream_before_final_text_response(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [[LLMTextDelta(text="First "), LLMTextDelta(text="second.")]]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Explain this.")
+        await wait_for_idle(session)
+
+        delta_events = [e for e in events if isinstance(e, TutorialTextDeltaEvent)]
+        text_events = [e for e in events if isinstance(e, TextResponseEventLike)]
+        self.assertEqual([event.text for event in delta_events], ["First ", "second."])
+        self.assertEqual(len(text_events), 1)
+        self.assertEqual(text_events[0].text, "First second.")
+        self.assertLess(events.index(delta_events[0]), events.index(text_events[0]))
+
     async def test_action_tool_call_produces_plan_and_awaits_confirmation(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM(
@@ -106,12 +140,68 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
             isinstance(e, AwaitingConfirmationEvent) for e in events
         ))
         await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
         self.assertIn(
             SessionCompletedEvent(),
             events,
         )
+
+    async def test_action_tool_call_requests_fresh_screen_before_next_turn(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_CALL)],
+                [LLMTextDelta(text="The new screen is visible.")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Click New.")
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001")
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await wait_until(
+            lambda: any(isinstance(e, ScreenRequestedEvent) for e in events)
+        )
+
+        self.assertEqual(len(llm.requests), 1)
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertEqual(len(llm.requests), 2)
+        self.assertEqual(len(llm.requests[1].images), 1)
+
+    async def test_request_screen_mixed_with_actions_waits_until_after_action(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [
+                    LLMToolCallEvent(tool_call=CLICK_CALL),
+                    LLMToolCallEvent(tool_call=REQUEST_SCREEN_CALL),
+                ],
+                [LLMTextDelta(text="Now I can continue.")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Click New.")
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        self.assertFalse(any(isinstance(e, ScreenRequestedEvent) for e in events))
+
+        await session.handle_step_started("step_001")
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertEqual(len(llm.requests), 2)
 
     async def test_request_screen_suspends_loop_until_screen_arrives(self) -> None:
         events: list[Any] = []
@@ -166,6 +256,7 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await session.handle_user_confirmation(
             "step_001", confirmed=False, note="That button is gone."
         )
+        await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
         self.assertEqual(len(llm.requests), 2)
@@ -190,6 +281,29 @@ async def wait_until(predicate, timeout: float = 2.0, interval: float = 0.01) ->
         elapsed += interval
         if elapsed > timeout:
             raise AssertionError("Timed out waiting for predicate")
+
+
+async def send_next_requested_screen(
+    session: TutorialSession,
+    events: list[Any],
+) -> None:
+    await wait_until(
+        lambda: any(
+            isinstance(e, ScreenRequestedEvent)
+            and e.request_id == session.pending_screen_request_id
+            for e in events
+        )
+    )
+    screen_event = next(
+        e
+        for e in events
+        if isinstance(e, ScreenRequestedEvent)
+        and e.request_id == session.pending_screen_request_id
+    )
+    await session.handle_user_screen(
+        screen_event.request_id,
+        ScreenSnapshot(mime_type="image/png", data_base64=tiny_png_base64()),
+    )
 
 
 def tiny_png_base64() -> str:

@@ -31,6 +31,8 @@ class TutorialToolTests(unittest.TestCase):
             step.action.target.description,
             "A green New button in the toolbar.",
         )
+        self.assertEqual(step.confidence, 0.65)
+        self.assertTrue(step.requires_confirmation)
 
     def test_type_tool_converts_copiable_text(self) -> None:
         step = step_from_tool_call(
@@ -52,6 +54,8 @@ class TutorialToolTests(unittest.TestCase):
             step.action.target.description,
             "The repository name text field.",
         )
+        self.assertEqual(step.confidence, 0.65)
+        self.assertTrue(step.requires_confirmation)
 
     def test_scroll_tool_converts_expected_end_state_to_target(self) -> None:
         step = step_from_tool_call(
@@ -72,6 +76,8 @@ class TutorialToolTests(unittest.TestCase):
             step.action.target.description,
             "The Billing section is visible.",
         )
+        self.assertEqual(step.confidence, 0.65)
+        self.assertTrue(step.requires_confirmation)
 
     def test_rejects_missing_copiable_text_for_type_tool(self) -> None:
         with self.assertRaises(TutorialToolCallError) as error:

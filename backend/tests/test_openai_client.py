@@ -10,14 +10,14 @@ from backend.openai_client import (
     stream_event_from_response_event,
     tool_call_from_response_event,
 )
-from backend.tutorial_schema import tutorial_planner_reply_response_schema
+from backend.tutorial_schema import tutorial_plan_response_schema
 
 
 class OpenAIClientSchemaTests(unittest.TestCase):
     def test_json_schema_format_adds_openai_strict_object_constraints(self) -> None:
         text_format = build_text_format(
             "application/json",
-            tutorial_planner_reply_response_schema(),
+            tutorial_plan_response_schema(),
         )
         schema = text_format["schema"]
 

@@ -62,6 +62,9 @@ EventSink = Callable[[ServerSessionEvent], Awaitable[None]]
 
 MAX_AGENT_TURNS = 8
 MAX_CONSECUTIVE_SCREEN_REQUESTS = 3
+SCREEN_CHANGING_ACTION_TYPES = frozenset(
+    {"click", "double_click", "right_click", "type", "press_key", "scroll", "drag"}
+)
 
 
 @dataclass
@@ -183,9 +186,16 @@ class TutorialSession:
                         await self.emit(SessionCompletedEvent())
                         self.status = "completed"
                     return
-                await self._walk_steps()
+                walked_steps = list(self.plan_steps)
+                replan_requested = await self._walk_steps()
                 any_steps_walked = True
+                needs_fresh_screen = replan_requested or has_screen_changing_step(
+                    walked_steps,
+                    self.completed_step_ids,
+                )
                 self._record_walk_outcome()
+                if needs_fresh_screen:
+                    await self._request_fresh_screen_after_user_action()
                 self.plan_steps = []
                 self.completed_step_ids = []
                 self.plan_emitted = False
@@ -252,14 +262,25 @@ class TutorialSession:
                 await self.emit(StatusChangedEvent(status="ready", label="Ready"))
                 return
 
-            request_screen_call: TutorialToolCall | None = None
-            for call in tool_calls:
-                if call.name == REQUEST_SCREEN_TOOL_NAME:
-                    request_screen_call = call
-                    break
+            request_screen_call = first_request_screen_call(tool_calls)
+            action_calls = [
+                call for call in tool_calls if call.name != REQUEST_SCREEN_TOOL_NAME
+            ]
+            for call in action_calls:
                 await self._execute_action_call(call)
 
             if request_screen_call is not None:
+                if action_calls:
+                    self.history.append(
+                        HistoryEntry(
+                            role="tool",
+                            content=(
+                                f"{REQUEST_SCREEN_TOOL_NAME} deferred until after "
+                                "the user completes the planned action steps."
+                            ),
+                        )
+                    )
+                    return
                 try:
                     last_screen_reason = parse_request_screen_reason(
                         request_screen_call
@@ -331,18 +352,42 @@ class TutorialSession:
                     raise event
                 if isinstance(event, LLMTextDelta):
                     text_parts.append(event.text)
+                    logger.info(
+                        "LLM text delta",
+                        extra={
+                            "session_id": self.session_id,
+                            "delta": repr(event.text),
+                            "delta_chars": len(event.text),
+                        },
+                    )
                     await self.emit(TutorialTextDeltaEvent(text=event.text))
                 elif isinstance(event, LLMToolCallEvent):
                     tool_calls.append(event.tool_call)
         finally:
             await producer
 
-        return tool_calls, "".join(text_parts)
+        text = "".join(text_parts)
+        if text_parts:
+            logger.info(
+                "LLM text concatenated",
+                extra={
+                    "session_id": self.session_id,
+                    "text": repr(text),
+                    "text_chars": len(text),
+                    "delta_count": len(text_parts),
+                },
+            )
+
+        return tool_calls, text
 
     def _build_llm_request(self) -> LLMRequest:
         request = LLMRequest(
             system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
-            user_text=render_history(self.goal or "", self.history),
+            user_text=render_history(
+                goal=self.goal or "",
+                history=self.history,
+                has_latest_screen=self.latest_screen is not None,
+            ),
             images=[self.latest_screen] if self.latest_screen is not None else [],
             enable_search_grounding=False,
             temperature=0,
@@ -435,6 +480,17 @@ class TutorialSession:
         )
         self.status = "planning"
         await self.emit(StatusChangedEvent(status="planning", label="Thinking"))
+
+    async def _request_fresh_screen_after_user_action(self) -> None:
+        self.latest_screen = None
+        call = TutorialToolCall(
+            name=REQUEST_SCREEN_TOOL_NAME,
+            arguments=(
+                '{"reason":"Need to verify the current screen after the user action '
+                'before planning the next instruction."}'
+            ),
+        )
+        await self._execute_screen_request(call)
 
     # -------- Step walkthrough --------
 
@@ -557,11 +613,21 @@ class TutorialSession:
 # ---------------- Helpers ----------------
 
 
-def render_history(goal: str, history: list[HistoryEntry]) -> str:
+def render_history(
+    goal: str,
+    history: list[HistoryEntry],
+    has_latest_screen: bool = False,
+) -> str:
     lines: list[str] = []
     if goal:
         lines.append(f"User goal: {goal}")
         lines.append("")
+    lines.append("Loop state:")
+    if has_latest_screen:
+        lines.append("- latest_screen: attached to this request")
+    else:
+        lines.append("- latest_screen: not attached yet")
+    lines.append("")
     lines.append("Conversation so far:")
     if not history:
         lines.append("- <none yet>")
@@ -569,6 +635,26 @@ def render_history(goal: str, history: list[HistoryEntry]) -> str:
     for entry in history:
         lines.append(f"[{entry.role}] {entry.content}")
     return "\n".join(lines)
+
+
+def first_request_screen_call(
+    tool_calls: list[TutorialToolCall],
+) -> TutorialToolCall | None:
+    for call in tool_calls:
+        if call.name == REQUEST_SCREEN_TOOL_NAME:
+            return call
+    return None
+
+
+def has_screen_changing_step(
+    steps: list[TutorialStep],
+    completed_step_ids: list[str],
+) -> bool:
+    completed = set(completed_step_ids)
+    return any(
+        step.step_id in completed and step.action.type in SCREEN_CHANGING_ACTION_TYPES
+        for step in steps
+    )
 
 
 def uploaded_image_from_snapshot(snapshot: ScreenSnapshot) -> UploadedImage:

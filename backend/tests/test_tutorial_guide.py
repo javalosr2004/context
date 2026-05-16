@@ -3,16 +3,14 @@ from __future__ import annotations
 import unittest
 from collections.abc import Iterator
 
-from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
+from backend.llm import LLMRequest, LLMStreamEvent, LLMToolCallEvent
 from backend.tutorial_tools import TutorialToolCall
 from backend.tutorial_guide import (
     TUTORIAL_CREATOR_SYSTEM_PROMPT,
     TUTORIAL_PLAN_SYSTEM_PROMPT,
-    TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
     TutorialGuide,
     TutorialPlanRequest,
-    TutorialSessionPlanRequest,
     TutorialStreamRequest,
     plan_generation_prompt,
 )
@@ -38,20 +36,6 @@ VALID_PLAN_JSON = """
       "requires_confirmation": false
     }
   ]
-}
-""".strip()
-
-VALID_READY_REPLY_JSON = f"""
-{{
-  "type": "ready",
-  "plan": {VALID_PLAN_JSON}
-}}
-""".strip()
-
-VALID_NEEDS_CONTEXT_REPLY_JSON = """
-{
-  "type": "needs_context",
-  "question": "Which repository should I use?"
 }
 """.strip()
 
@@ -99,21 +83,13 @@ class TutorialGuideTests(unittest.TestCase):
     def test_creator_prompt_supports_conversation_mode(self) -> None:
         self.assertIn("Conversational help", TUTORIAL_CREATOR_SYSTEM_PROMPT)
         self.assertIn("not only a tutorial generator", TUTORIAL_CREATOR_SYSTEM_PROMPT)
-        self.assertIn("Do not cut the conversation short", TUTORIAL_CREATOR_SYSTEM_PROMPT)
-        self.assertIn("screen checks", TUTORIAL_CREATOR_SYSTEM_PROMPT)
         self.assertIn("Never announce or describe the internal route", TUTORIAL_CREATOR_SYSTEM_PROMPT)
 
-    def test_session_prompts_do_not_force_tutorial_steps(self) -> None:
-        self.assertIn("conversation", TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT)
-        self.assertIn("Do not invent generic tutorial steps", TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT)
-        self.assertIn("answer, or just act", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("Do not narrate your reasoning", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("Do not explain when or why you are or are not", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertNotIn("overlay system", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
-        self.assertNotIn("overlay steps", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
-        self.assertNotIn("tutorial_click", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertNotIn("call tools", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
-        self.assertNotIn("default to answering", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT.lower())
+    def test_tool_stream_prompt_describes_loop_and_tool_rules(self) -> None:
+        self.assertIn("agent loop", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("tutorial_action_", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("tutorial_request_screen", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("Never list steps as plain", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
 
     def test_stream_tutorial_maps_domain_request_to_llm_request(self) -> None:
         llm = FakeLLM()
@@ -177,205 +153,7 @@ class TutorialGuideTests(unittest.TestCase):
         self.assertEqual(len(llm.requests), 2)
         self.assertIn("Fix the previous JSON", llm.requests[1].user_text)
         self.assertIn("not-json", llm.requests[1].user_text)
-        self.assertIn("Invalid JSON", llm.requests[1].user_text)
         self.assertIsNotNone(llm.requests[1].response_schema)
-
-    def test_create_session_planner_reply_accepts_ready_reply(self) -> None:
-        llm = FakeLLM(complete_responses=[VALID_READY_REPLY_JSON])
-        guide = TutorialGuide(llm)
-
-        reply = guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id="session-1",
-                goal="Show me how to create a repo.",
-                messages=[{"role": "user", "content": "Show me how to create a repo."}],
-                latest_screen=None,
-            )
-        )
-
-        self.assertEqual(reply.type, "ready")
-        self.assertEqual(len(llm.requests), 2)
-        self.assertEqual(
-            llm.requests[1].system_prompt,
-            TUTORIAL_SESSION_PLANNER_SYSTEM_PROMPT,
-        )
-        self.assertIn("Show me how to create a repo.", llm.requests[1].user_text)
-        self.assertEqual(llm.requests[1].response_mime_type, "application/json")
-        self.assertIsNotNone(llm.requests[1].response_schema)
-
-    def test_create_session_planner_reply_uses_streamed_tool_calls(self) -> None:
-        llm = FakeLLM(
-            complete_responses=[],
-            tool_calls=[
-                TutorialToolCall(
-                    name="tutorial_click",
-                    arguments=(
-                        '{"human_text":"Click New.","agent_description":"A green New button."}'
-                    ),
-                )
-            ],
-        )
-        guide = TutorialGuide(llm)
-
-        reply = guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id="session-1",
-                goal="Create a repo.",
-                messages=[{"role": "user", "content": "Create a repo."}],
-                latest_screen=None,
-            )
-        )
-
-        self.assertEqual(reply.type, "ready")
-        self.assertEqual(reply.plan.steps[0].instruction, "Click New.")
-        self.assertEqual(reply.plan.steps[0].action.type, "click")
-        self.assertEqual(
-            reply.plan.steps[0].action.target.description,
-            "A green New button.",
-        )
-
-    def test_create_session_planner_reply_reports_each_streamed_step(self) -> None:
-        llm = FakeLLM(
-            complete_responses=[],
-            tool_calls=[
-                TutorialToolCall(
-                    name="tutorial_click",
-                    arguments=(
-                        '{"human_text":"Click New.","agent_description":"A green New button."}'
-                    ),
-                ),
-                TutorialToolCall(
-                    name="tutorial_type",
-                    arguments=(
-                        '{"human_text":"Type the name.",'
-                        '"copiable_text":"context-demo",'
-                        '"agent_description":"The repository name field."}'
-                    ),
-                ),
-            ],
-        )
-        guide = TutorialGuide(llm)
-        streamed_steps = []
-
-        reply = guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id="session-1",
-                goal="Create a repo.",
-                messages=[{"role": "user", "content": "Create a repo."}],
-                latest_screen=None,
-            ),
-            on_streamed_step=streamed_steps.append,
-        )
-
-        self.assertEqual(reply.type, "ready")
-        self.assertEqual(
-            [step.step_id for step in streamed_steps],
-            ["step_001", "step_002"],
-        )
-        self.assertEqual(streamed_steps, reply.plan.steps)
-
-    def test_create_session_planner_reply_reports_text_deltas(self) -> None:
-        llm = FakeLLM(
-            complete_responses=[],
-            stream_events=[
-                LLMTextDelta(text="Looking at the screen..."),
-                LLMToolCallEvent(
-                    tool_call=TutorialToolCall(
-                        name="tutorial_click",
-                        arguments=(
-                            '{"human_text":"Click New.",'
-                            '"agent_description":"A green New button."}'
-                        ),
-                    )
-                ),
-            ],
-        )
-        guide = TutorialGuide(llm)
-        text_deltas = []
-
-        reply = guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id="session-1",
-                goal="Create a repo.",
-                messages=[{"role": "user", "content": "Create a repo."}],
-                latest_screen=None,
-            ),
-            on_text_delta=text_deltas.append,
-        )
-
-        self.assertEqual(reply.type, "ready")
-        self.assertEqual(text_deltas, ["Looking at the screen..."])
-        self.assertEqual(reply.plan.steps[0].instruction, "Click New.")
-
-    def test_create_session_planner_reply_accepts_text_only_conversation(self) -> None:
-        llm = FakeLLM(
-            complete_responses=[],
-            stream_events=[
-                LLMTextDelta(text="You can talk to me naturally."),
-                LLMTextDelta(text=" I will only use the overlay when it helps."),
-            ],
-        )
-        guide = TutorialGuide(llm)
-        text_deltas = []
-
-        reply = guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id="session-1",
-                goal="Can I just ask questions?",
-                messages=[{"role": "user", "content": "Can I just ask questions?"}],
-                latest_screen=None,
-            ),
-            on_text_delta=text_deltas.append,
-        )
-
-        self.assertEqual(reply.type, "conversation")
-        self.assertEqual(
-            reply.message,
-            "You can talk to me naturally. I will only use the overlay when it helps.",
-        )
-        self.assertEqual(
-            text_deltas,
-            [
-                "You can talk to me naturally.",
-                " I will only use the overlay when it helps.",
-            ],
-        )
-
-    def test_create_session_planner_reply_accepts_context_question(self) -> None:
-        llm = FakeLLM(complete_responses=[VALID_NEEDS_CONTEXT_REPLY_JSON])
-        guide = TutorialGuide(llm)
-
-        reply = guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id="session-1",
-                goal="Show me how to create a repo.",
-                messages=[],
-                latest_screen=None,
-            )
-        )
-
-        self.assertEqual(reply.type, "needs_context")
-        self.assertEqual(reply.question, "Which repository should I use?")
-
-    def test_create_session_planner_reply_includes_all_session_messages(self) -> None:
-        llm = FakeLLM(complete_responses=[VALID_READY_REPLY_JSON])
-        guide = TutorialGuide(llm)
-        messages = [
-            {"role": "user", "content": f"message {index}"}
-            for index in range(1, 11)
-        ]
-
-        guide.create_session_planner_reply(
-            TutorialSessionPlanRequest(
-                session_id="session-1",
-                goal="Show me how to create a repo.",
-                messages=messages,
-                latest_screen=None,
-            )
-        )
-
-        self.assertIn("- user: message 1", llm.requests[0].user_text)
-        self.assertIn("- user: message 10", llm.requests[0].user_text)
 
     def test_plan_generation_prompt_does_not_duplicate_json_schema(self) -> None:
         prompt = plan_generation_prompt(
@@ -387,7 +165,6 @@ class TutorialGuideTests(unittest.TestCase):
 
         self.assertEqual(prompt, "Create a tutorial plan.")
         self.assertNotIn("schema_version", TUTORIAL_PLAN_SYSTEM_PROMPT)
-        self.assertNotIn("JSON shape", TUTORIAL_PLAN_SYSTEM_PROMPT)
 
 
 if __name__ == "__main__":

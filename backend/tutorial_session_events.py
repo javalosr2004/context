@@ -119,6 +119,11 @@ class TutorialTextDeltaEvent(TutorialSessionEventModel):
     text: str = Field(min_length=1)
 
 
+class TextResponseEventLike(TutorialSessionEventModel):
+    type: Literal["text_response"] = "text_response"
+    text: str = Field(min_length=1)
+
+
 class StepReadyEvent(TutorialSessionEventModel):
     type: Literal["step_ready"] = "step_ready"
     step_id: str
@@ -155,6 +160,7 @@ ServerSessionEvent = (
     | TutorialActionEvent
     | TutorialActionDeltaEvent
     | TutorialTextDeltaEvent
+    | TextResponseEventLike
     | StepReadyEvent
     | AwaitingConfirmationEvent
     | ScreenRequestedEvent

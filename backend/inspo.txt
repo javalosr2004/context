@@ -1,0 +1,154 @@
+❯ curl -N \
+  -F "conversation_id=test-conversation-1" \
+  -F "text=Describe what a good macOS overlay tutorial system should do." \
+  http://127.0.0.1:8000/conversations/stream
+
+data: A great macOS overlay tutorial (often called onboarding or walkthroughs) must balance **utility** with the high **
+
+data: aesthetic standards** of the platform. macOS users typically value efficiency and minimalism; they are easily annoyed by "clutter" or
+
+data:  systems that treat them like novices for too long.
+
+Here is a breakdown of what a high-quality macOS overlay tutorial system
+
+data:  should do:
+
+---
+
+### 1. Adhere to "Native" Aesthetics
+A tutorial should feel like a
+
+data:  part of the OS, not a website wrapped in a window.
+*   **Vibrancy and Materials:** Use system
+
+data: -standard translucency (vibrancy effects) and rounded corners (typically 10–12pt).
+*   **
+
+data: San Francisco Typography:** Use the system font with appropriate weights to ensure it matches the rest of the UI.
+*   **SF Symbols
+
+data: :** Use Apple’s SF Symbols for icons to maintain visual consistency.
+*   **Dark Mode Support:** It must react
+
+data:  instantly to system-wide appearance changes.
+
+### 2. Implement Progressive Disclosure
+The biggest mistake is the "1
+
+data: 0-step forced march" upon first launch.
+*   **Just-in-Time Learning:** Instead of showing how
+
+data:  the "Export" feature works when the user first opens the app, trigger that specific tutorial overlay only when the user first
+
+data:  clicks the Export menu or hovers over the button.
+*   **Contextual Triggers:** The system should recognize
+
+data:  when a user is "stuck" (e.g., clicking around aimlessly) and offer a subtle hint overlay
+
+data: .
+
+### 3. Use "Focus" Masking Effectively
+To guide the eye, the tutorial should dim the
+
+data:  rest of the interface while "punching a hole" through to the active element.
+*   **Soft Dimming:** Avoid pitch
+
+data: -black overlays; use a subtle 40–60% alpha black or a blur.
+*   **Interactive
+
+data:  Cutouts:** The "hole" in the overlay shouldn't just be a visual highlight; the user should be able to actually
+
+data:  click the button beneath it to advance the tutorial. This creates "muscle memory."
+
+### 4. Respect User Autonomy (
+
+data: The "Exit" Factor)
+Mac users are often "power users" who want to get straight to work.
+*   
+
+data: **The "Skip All" Button:** Always provide a clear, one-click way to kill the entire tutorial.
+*   **Easy
+
+data:  Re-entry:** If a user skips the tutorial, there should be a "Show Hints" or "Tutorial" option
+
+data:  in the **Help** menu so they can find it later on their own terms.
+*   **Persistence:** The system
+
+data:  must remember where a user left off. If they close the app at Step 3, don't make them start at Step 1
+
+data:  next time.
+
+### 5. Be Responsive to Window State
+macOS is a multi-window environment where users constantly
+
+data:  resize and move apps.
+*   **Dynamic Positioning:** If the user resizes the window while an overlay is active, the tutorial
+
+data:  bubbles (tooltips) should move fluidly with their target elements.
+*   **Handle Full-Screen/Split-
+
+data: View:** The tutorial should not break or clip when the app enters macOS Green-Button full-screen mode.
+
+###
+
+data:  6. Prioritize Interactivity over Reading
+Reading text is passive; clicking is active.
+*   **Action-Oriented Steps
+
+data: :** Instead of saying "This is the Sidebar," say "Click a folder in the sidebar to begin." The tutorial should
+
+data:  only advance when the user performs the requested action.
+*   **Micro-Animations:** Use subtle "bounces" or "pul
+
+data: ses" on the UI element you want the user to notice.
+
+### 7. Accessibility (VoiceOver Support)
+A good overlay
+
+data:  system is not just visual.
+*   **Screen Reader Compatibility:** Ensure VoiceOver reads the tutorial text and describes the highlighted
+
+data:  area.
+*   **Keyboard Navigation:** Users should be able to navigate the tutorial (Next, Back, Close) using the
+
+data:  `Tab`, `Enter`, and `Esc` keys.
+
+### 8. Use High-Quality Copy (Micro
+
+data: copy)
+*   **Be Brief:** No more than two short sentences per bubble.
+*   **Value-Focused
+
+data: :** Don't just explain *what* a button is; explain *why* it helps the user. (e.g., instead
+
+data:  of "This is the Filter button," use "Filter your list to find specific files faster.")
+
+### 9. Non-Modal
+
+data:  Communication
+Whenever possible, use **non-modal** overlays.
+*   **Tooltips vs. Modals:** A modal (
+
+data: which blocks all interaction until closed) is aggressive. A contextual tooltip that points to a button but allows the user to click
+
+data:  other things is much more "Mac-like" and respectful.
+
+---
+
+### Summary Checklist for Developers:
+1
+
+data: .  **Can I skip this in one click?**
+2.  **Does it look like it was made
+
+data:  by Apple?**
+3.  **Am I asking the user to *do* something or just *read* something
+
+data: ?**
+4.  **Does it move correctly when I resize the window?**
+5.  **Is
+
+data:  it accessible to a blind user?**
+
+event: done
+data: {}

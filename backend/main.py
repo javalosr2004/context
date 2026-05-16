@@ -9,7 +9,6 @@ from json import dumps, loads
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from starlette.requests import HTTPConnection
@@ -30,10 +29,14 @@ from backend.tutorial_session_events import (
     ErrorEvent,
     ServerSessionEvent,
     SessionReadyEvent,
+    StepStartedEvent,
     TutorialSessionResponse,
+    UserConfirmationEvent,
+    UserMessageEvent,
+    UserScreenEvent,
     client_session_event_adapter,
 )
-from backend.tutorial_sessions import TutorialSessionError, TutorialSessionManager
+from backend.tutorial_session_store import TutorialSessionError, TutorialSessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +147,14 @@ def create_app() -> FastAPI:
 
     @app.post("/tutorial-sessions")
     def create_tutorial_session(
-        sessions: TutorialSessionManager = Depends(get_tutorial_session_manager),
+        sessions: TutorialSessionStore = Depends(get_tutorial_session_store),
     ) -> CreateTutorialSessionResponse:
         return sessions.create_session()
 
     @app.get("/tutorial-sessions/{session_id}")
     def get_tutorial_session(
         session_id: str,
-        sessions: TutorialSessionManager = Depends(get_tutorial_session_manager),
+        sessions: TutorialSessionStore = Depends(get_tutorial_session_store),
     ) -> TutorialSessionResponse:
         try:
             return sessions.get_session(session_id)
@@ -162,7 +165,7 @@ def create_app() -> FastAPI:
     async def tutorial_session_socket(
         websocket: WebSocket,
         session_id: str,
-        sessions: TutorialSessionManager = Depends(get_tutorial_session_manager),
+        sessions: TutorialSessionStore = Depends(get_tutorial_session_store),
     ) -> None:
         await websocket.accept()
         try:
@@ -175,7 +178,23 @@ def create_app() -> FastAPI:
             await websocket.close(code=1008)
             return
 
-        await send_server_event(websocket, SessionReadyEvent(session_id=session_id))
+        send_lock = asyncio.Lock()
+
+        async def emit(event: ServerSessionEvent) -> None:
+            async with send_lock:
+                await send_server_event(websocket, event)
+
+        try:
+            session = sessions.attach(session_id, emit)
+        except TutorialSessionError as error:
+            await send_server_event(
+                websocket,
+                ErrorEvent(code=error.code, message=error.message),
+            )
+            await websocket.close(code=1008)
+            return
+
+        await emit(SessionReadyEvent(session_id=session_id))
 
         try:
             while True:
@@ -185,32 +204,59 @@ def create_app() -> FastAPI:
                 except WebSocketDisconnect:
                     raise
                 except ValidationError as error:
-                    await send_server_event(
-                        websocket,
+                    await emit(
                         ErrorEvent(
                             code="invalid_event",
                             message=error.errors()[0]["msg"],
-                        ),
+                        )
                     )
                     continue
                 except ValueError as error:
-                    await send_server_event(
-                        websocket,
-                        ErrorEvent(code="invalid_event", message=str(error)),
-                    )
+                    await emit(ErrorEvent(code="invalid_event", message=str(error)))
                     continue
 
-                for evt in sessions.pre_threadpool_events(event):
-                    await send_server_event(websocket, evt)
-
-                await drain_session_events(websocket, sessions, session_id, event)
+                try:
+                    await dispatch_client_event(session, event)
+                except Exception as error:  # noqa: BLE001 — surface unhandled errors to client
+                    logger.exception(
+                        "Tutorial session event failed",
+                        extra={
+                            "session_id": session_id,
+                            "error_type": type(error).__name__,
+                        },
+                    )
+                    await emit(
+                        ErrorEvent(
+                            code="session_event_failed",
+                            message=f"{type(error).__name__}: {error}",
+                        )
+                    )
         except WebSocketDisconnect:
             logger.info(
                 "Tutorial session socket disconnected",
                 extra={"session_id": session_id},
             )
+        finally:
+            await sessions.detach(session_id)
 
     return app
+
+
+async def dispatch_client_event(session, event) -> None:  # type: ignore[no-untyped-def]
+    if isinstance(event, UserMessageEvent):
+        await session.handle_user_message(event.text)
+        return
+    if isinstance(event, UserScreenEvent):
+        await session.handle_user_screen(event.request_id, event.screen)
+        return
+    if isinstance(event, StepStartedEvent):
+        await session.handle_step_started(event.step_id)
+        return
+    if isinstance(event, UserConfirmationEvent):
+        await session.handle_user_confirmation(
+            event.step_id, event.confirmed, event.note
+        )
+        return
 
 
 def get_conversation_repository() -> ConversationRepository:
@@ -230,15 +276,15 @@ def get_tutorial_guide(
     return TutorialGuide(llm)
 
 
-def get_tutorial_session_manager(
+def get_tutorial_session_store(
     connection: HTTPConnection,
-    tutorial_guide: TutorialGuide = Depends(get_tutorial_guide),
-) -> TutorialSessionManager:
-    manager = getattr(connection.app.state, "tutorial_session_manager", None)
-    if manager is None:
-        manager = TutorialSessionManager(tutorial_guide)
-        connection.app.state.tutorial_session_manager = manager
-    return manager
+    llm: MultimodalLLM = Depends(get_multimodal_llm),
+) -> TutorialSessionStore:
+    store = getattr(connection.app.state, "tutorial_session_store", None)
+    if store is None:
+        store = TutorialSessionStore(llm)
+        connection.app.state.tutorial_session_store = store
+    return store
 
 
 async def receive_websocket_json(websocket: WebSocket) -> object:
@@ -255,67 +301,6 @@ async def receive_websocket_json(websocket: WebSocket) -> object:
         return loads(data.decode("utf-8"))
 
     raise ValueError("Expected a text or binary JSON WebSocket message.")
-
-
-async def send_server_events(
-    websocket: WebSocket,
-    events: list[ServerSessionEvent],
-) -> None:
-    for event in events:
-        await send_server_event(websocket, event)
-
-
-async def drain_session_events(
-    websocket: WebSocket,
-    sessions: TutorialSessionManager,
-    session_id: str,
-    event: object,
-) -> None:
-    queue: asyncio.Queue[ServerSessionEvent | None] = asyncio.Queue()
-    loop = asyncio.get_running_loop()
-
-    def sink(evt: ServerSessionEvent) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, evt)
-
-    async def run_handler() -> None:
-        try:
-            await run_in_threadpool(
-                sessions.handle_client_event,
-                session_id,
-                event,
-                sink,
-            )
-        except TutorialSessionError as error:
-            logger.warning(
-                "Tutorial session error",
-                extra={
-                    "session_id": session_id,
-                    "code": error.code,
-                    "detail": error.message,
-                },
-            )
-            queue.put_nowait(ErrorEvent(code=error.code, message=error.message))
-        except Exception as error:
-            logger.exception(
-                "Tutorial session event failed",
-                extra={"session_id": session_id, "error_type": type(error).__name__},
-            )
-            queue.put_nowait(
-                ErrorEvent(
-                    code="session_event_failed",
-                    message=f"{type(error).__name__}: {error}",
-                )
-            )
-        finally:
-            queue.put_nowait(None)
-
-    task = asyncio.create_task(run_handler())
-    while True:
-        evt = await queue.get()
-        if evt is None:
-            break
-        await send_server_event(websocket, evt)
-    await task
 
 
 async def send_server_event(websocket: WebSocket, event: ServerSessionEvent) -> None:

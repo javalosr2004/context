@@ -30,6 +30,9 @@ TUTORIAL_TOOL_NAMES = frozenset(
 REQUEST_SCREEN_TOOL_NAME = "tutorial_request_screen"
 INVALID_TOOL_CALL = "invalid_tool_call"
 INVALID_TOOL_ARGUMENTS = "invalid_tool_arguments"
+UNGROUNDED_TARGET_CONFIDENCE = 0.65
+KEYBOARD_ACTION_CONFIDENCE = 0.8
+DETERMINISTIC_ACTION_CONFIDENCE = 0.9
 
 
 class TutorialToolCallError(ValueError):
@@ -288,8 +291,8 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=action,
-            confidence=0.9,
-            requires_confirmation=False,
+            confidence=UNGROUNDED_TARGET_CONFIDENCE,
+            requires_confirmation=True,
         )
 
     if isinstance(arguments, TutorialTypeArguments):
@@ -302,8 +305,8 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=action,
-            confidence=0.9,
-            requires_confirmation=False,
+            confidence=UNGROUNDED_TARGET_CONFIDENCE,
+            requires_confirmation=True,
         )
 
     if isinstance(arguments, TutorialScrollArguments):
@@ -318,8 +321,8 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=action,
-            confidence=0.85,
-            requires_confirmation=False,
+            confidence=UNGROUNDED_TARGET_CONFIDENCE,
+            requires_confirmation=True,
         )
 
     if isinstance(arguments, TutorialPressKeyArguments):
@@ -327,7 +330,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=TutorialAction(type="press_key", key=arguments.key),
-            confidence=0.9,
+            confidence=KEYBOARD_ACTION_CONFIDENCE,
             requires_confirmation=False,
         )
 
@@ -336,7 +339,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=TutorialAction(type="wait", duration_ms=arguments.duration_ms),
-            confidence=0.9,
+            confidence=DETERMINISTIC_ACTION_CONFIDENCE,
             requires_confirmation=False,
         )
 

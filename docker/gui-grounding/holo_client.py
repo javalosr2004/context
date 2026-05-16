@@ -11,6 +11,24 @@ from logging_config import configure_logging, log_event
 class VisualLocalizerOutput(BaseModel):
     x: int = Field(ge=0, le=1000, description="X coordinate as integer in [0, 1000]")
     y: int = Field(ge=0, le=1000, description="Y coordinate as integer in [0, 1000]")
+    found: bool = Field(
+        description=(
+            "True if you found a UI element matching the target on the screen. "
+            "False if no element on the screen matches the target description; "
+            "in that case x/y are best-guess placeholders and must not be trusted."
+        )
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Your confidence that the returned (x, y) is the correct element for "
+            "the target, from 0.0 to 1.0. Use 0.9+ only when the match is "
+            "unambiguous. Use 0.5-0.8 when the target description is partially "
+            "ambiguous or several candidates are plausible. Use below 0.5 when "
+            "you are guessing; set found=false in that case."
+        ),
+    )
 
 
 class HoloLocalizer:
@@ -84,6 +102,11 @@ def build_localization_prompt(
     return (
         f"Localize an element on {visual_context} according to the provided target "
         "and output a click position on image 1.\n"
+        " * If you find a matching element, set found=true and report your "
+        "confidence (0.0-1.0) that the (x, y) is correct.\n"
+        " * If no element on the screen matches the target, set found=false "
+        "with confidence below 0.5; x and y must still be within [0, 1000] "
+        "but will be treated as untrusted placeholders.\n"
         f" * You must output a valid JSON following the format: {schema}\n"
         f" Your target is:\n{target}"
     )

@@ -24,7 +24,7 @@ class FakeLocalizer:
         assert screenshot_data_uri.startswith("data:image/png;base64,")
         assert target == "Submit button"
         self.reference_image_data_uri = reference_image_data_uri
-        return VisualLocalizerOutput(x=250, y=750)
+        return VisualLocalizerOutput(x=250, y=750, found=True, confidence=0.88)
 
 
 class FailingLocalizer:

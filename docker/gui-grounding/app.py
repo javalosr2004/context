@@ -80,6 +80,8 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
                 bbox=bbox,
                 image_size=image_size,
                 label=instruction_text,
+                confidence=point_1000.confidence,
+                found=point_1000.found,
             )
             post_ms = elapsed_ms(post_started)
         except ValueError as exc:
@@ -131,6 +133,8 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
             has_reference_image=reference_image_data_uri is not None,
             image_size={"width": image_size.width, "height": image_size.height},
             holo_point_1000={"x": point_1000.x, "y": point_1000.y},
+            holo_confidence=point_1000.confidence,
+            holo_found=point_1000.found,
             normalized_point=response["point"],
             bbox=response["bbox"],
             timings_ms={

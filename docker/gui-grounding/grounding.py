@@ -74,6 +74,8 @@ def gui_actor_response(
     bbox: BoundingBox,
     image_size: ImageSize,
     label: str | None,
+    confidence: float | None = None,
+    found: bool | None = None,
 ) -> dict:
     bbox_px = pixel_bbox(bbox, image_size)
     return {
@@ -94,9 +96,10 @@ def gui_actor_response(
             "x2": bbox_px.x2,
             "y2": bbox_px.y2,
         },
-        "bbox_score": None,
+        "bbox_score": confidence,
         "bbox_label": label,
         "bbox_source": "holo3_point_box",
         "image_size": {"width": image_size.width, "height": image_size.height},
-        "num_detections": 1,
+        "num_detections": 1 if found is None or found else 0,
+        "found": found if found is not None else True,
     }

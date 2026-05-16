@@ -30,9 +30,6 @@ TUTORIAL_TOOL_NAMES = frozenset(
 REQUEST_SCREEN_TOOL_NAME = "tutorial_request_screen"
 INVALID_TOOL_CALL = "invalid_tool_call"
 INVALID_TOOL_ARGUMENTS = "invalid_tool_arguments"
-UNGROUNDED_TARGET_CONFIDENCE = 0.65
-KEYBOARD_ACTION_CONFIDENCE = 0.8
-DETERMINISTIC_ACTION_CONFIDENCE = 0.9
 
 
 class TutorialToolCallError(ValueError):
@@ -59,34 +56,51 @@ class TutorialToolArguments(BaseModel):
         return value
 
 
+CONFIDENCE_FIELD_DESCRIPTION = (
+    "Your confidence that this action is correct given what you can see "
+    "on the current screen, from 0.0 to 1.0. Use 0.9+ when the target is "
+    "clearly visible and the next step is obvious. Use 0.6-0.8 when the "
+    "step is plausible but the target is partially obscured, the layout "
+    "varies across accounts, or you are inferring from a draft plan rather "
+    "than a clear visual cue. Use below 0.6 when you are extrapolating "
+    "beyond what the screen actually shows."
+)
+
+
 class TutorialClickArguments(TutorialToolArguments):
     human_text: str = Field(min_length=1)
     agent_description: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_FIELD_DESCRIPTION)
 
 
 class TutorialTypeArguments(TutorialToolArguments):
     human_text: str = Field(min_length=1)
     copiable_text: str = Field(min_length=1)
     agent_description: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_FIELD_DESCRIPTION)
 
 
 class TutorialScrollArguments(TutorialToolArguments):
     human_text: str = Field(min_length=1)
     expected_end_state: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_FIELD_DESCRIPTION)
 
 
 class TutorialPressKeyArguments(TutorialToolArguments):
     human_text: str = Field(min_length=1)
     key: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_FIELD_DESCRIPTION)
 
 
 class TutorialWaitArguments(TutorialToolArguments):
     human_text: str = Field(min_length=1)
     duration_ms: int = Field(ge=0, le=10000)
+    confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_FIELD_DESCRIPTION)
 
 
 class TutorialConfirmArguments(TutorialToolArguments):
     human_text: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_FIELD_DESCRIPTION)
 
 
 class TutorialRequestScreenArguments(TutorialToolArguments):
@@ -291,7 +305,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=action,
-            confidence=UNGROUNDED_TARGET_CONFIDENCE,
+            confidence=arguments.confidence,
             requires_confirmation=True,
         )
 
@@ -305,7 +319,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=action,
-            confidence=UNGROUNDED_TARGET_CONFIDENCE,
+            confidence=arguments.confidence,
             requires_confirmation=True,
         )
 
@@ -321,7 +335,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=action,
-            confidence=UNGROUNDED_TARGET_CONFIDENCE,
+            confidence=arguments.confidence,
             requires_confirmation=True,
         )
 
@@ -330,7 +344,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=TutorialAction(type="press_key", key=arguments.key),
-            confidence=KEYBOARD_ACTION_CONFIDENCE,
+            confidence=arguments.confidence,
             requires_confirmation=False,
         )
 
@@ -339,7 +353,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=TutorialAction(type="wait", duration_ms=arguments.duration_ms),
-            confidence=DETERMINISTIC_ACTION_CONFIDENCE,
+            confidence=arguments.confidence,
             requires_confirmation=False,
         )
 
@@ -348,7 +362,7 @@ def step_from_arguments(
             step_id=step_id,
             instruction=arguments.human_text,
             action=TutorialAction(type="confirm"),
-            confidence=0.65,
+            confidence=arguments.confidence,
             requires_confirmation=True,
         )
 

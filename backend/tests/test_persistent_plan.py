@@ -31,11 +31,17 @@ from backend.tutorial_tools import TutorialToolCall
 
 CLICK_NEW = TutorialToolCall(
     name="tutorial_click",
-    arguments='{"human_text": "Click New.", "agent_description": "Green New button."}',
+    arguments=(
+        '{"human_text": "Click New.", "agent_description": "Green New button.",'
+        ' "confidence": 0.9}'
+    ),
 )
 CLICK_NEXT = TutorialToolCall(
     name="tutorial_click",
-    arguments='{"human_text": "Click Next.", "agent_description": "Blue Next button."}',
+    arguments=(
+        '{"human_text": "Click Next.", "agent_description": "Blue Next button.",'
+        ' "confidence": 0.85}'
+    ),
 )
 
 

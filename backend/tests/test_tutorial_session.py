@@ -23,7 +23,10 @@ from backend.tutorial_tools import TutorialToolCall
 
 CLICK_CALL = TutorialToolCall(
     name="tutorial_click",
-    arguments='{"human_text": "Click New.", "agent_description": "Green New button."}',
+    arguments=(
+        '{"human_text": "Click New.", "agent_description": "Green New button.",'
+        ' "confidence": 0.9}'
+    ),
 )
 REQUEST_SCREEN_CALL = TutorialToolCall(
     name="tutorial_request_screen",

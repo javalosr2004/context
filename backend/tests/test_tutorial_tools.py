@@ -18,7 +18,8 @@ class TutorialToolTests(unittest.TestCase):
                 name="tutorial_click",
                 arguments=(
                     '{"human_text":"Click the New button.",'
-                    '"agent_description":"A green New button in the toolbar."}'
+                    '"agent_description":"A green New button in the toolbar.",'
+                    '"confidence":0.82}'
                 ),
             ),
             index=0,
@@ -31,7 +32,7 @@ class TutorialToolTests(unittest.TestCase):
             step.action.target.description,
             "A green New button in the toolbar.",
         )
-        self.assertEqual(step.confidence, 0.65)
+        self.assertEqual(step.confidence, 0.82)
         self.assertTrue(step.requires_confirmation)
 
     def test_type_tool_converts_copiable_text(self) -> None:
@@ -41,7 +42,8 @@ class TutorialToolTests(unittest.TestCase):
                 arguments=(
                     '{"human_text":"Type the repo name.",'
                     '"copiable_text":"context-demo",'
-                    '"agent_description":"The repository name text field."}'
+                    '"agent_description":"The repository name text field.",'
+                    '"confidence":0.75}'
                 ),
             ),
             index=1,
@@ -54,7 +56,7 @@ class TutorialToolTests(unittest.TestCase):
             step.action.target.description,
             "The repository name text field.",
         )
-        self.assertEqual(step.confidence, 0.65)
+        self.assertEqual(step.confidence, 0.75)
         self.assertTrue(step.requires_confirmation)
 
     def test_scroll_tool_converts_expected_end_state_to_target(self) -> None:
@@ -63,7 +65,8 @@ class TutorialToolTests(unittest.TestCase):
                 name="tutorial_scroll",
                 arguments=(
                     '{"human_text":"Scroll down to billing.",'
-                    '"expected_end_state":"The Billing section is visible."}'
+                    '"expected_end_state":"The Billing section is visible.",'
+                    '"confidence":0.7}'
                 ),
             ),
             index=2,
@@ -76,7 +79,7 @@ class TutorialToolTests(unittest.TestCase):
             step.action.target.description,
             "The Billing section is visible.",
         )
-        self.assertEqual(step.confidence, 0.65)
+        self.assertEqual(step.confidence, 0.7)
         self.assertTrue(step.requires_confirmation)
 
     def test_rejects_missing_copiable_text_for_type_tool(self) -> None:

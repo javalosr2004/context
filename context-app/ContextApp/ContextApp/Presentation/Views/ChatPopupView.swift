@@ -53,9 +53,7 @@ struct ChatPopupView: View {
     @State private var maxImageWidth = 1280
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
-    @State private var rejectionNote = ""
     @State private var dismissedAnswerID: UUID?
-    @State private var selectedConfirmationStepID: String?
     @FocusState private var isMessageFieldFocused: Bool
 
     private static let loadingRowID = "tutorial-plan-loading-row"
@@ -84,14 +82,6 @@ struct ChatPopupView: View {
 
                 if let answer = latestTutorialAnswer {
                     answerCard(answer)
-                }
-
-                if let stepID = sessionController.pendingContinuePromptStepID {
-                    continuePromptCard(stepID: stepID)
-                }
-
-                if let selectedConfirmationStepID {
-                    confirmationCard(stepID: selectedConfirmationStepID)
                 }
 
                 peekStack
@@ -132,9 +122,9 @@ struct ChatPopupView: View {
 
             LinearGradient(
                 colors: [
-                    Color(red: 0.86, green: 0.63, blue: 0.50).opacity(0.92),
-                    Color(red: 0.58, green: 0.40, blue: 0.49).opacity(0.90),
-                    Color(red: 0.34, green: 0.27, blue: 0.40).opacity(0.88)
+                    Color(red: 0.86, green: 0.63, blue: 0.50).opacity(0.2),
+                    Color(red: 0.58, green: 0.40, blue: 0.49).opacity(0.23),
+                    Color(red: 0.34, green: 0.27, blue: 0.40).opacity(0.3)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -386,6 +376,19 @@ struct ChatPopupView: View {
             } else {
                 keyboardHint("⌘K")
             }
+
+            Button(action: advanceCurrentStep) {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(canAdvanceCurrentStep ? OverlayTheme.invertedForeground : OverlayTheme.tertiaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(canAdvanceCurrentStep ? Color.black.opacity(0.85) : Color.black.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .disabled(!canAdvanceCurrentStep)
+            .help("Next step")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -486,107 +489,6 @@ struct ChatPopupView: View {
                     .opacity(loadingWordIndex == index ? 0.70 : 0.25)
             }
         }
-    }
-
-    private func continuePromptCard(stepID: String) -> some View {
-        handoffPromptCard(
-            title: "Continue to next step?",
-            message: "Clicked outside the highlight. Continue, or re-check the screen.",
-            primaryTitle: "Continue",
-            primaryAction: { submitContinuePrompt(stepID: stepID, confirmed: true) },
-            secondaryTitle: "Re-check screen",
-            secondaryAction: { submitContinuePrompt(stepID: stepID, confirmed: false) }
-        )
-    }
-
-    private func confirmationCard(stepID: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Does the highlight look right?")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(OverlayTheme.primaryText)
-
-            TextField("Optional note for Not right", text: $rejectionNote)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(OverlayTheme.primaryText)
-                .tint(OverlayTheme.primaryText)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(OverlayTheme.hairline, lineWidth: 0.5)
-                )
-
-            HStack(spacing: 6) {
-                compactPromptButton("Looks right", isPrimary: true) {
-                    submitConfirmation(stepID: stepID, confirmed: true)
-                }
-
-                compactPromptButton("Not right", isPrimary: false) {
-                    submitConfirmation(stepID: stepID, confirmed: false)
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(OverlayTheme.answerSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
-        )
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
-    }
-
-    private func handoffPromptCard(
-        title: String,
-        message: String,
-        primaryTitle: String,
-        primaryAction: @escaping () -> Void,
-        secondaryTitle: String,
-        secondaryAction: @escaping () -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(OverlayTheme.primaryText)
-
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(OverlayTheme.secondaryText)
-
-            HStack(spacing: 6) {
-                compactPromptButton(primaryTitle, isPrimary: true, action: primaryAction)
-                compactPromptButton(secondaryTitle, isPrimary: false, action: secondaryAction)
-            }
-            .padding(.top, 2)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(OverlayTheme.answerSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
-        )
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
-    }
-
-    private func compactPromptButton(_ title: String, isPrimary: Bool, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(isPrimary ? OverlayTheme.invertedForeground : OverlayTheme.secondaryText)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 5)
-            .background(isPrimary ? OverlayTheme.invertedAccent : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
     }
 
     private var finishedTutorialView: some View {
@@ -882,108 +784,6 @@ struct ChatPopupView: View {
         }
     }
 
-    private var continuePromptControls: some View {
-        Group {
-            if let stepID = sessionController.pendingContinuePromptStepID {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Continue to next step?")
-                        .font(.system(size: 13, weight: .medium))
-
-                    Text("Clicked outside the highlight. Continue, or re-check the screen.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 8) {
-                        Button {
-                            submitContinuePrompt(stepID: stepID, confirmed: true)
-                        } label: {
-                            Label("Continue", systemImage: "arrow.right")
-                                .font(.caption.weight(.medium))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-
-                        Button {
-                            submitContinuePrompt(stepID: stepID, confirmed: false)
-                        } label: {
-                            Label("Re-check screen", systemImage: "arrow.clockwise")
-                                .font(.caption.weight(.medium))
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button {
-                            sessionController.dismissContinuePrompt()
-                        } label: {
-                            Text("Dismiss")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.plain)
-                        .controlSize(.small)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(OverlayTheme.quietFill)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(OverlayTheme.separator)
-                        .frame(height: 1)
-                }
-            }
-        }
-    }
-
-    private var confirmationControls: some View {
-        Group {
-            if let selectedConfirmationStepID {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Does the highlight look right?")
-                        .font(.system(size: 13, weight: .medium))
-
-                    TextField("Optional note for Not right", text: $rejectionNote)
-                        .textFieldStyle(.plain)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(OverlayTheme.strongerFill)
-                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: OverlayTheme.controlCornerRadius, style: .continuous)
-                                .stroke(OverlayTheme.hairline, lineWidth: 1)
-                        )
-
-                    HStack(spacing: 8) {
-                        Button {
-                            submitConfirmation(stepID: selectedConfirmationStepID, confirmed: true)
-                        } label: {
-                            Label("Looks right", systemImage: "checkmark")
-                                .font(.caption.weight(.medium))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-
-                        Button {
-                            submitConfirmation(stepID: selectedConfirmationStepID, confirmed: false)
-                        } label: {
-                            Label("Not right", systemImage: "xmark")
-                                .font(.caption.weight(.medium))
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(OverlayTheme.quietFill)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(OverlayTheme.separator)
-                        .frame(height: 1)
-                }
-            }
-        }
-    }
-
     private var statusText: String {
         if isSendingInstruction {
             return "Reading screen"
@@ -1033,7 +833,7 @@ struct ChatPopupView: View {
     }
 
     private var isTutorialPaused: Bool {
-        latestTutorialAnswer != nil || sessionController.pendingContinuePromptStepID != nil || selectedConfirmationStepID != nil
+        latestTutorialAnswer != nil
     }
 
     private var peekSteps: TutorialPeekSteps {
@@ -1073,6 +873,19 @@ struct ChatPopupView: View {
 
     private var canSubmitInstruction: Bool {
         !instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canAdvanceCurrentStep: Bool {
+        currentStepForAdvance != nil && !sessionController.status.isBusy
+    }
+
+    private var currentStepForAdvance: TutorialStep? {
+        guard let plan = latestPlan, !plan.steps.isEmpty else { return nil }
+        if let currentStepID = sessionController.currentStepID {
+            return plan.steps.first { $0.stepId == currentStepID }
+        }
+        guard let currentStepIndex else { return nil }
+        return plan.steps[currentStepIndex]
     }
 
     private func latestTextMessage(role: ChatMessageRole) -> (id: UUID, text: String, createdAt: Date)? {
@@ -1233,8 +1046,8 @@ struct ChatPopupView: View {
                         }
                     }
 
-                    if step.requiresConfirmation || step.confidence < 0.7 {
-                        Label("Confirm when the screen looks right", systemImage: "checkmark.circle")
+                    if step.confidence < 0.7 {
+                        Label("Low confidence target", systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1333,29 +1146,9 @@ struct ChatPopupView: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    submitInlineConfirm(stepID: step.stepId, confirmed: true)
-                } label: {
-                    Label("Done", systemImage: "checkmark")
-                        .font(.caption.weight(.medium))
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(activeStepID == step.stepId)
-
-                Button {
-                    submitInlineConfirm(stepID: step.stepId, confirmed: false)
-                } label: {
-                    Label("Not right", systemImage: "xmark")
-                        .font(.caption.weight(.medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(activeStepID == step.stepId)
-
-                Spacer()
-            }
+            Text("Use the arrow at the bottom to continue.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 8)
@@ -1394,14 +1187,6 @@ struct ChatPopupView: View {
         expandedStepID = step.stepId
         guard canSelectTutorialStep(step), activeStepID == nil else { return }
         selectTutorialStep(step)
-    }
-
-    private func submitInlineConfirm(stepID: String, confirmed: Bool) {
-        selectedConfirmationStepID = nil
-        expandedStepID = nil
-        Task {
-            await sessionController.confirmStep(stepID: stepID, confirmed: confirmed, note: nil)
-        }
     }
 
     private func copyTypeTextToPasteboard(_ text: String) {
@@ -1478,8 +1263,6 @@ struct ChatPopupView: View {
         isSendingInstruction = false
         referenceImageData = nil
         referenceImageName = nil
-        rejectionNote = ""
-        selectedConfirmationStepID = nil
         stepJSONPreview = nil
         loadingWordIndex = 0
         sessionController.startNewChat()
@@ -1488,36 +1271,21 @@ struct ChatPopupView: View {
     private func selectTutorialStep(_ step: TutorialStep) {
         guard activeStepID == nil, canSelectTutorialStep(step) else { return }
         activeStepID = step.stepId
-        selectedConfirmationStepID = nil
 
         Task {
             await sessionController.markStepStarted(stepID: step.stepId)
-            let result = await onTutorialStepSelected(step)
+            _ = await onTutorialStepSelected(step)
             await MainActor.run {
-                sessionController.appendTutorialText(result)
                 activeStepID = nil
-                selectedConfirmationStepID = step.stepId
             }
         }
     }
 
-    private func submitContinuePrompt(stepID: String, confirmed: Bool) {
+    private func advanceCurrentStep() {
+        guard let step = currentStepForAdvance, canAdvanceCurrentStep else { return }
+        expandedStepID = nil
         Task {
-            await sessionController.confirmStep(stepID: stepID, confirmed: confirmed, note: nil)
-        }
-    }
-
-    private func submitConfirmation(stepID: String, confirmed: Bool) {
-        let note = rejectionNote.trimmingCharacters(in: .whitespacesAndNewlines)
-        selectedConfirmationStepID = nil
-        rejectionNote = ""
-
-        Task {
-            await sessionController.confirmStep(
-                stepID: stepID,
-                confirmed: confirmed,
-                note: note.isEmpty ? nil : note
-            )
+            await sessionController.confirmStep(stepID: step.stepId, confirmed: true, note: nil)
         }
     }
 

@@ -28,6 +28,24 @@ final class PopupController {
         state = .expanded(frame: popupPanel.frame)
     }
 
+    func fitPopupHeight(to screenFrame: CGRect, minimumHeight: CGFloat = PopupState.minimumSize.height, verticalMargin: CGFloat = 64) {
+        guard popupPanel.isVisible else { return }
+        guard let contentView = popupPanel.contentView else { return }
+
+        contentView.layoutSubtreeIfNeeded()
+        let fittingHeight = ceil(contentView.fittingSize.height)
+        let maximumHeight = max(minimumHeight, screenFrame.height - verticalMargin)
+        let nextHeight = min(max(fittingHeight, minimumHeight), maximumHeight)
+        guard abs(nextHeight - popupPanel.frame.height) > 1 else { return }
+
+        var nextFrame = popupPanel.frame
+        nextFrame.origin.y += nextFrame.height - nextHeight
+        nextFrame.size.height = nextHeight
+        nextFrame = boundsKeeper.clamp(frame: nextFrame, into: screenFrame, minimumVisible: minimumVisible)
+        popupPanel.setFrame(nextFrame, display: true)
+        state = state.expanded(at: nextFrame)
+    }
+
     func minify() {
         let iconFrame = iconFrameBesidePopup()
         iconPanel.setFrame(iconFrame, display: true)

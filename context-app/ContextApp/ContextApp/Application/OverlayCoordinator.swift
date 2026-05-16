@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -16,6 +17,7 @@ final class OverlayCoordinator {
     private var screenGroundingController: ScreenGroundingController?
     private var screenObserver: NSObjectProtocol?
     private var statusBarController: StatusBarController?
+    private var popupResizeCancellable: AnyCancellable?
     private var tutorialActionConsumer: TutorialActionConsumer?
     private var tutorialPlanController: TutorialPlanController?
     private var tutorialSessionController: TutorialSessionController?
@@ -69,9 +71,6 @@ final class OverlayCoordinator {
             onOutsideClick: { [weak bboxPanel, weak self] in
                 bboxPanel?.orderOut(nil)
                 self?.stabilityWatcher.cancel()
-                guard let sessionController = sessionControllerRef,
-                      let stepID = sessionController.currentStepID else { return }
-                sessionController.presentContinuePrompt(stepID: stepID)
             }
         )
         let debugController = DebugBboxController(
@@ -145,6 +144,11 @@ final class OverlayCoordinator {
                 popupController.minify()
             }
         ))
+        popupResizeCancellable = tutorialSessionController.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.fitPopupToContent()
+            }
+        }
         iconPanel.contentView = NSHostingView(rootView: IconView(
             onRestore: { popupController.restore() },
             onContextMenu: { menuController.handleTestBbox() },
@@ -169,6 +173,7 @@ final class OverlayCoordinator {
         self.tutorialSessionController = tutorialSessionController
 
         popupController.showPopup()
+        fitPopupToContent()
         observeScreenChanges()
     }
 
@@ -187,6 +192,7 @@ final class OverlayCoordinator {
         focusMaskController = nil
         screenGroundingController = nil
         statusBarController = nil
+        popupResizeCancellable = nil
         tutorialActionConsumer = nil
         tutorialPlanController = nil
         tutorialSessionController = nil
@@ -215,5 +221,11 @@ final class OverlayCoordinator {
     private func reclampPanels() {
         guard let screen = screenProvider() else { return }
         popupController?.reclamp(to: screen.frame)
+        fitPopupToContent()
+    }
+
+    private func fitPopupToContent() {
+        guard let screen = screenProvider() else { return }
+        popupController?.fitPopupHeight(to: screen.frame)
     }
 }

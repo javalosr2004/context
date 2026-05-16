@@ -84,6 +84,12 @@ class HoloClientTests(unittest.TestCase):
             "current GUI image (image 1) and reference image (image 2)",
             prompt,
         )
+        self.assertIn("reference crop for the target", prompt)
+        self.assertIn("primary matching signal", prompt)
+        self.assertIn(
+            "confidence >= 0.9 only when the exact target is visible",
+            prompt,
+        )
         self.assertIn("click position on image 1", prompt)
         self.assertIn("Submit", prompt)
 

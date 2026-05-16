@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 import uuid
@@ -48,11 +49,14 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
             decode_started = time.perf_counter()
             image_bytes = await input_image.read()
             upload_bytes = len(image_bytes)
+            image_sha256 = sha256_hex(image_bytes)
             image_size, screenshot_data_uri = read_image(image_bytes)
             reference_image_data_uri = None
+            reference_image_sha256 = None
             if reference_image is not None:
                 reference_bytes = await reference_image.read()
                 reference_upload_bytes = len(reference_bytes)
+                reference_image_sha256 = sha256_hex(reference_bytes)
                 _, reference_image_data_uri = read_image(reference_bytes)
             decode_ms = elapsed_ms(decode_started)
 
@@ -131,6 +135,8 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
             upload_bytes=upload_bytes,
             reference_upload_bytes=reference_upload_bytes,
             has_reference_image=reference_image_data_uri is not None,
+            input_image_sha256=image_sha256,
+            reference_image_sha256=reference_image_sha256,
             image_size={"width": image_size.width, "height": image_size.height},
             holo_point_1000={"x": point_1000.x, "y": point_1000.y},
             holo_confidence=point_1000.confidence,
@@ -151,6 +157,10 @@ def create_app(localizer: HoloLocalizer | None = None) -> FastAPI:
 
 def elapsed_ms(started: float) -> int:
     return round((time.perf_counter() - started) * 1000)
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def log_predict_error(

@@ -97,6 +97,8 @@ def test_predict_logs_success_without_image_payload(caplog):
     assert event["status_code"] == 200
     assert event["instruction"] == "Submit button"
     assert event["has_reference_image"] is False
+    assert len(event["input_image_sha256"]) == 64
+    assert event["reference_image_sha256"] is None
     assert event["image_size"] == {"width": 200, "height": 100}
     assert event["holo_point_1000"] == {"x": 250, "y": 750}
     assert event["normalized_point"] == {"x": 0.25, "y": 0.75}

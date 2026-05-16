@@ -36,5 +36,8 @@ def test_build_localization_prompt_names_reference_image_and_click_target_image(
     )
 
     assert "current GUI image (image 1) and reference image (image 2)" in prompt
+    assert "reference crop for the target" in prompt
+    assert "primary matching signal" in prompt
+    assert "confidence >= 0.9 only when the exact target is visible" in prompt
     assert "click position on image 1" in prompt
     assert "Submit" in prompt

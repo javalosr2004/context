@@ -41,8 +41,9 @@ final class OverlayCoordinator {
             interactiveWindowsProvider: {
                 [popupPanel, iconPanel]
             },
-            onExit: { [weak bboxPanel] in
+            onExit: { [weak bboxPanel, weak self] in
                 bboxPanel?.orderOut(nil)
+                self?.stabilityWatcher.cancel()
             },
             onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak iconPanel, screenProvider] in
                 bboxPanel?.orderOut(nil)
@@ -65,8 +66,9 @@ final class OverlayCoordinator {
                     await sessionController.confirmStep(stepID: stepID, confirmed: true, note: nil)
                 }
             },
-            onOutsideClick: { [weak bboxPanel] in
+            onOutsideClick: { [weak bboxPanel, weak self] in
                 bboxPanel?.orderOut(nil)
+                self?.stabilityWatcher.cancel()
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID else { return }
                 sessionController.presentContinuePrompt(stepID: stepID)
@@ -109,8 +111,13 @@ final class OverlayCoordinator {
         )
         sessionControllerRef = tutorialSessionController
         let tutorialActionConsumer = TutorialActionConsumer(
-            groundInstruction: { instruction in
-                await screenGroundingController.submit(instruction)
+            groundInstruction: { [weak self, weak popupPanel, weak iconPanel, screenProvider] instruction in
+                if let self, let screen = screenProvider() {
+                    let excluded: [NSWindow] = [popupPanel, iconPanel, self.stabilityIndicator?.window]
+                        .compactMap { $0 }
+                    self.stabilityWatcher.prewarm(on: screen, excludingWindows: excluded)
+                }
+                return await screenGroundingController.submit(instruction)
             },
             presentNonSpatial: { step in
                 "Showing instruction inline for \(step.action.type)."

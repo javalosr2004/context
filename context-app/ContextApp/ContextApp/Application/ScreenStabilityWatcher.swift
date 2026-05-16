@@ -35,36 +35,79 @@ final class ScreenStabilityWatcher {
     static let blurRadius: Double = 2.0
 
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    private var activeStream: SCStream?
+    private var activeCollector: FrameCollector?
+    private var prewarmTask: Task<Void, Never>?
+
+    /// Opens the SCStream so frames are already flowing by the time the user
+    /// clicks. Idempotent — safe to call multiple times per step.
+    func prewarm(on screen: NSScreen, excludingWindows: [NSWindow] = []) {
+        guard prewarmTask == nil, activeStream == nil else { return }
+        prewarmTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.prewarmTask = nil }
+            guard let displayID = try? Self.displayID(for: screen) else { return }
+            let collector = FrameCollector()
+            do {
+                let stream = try await Self.makeStream(
+                    displayID: displayID,
+                    excludingWindows: excludingWindows,
+                    collector: collector
+                )
+                self.activeStream = stream
+                self.activeCollector = collector
+            } catch {
+                return
+            }
+        }
+    }
+
+    /// Tears down any prewarmed or active stream. Safe to call when nothing is
+    /// running.
+    func cancel() {
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        if let stream = activeStream {
+            Task { try? await stream.stopCapture() }
+        }
+        activeStream = nil
+        activeCollector = nil
+    }
 
     func waitUntilStable(
         on screen: NSScreen,
         excludingWindows: [NSWindow] = [],
         onProgress: ((StabilityProgress) -> Void)? = nil
     ) async {
-        let displayID: CGDirectDisplayID
-        do {
-            displayID = try Self.displayID(for: screen)
-        } catch {
-            onProgress?(.streamFailed)
-            return
+        if let task = prewarmTask {
+            await task.value
         }
 
-        let collector = FrameCollector()
-        let stream: SCStream
-        do {
-            stream = try await Self.makeStream(
-                displayID: displayID,
-                excludingWindows: excludingWindows,
-                collector: collector
-            )
-        } catch {
-            onProgress?(.streamFailed)
-            return
+        let collector: FrameCollector
+        if let warmed = activeCollector, activeStream != nil {
+            collector = warmed
+        } else {
+            guard let displayID = try? Self.displayID(for: screen) else {
+                onProgress?(.streamFailed)
+                return
+            }
+            let fresh = FrameCollector()
+            do {
+                let stream = try await Self.makeStream(
+                    displayID: displayID,
+                    excludingWindows: excludingWindows,
+                    collector: fresh
+                )
+                activeStream = stream
+                activeCollector = fresh
+                collector = fresh
+            } catch {
+                onProgress?(.streamFailed)
+                return
+            }
         }
 
-        defer {
-            Task { try? await stream.stopCapture() }
-        }
+        defer { cancel() }
 
         try? await Task.sleep(nanoseconds: UInt64(Self.initialDelay * 1_000_000_000))
 
@@ -152,9 +195,9 @@ final class ScreenStabilityWatcher {
         let halfHeight = max(1, display.height / 2)
         config.width = halfWidth
         config.height = halfHeight
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 10)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         config.queueDepth = 2
-        config.showsCursor = false
+        config.showsCursor = true
 
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
         try stream.addStreamOutput(

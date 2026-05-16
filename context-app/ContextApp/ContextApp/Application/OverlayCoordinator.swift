@@ -193,7 +193,7 @@ final class OverlayCoordinator {
     }
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {
-        CGRect(x: screen.midX - 180, y: screen.midY - 220, width: 360, height: 440)
+        CGRect(x: screen.midX - 170, y: screen.midY - 180, width: 340, height: 360)
     }
 
     private func initialIconFrame(on screen: CGRect) -> CGRect {

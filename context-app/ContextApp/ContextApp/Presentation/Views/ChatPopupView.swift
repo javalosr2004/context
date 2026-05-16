@@ -16,6 +16,24 @@ private struct StepJSONPreview: Identifiable {
     let json: String
 }
 
+private enum PeekStepKind {
+    case done
+    case now
+    case next
+}
+
+private struct TutorialPeekSteps {
+    let done: TutorialStepDisplayItem?
+    let now: TutorialStepDisplayItem?
+    let next: TutorialStepDisplayItem?
+}
+
+private struct TutorialAnswerDisplay {
+    let id: UUID
+    let question: String
+    let answer: String
+}
+
 struct ChatPopupView: View {
     @ObservedObject var sessionController: TutorialSessionController
     let onTutorialStepSelected: (TutorialStep) async -> String
@@ -36,6 +54,7 @@ struct ChatPopupView: View {
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
     @State private var rejectionNote = ""
+    @State private var dismissedAnswerID: UUID?
     @State private var selectedConfirmationStepID: String?
     @FocusState private var isMessageFieldFocused: Bool
 
@@ -56,21 +75,42 @@ struct ChatPopupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            messageList
-            continuePromptControls
-            confirmationControls
-            instructionInput
-            composer
+            handoffChrome
+
+            if isTutorialFinished {
+                finishedTutorialView
+            } else {
+                tutorialMeta
+
+                if let answer = latestTutorialAnswer {
+                    answerCard(answer)
+                }
+
+                if let stepID = sessionController.pendingContinuePromptStepID {
+                    continuePromptCard(stepID: stepID)
+                }
+
+                if let selectedConfirmationStepID {
+                    confirmationCard(stepID: selectedConfirmationStepID)
+                }
+
+                peekStack
+                    .opacity(isTutorialPaused ? 0.35 : 1)
+                    .allowsHitTesting(!isTutorialPaused)
+            }
+
+            askBar
         }
-        .frame(width: 360, height: isInstructionInputVisible ? 620 : 440)
+        .frame(width: 340)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous)
-                .stroke(OverlayTheme.hairline, lineWidth: 1)
+                .stroke(Color.black.opacity(0.10), lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.18), radius: 24, y: 12)
+        .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+        .shadow(color: .black.opacity(0.22), radius: 40, y: 12)
+        .shadow(color: .black.opacity(0.18), radius: 80, y: 24)
         .onReceive(Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()) { _ in
             guard sessionController.status.isBusy else { return }
             loadingWordIndex = (loadingWordIndex + 1) % Self.loadingWords.count
@@ -83,6 +123,466 @@ struct ChatPopupView: View {
                 DraftPlanPreviewSheet(plan: plan)
             }
         }
+    }
+
+    private var handoffChrome: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                trafficLight(color: Color(red: 0.984, green: 0.376, blue: 0.345))
+                trafficLight(color: Color(red: 0.992, green: 0.745, blue: 0.251))
+                trafficLight(color: Color(red: 0.176, green: 0.788, blue: 0.251))
+            }
+
+            Spacer()
+
+            Button(action: startNewChat) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(OverlayTheme.quietFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .help("New chat")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+    }
+
+    private func trafficLight(color: Color) -> some View {
+        Circle()
+            .fill(color)
+            .frame(width: 12, height: 12)
+            .overlay(Circle().stroke(Color.black.opacity(0.20), lineWidth: 0.5))
+    }
+
+    private var tutorialMeta: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(tutorialName)
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(0.44)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.black.opacity(0.50))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text(metaRightText)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.black.opacity(0.50))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 2)
+            .padding(.bottom, 10)
+
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.black.opacity(0.07))
+
+                    Capsule()
+                        .fill(Color.black.opacity(0.55))
+                        .frame(width: max(0, geometry.size.width * tutorialProgress))
+                }
+            }
+            .frame(height: 2)
+            .padding(.horizontal, 14)
+        }
+    }
+
+    private var peekStack: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let doneStep = peekSteps.done {
+                peekStepRow(kind: .done, title: doneStep.title, step: doneStep.step)
+            }
+
+            if let nowStep = peekSteps.now {
+                peekStepRow(kind: .now, title: nowStep.title, step: nowStep.step)
+            } else {
+                emptyPeekRow
+            }
+
+            if let nextStep = peekSteps.next {
+                peekStepRow(kind: .next, title: nextStep.title, step: nextStep.step)
+            }
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+        .animation(.easeInOut(duration: 0.18), value: sessionController.currentStepID)
+    }
+
+    private func peekStepRow(kind: PeekStepKind, title: String, step: TutorialStep) -> some View {
+        Button {
+            handlePeekStepTap(kind: kind, step: step)
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                stepMarker(kind: kind)
+
+                Text(title)
+                    .font(.system(size: kind == .now ? 14 : 13, weight: kind == .now ? .semibold : .regular))
+                    .strikethrough(kind == .done, color: Color.black.opacity(0.25))
+                    .foregroundStyle(stepTextColor(kind))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if kind == .now && activeStepID == step.stepId {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.72)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(kind == .now ? Color.black.opacity(0.05) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(kind == .now ? OverlayTheme.hairline : Color.clear, lineWidth: 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(kind == .done || !canToggleStep(step))
+        .contextMenu {
+            Button {
+                showStepJSONPreview(for: step)
+            } label: {
+                Label("Show step JSON", systemImage: "curlybraces")
+            }
+        }
+        .help(kind == .now ? "Show on screen" : "")
+    }
+
+    private var emptyPeekRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Ready when you are")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(OverlayTheme.primaryText)
+
+            Text("Ask Context to plan a tutorial from your screen.")
+                .font(.system(size: 13))
+                .foregroundStyle(OverlayTheme.quaternaryText)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func stepMarker(kind: PeekStepKind) -> some View {
+        switch kind {
+        case .done:
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.40))
+                .frame(width: 18, height: 18)
+        case .now:
+            ZStack {
+                Circle()
+                    .fill(OverlayTheme.invertedAccent)
+                    .frame(width: 18, height: 18)
+                    .shadow(color: Color.black.opacity(0.06), radius: 0, x: 0, y: 0)
+
+                Circle()
+                    .fill(OverlayTheme.invertedForeground)
+                    .frame(width: 5, height: 5)
+            }
+            .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 3))
+        case .next:
+            Image(systemName: "arrow.right")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.black.opacity(0.35))
+                .frame(width: 18, height: 18)
+                .overlay(Circle().stroke(Color.black.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+        }
+    }
+
+    private func stepTextColor(_ kind: PeekStepKind) -> Color {
+        switch kind {
+        case .done:
+            return OverlayTheme.doneText
+        case .now:
+            return OverlayTheme.primaryText
+        case .next:
+            return OverlayTheme.quaternaryText
+        }
+    }
+
+    private var askBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(OverlayTheme.tertiaryText)
+
+            TextField("Ask Context anything", text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .focused($isMessageFieldFocused)
+                .disabled(sessionController.status.isBusy)
+                .onSubmit(submitDraft)
+
+            if isMessageFieldFocused {
+                keyboardHint("esc")
+
+                Button(action: submitDraft) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(OverlayTheme.invertedForeground)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(canSubmitDraft ? Color.black.opacity(0.85) : Color.black.opacity(0.18))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .disabled(!canSubmitDraft)
+                .help("Send")
+            } else {
+                keyboardHint("⌘K")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(OverlayTheme.askSurface)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(OverlayTheme.separator)
+                .frame(height: 0.5)
+        }
+    }
+
+    private func keyboardHint(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .regular, design: .monospaced))
+            .foregroundStyle(Color.black.opacity(0.40))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.black.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+            )
+    }
+
+    private func answerCard(_ answer: TutorialAnswerDisplay) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 11, weight: .medium))
+
+                Text("Answer · tutorial paused")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.42)
+                    .textCase(.uppercase)
+            }
+            .foregroundStyle(OverlayTheme.tertiaryText)
+
+            Text("\"\(answer.question)\"")
+                .font(.system(size: 12).italic())
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .lineLimit(2)
+
+            MarkdownTextView(text: answer.answer)
+                .font(.system(size: 13.5))
+                .lineSpacing(3)
+                .foregroundStyle(OverlayTheme.primaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if sessionController.status.isBusy {
+                typingDots
+                    .padding(.top, 1)
+            } else {
+                HStack(spacing: 6) {
+                    Button("↩ Resume tutorial") {
+                        dismissLatestAnswer()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.invertedForeground)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(OverlayTheme.invertedAccent)
+                    .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+
+                    Button("Ask follow-up") {
+                        isMessageFieldFocused = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private var typingDots: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(OverlayTheme.primaryText.opacity(0.30))
+                    .frame(width: 5, height: 5)
+                    .opacity(loadingWordIndex == index ? 0.70 : 0.25)
+            }
+        }
+    }
+
+    private func continuePromptCard(stepID: String) -> some View {
+        handoffPromptCard(
+            title: "Continue to next step?",
+            message: "Clicked outside the highlight. Continue, or re-check the screen.",
+            primaryTitle: "Continue",
+            primaryAction: { submitContinuePrompt(stepID: stepID, confirmed: true) },
+            secondaryTitle: "Re-check screen",
+            secondaryAction: { submitContinuePrompt(stepID: stepID, confirmed: false) }
+        )
+    }
+
+    private func confirmationCard(stepID: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Does the highlight look right?")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(OverlayTheme.primaryText)
+
+            TextField("Optional note for Not right", text: $rejectionNote)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+                )
+
+            HStack(spacing: 6) {
+                compactPromptButton("Looks right", isPrimary: true) {
+                    submitConfirmation(stepID: stepID, confirmed: true)
+                }
+
+                compactPromptButton("Not right", isPrimary: false) {
+                    submitConfirmation(stepID: stepID, confirmed: false)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private func handoffPromptCard(
+        title: String,
+        message: String,
+        primaryTitle: String,
+        primaryAction: @escaping () -> Void,
+        secondaryTitle: String,
+        secondaryAction: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(OverlayTheme.primaryText)
+
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(OverlayTheme.secondaryText)
+
+            HStack(spacing: 6) {
+                compactPromptButton(primaryTitle, isPrimary: true, action: primaryAction)
+                compactPromptButton(secondaryTitle, isPrimary: false, action: secondaryAction)
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private func compactPromptButton(_ title: String, isPrimary: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(isPrimary ? OverlayTheme.invertedForeground : OverlayTheme.secondaryText)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(isPrimary ? OverlayTheme.invertedAccent : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+    }
+
+    private var finishedTutorialView: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(OverlayTheme.invertedForeground)
+                .frame(width: 44, height: 44)
+                .background(OverlayTheme.invertedAccent)
+                .clipShape(Circle())
+                .padding(.bottom, 14)
+
+            Text("All done")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(OverlayTheme.primaryText)
+
+            Text("\(latestPlan?.steps.count ?? 0) steps · \(tutorialName)")
+                .font(.system(size: 12, weight: .medium))
+                .tracking(0.48)
+                .textCase(.uppercase)
+                .foregroundStyle(Color.black.opacity(0.50))
+                .padding(.top, 4)
+
+            Button("Start new tutorial", action: startNewChat)
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OverlayTheme.invertedForeground)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(OverlayTheme.invertedAccent)
+                .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+                .padding(.top, 18)
+        }
+        .padding(.top, 28)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity)
     }
 
     private var header: some View {
@@ -451,6 +951,77 @@ struct ChatPopupView: View {
         return sessionController.status.label
     }
 
+    private var latestPlan: TutorialPlan? {
+        sessionController.messages.reversed().compactMap { message in
+            if case .tutorialPlan(let plan) = message.content { return plan }
+            return nil
+        }.first
+    }
+
+    private var tutorialName: String {
+        let rawName = latestPlan?.goal ?? latestPlan?.summary ?? "Context Tutorial"
+        let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return "Context Tutorial" }
+        return trimmedName
+    }
+
+    private var currentStepIndex: Int? {
+        guard let plan = latestPlan, !plan.steps.isEmpty else { return nil }
+        guard let currentStepID = sessionController.currentStepID else { return plan.steps.startIndex }
+        return plan.steps.firstIndex { $0.stepId == currentStepID } ?? plan.steps.startIndex
+    }
+
+    private var tutorialProgress: CGFloat {
+        guard let plan = latestPlan, !plan.steps.isEmpty, let currentStepIndex else { return 0 }
+        let completedCount = min(plan.steps.count, currentStepIndex + (isTutorialFinished ? 1 : 0))
+        return CGFloat(max(1, completedCount)) / CGFloat(plan.steps.count)
+    }
+
+    private var metaRightText: String {
+        if isTutorialPaused {
+            return "paused"
+        }
+        guard let plan = latestPlan, !plan.steps.isEmpty, let currentStepIndex else {
+            return sessionController.status.label.lowercased()
+        }
+        return "\(currentStepIndex + 1) of \(plan.steps.count)"
+    }
+
+    private var isTutorialFinished: Bool {
+        sessionController.status == .completed
+    }
+
+    private var isTutorialPaused: Bool {
+        latestTutorialAnswer != nil || sessionController.pendingContinuePromptStepID != nil || selectedConfirmationStepID != nil
+    }
+
+    private var peekSteps: TutorialPeekSteps {
+        guard let plan = latestPlan, !plan.steps.isEmpty, let currentStepIndex else {
+            return TutorialPeekSteps(done: nil, now: nil, next: nil)
+        }
+
+        let items = TutorialPlanDisplay.make(from: plan, currentStepID: sessionController.currentStepID).itemsByStepID()
+        let doneStep = currentStepIndex > plan.steps.startIndex
+            ? displayItem(for: plan.steps[currentStepIndex - 1], index: currentStepIndex - 1, items: items)
+            : nil
+        let nowStep = displayItem(for: plan.steps[currentStepIndex], index: currentStepIndex, items: items)
+        let nextIndex = plan.steps.index(after: currentStepIndex)
+        let nextStep = nextIndex < plan.steps.endIndex
+            ? displayItem(for: plan.steps[nextIndex], index: nextIndex, items: items)
+            : nil
+
+        return TutorialPeekSteps(done: doneStep, now: nowStep, next: nextStep)
+    }
+
+    private var latestTutorialAnswer: TutorialAnswerDisplay? {
+        guard let latestTutorialText = latestTextMessage(role: .tutorial) else { return nil }
+        guard latestTutorialText.id != dismissedAnswerID else { return nil }
+        guard !latestTutorialText.text.caseInsensitiveEquals("Tutorial completed.") else { return nil }
+        guard let latestUserText = latestTextMessage(role: .user) else { return nil }
+        guard latestTutorialText.createdAt >= latestUserText.createdAt else { return nil }
+        return TutorialAnswerDisplay(id: latestTutorialText.id, question: latestUserText.text, answer: latestTutorialText.text)
+    }
+
     private var composerPlaceholder: String {
         "Message"
     }
@@ -461,6 +1032,41 @@ struct ChatPopupView: View {
 
     private var canSubmitInstruction: Bool {
         !instructionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func latestTextMessage(role: ChatMessageRole) -> (id: UUID, text: String, createdAt: Date)? {
+        for message in sessionController.messages.reversed() where message.role == role {
+            if case .text(let text) = message.content {
+                let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedText.isEmpty {
+                    return (message.id, trimmedText, message.createdAt)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func displayItem(
+        for step: TutorialStep,
+        index: Int,
+        items: [String: TutorialStepDisplayItem]
+    ) -> TutorialStepDisplayItem {
+        items[step.stepId] ?? TutorialStepDisplayItem(
+            step: step,
+            stepNumber: index + 1,
+            title: step.instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private func handlePeekStepTap(kind: PeekStepKind, step: TutorialStep) {
+        guard kind == .now else { return }
+        toggleStepExpansion(step)
+    }
+
+    private func dismissLatestAnswer() {
+        dismissedAnswerID = latestTutorialAnswer?.id
+        draft = ""
+        isMessageFieldFocused = false
     }
 
     @ViewBuilder
@@ -934,6 +1540,25 @@ struct ChatPopupView: View {
 
         guard let last = sessionController.messages.last else { return }
         proxy.scrollTo(last.id, anchor: .bottom)
+    }
+}
+
+private extension TutorialPlanDisplay {
+    func itemsByStepID() -> [String: TutorialStepDisplayItem] {
+        var items: [String: TutorialStepDisplayItem] = [:]
+        if let currentStep {
+            items[currentStep.step.stepId] = currentStep
+        }
+        for upcomingStep in upcomingSteps {
+            items[upcomingStep.step.stepId] = upcomingStep
+        }
+        return items
+    }
+}
+
+private extension String {
+    func caseInsensitiveEquals(_ other: String) -> Bool {
+        compare(other, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
     }
 }
 

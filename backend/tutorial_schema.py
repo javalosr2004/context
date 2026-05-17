@@ -77,6 +77,12 @@ class TutorialAction(TutorialSchemaModel):
         le=10000,
         description="Wait duration in milliseconds. Only used when type is 'wait'.",
     )
+    requires_confirmation: bool = Field(
+        description=(
+            "True when the user must explicitly confirm this action before "
+            "the step advances. Always true for confirm actions."
+        ),
+    )
 
 
 class TutorialStep(TutorialSchemaModel):
@@ -88,14 +94,17 @@ class TutorialStep(TutorialSchemaModel):
         min_length=1,
         description="One concise user-facing overlay instruction.",
     )
-    action: TutorialAction
+    actions: list[TutorialAction] = Field(
+        min_length=1,
+        description=(
+            "Ordered list of mechanical actions that together accomplish "
+            "the step's user-perceived intent. Walked one at a time."
+        ),
+    )
     confidence: float = Field(
         ge=0.0,
         le=1.0,
         description="Model confidence from 0.0 to 1.0.",
-    )
-    requires_confirmation: bool = Field(
-        description="True when the screen state or target is uncertain."
     )
 
 
@@ -222,19 +231,16 @@ def validate_tutorial_plan_semantics(plan: TutorialPlan) -> None:
 
 
 def validate_step_semantics(step: TutorialStep) -> None:
-    validate_action_semantics(step.action)
-
-    if step.action.type == "confirm" and not step.requires_confirmation:
-        raise ValueError("confirm actions must set requires_confirmation to true")
-
-    if (
-        step.confidence < LOW_CONFIDENCE_THRESHOLD
-        and not step.requires_confirmation
-    ):
-        raise ValueError("steps below 0.7 confidence must require confirmation")
+    if not step.actions:
+        raise ValueError("step must contain at least one action")
+    for action in step.actions:
+        validate_action_semantics(action)
 
 
 def validate_action_semantics(action: TutorialAction) -> None:
+    if action.type == "confirm" and not action.requires_confirmation:
+        raise ValueError("confirm actions must set requires_confirmation to true")
+
     if action.type in {"click", "double_click", "right_click", "hover"}:
         require_target(action)
 

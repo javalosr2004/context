@@ -26,7 +26,49 @@ class TutorialSchemaTests(unittest.TestCase):
     def test_accepts_valid_click_action(self) -> None:
         plan = parse_tutorial_plan(build_plan_json(valid_click_step_json()))
 
-        self.assertEqual(plan.steps[0].action.type, "click")
+        self.assertEqual(plan.steps[0].actions[0].type, "click")
+
+    def test_accepts_multi_action_step(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Open new repo flow.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "New", "role": "button"},
+      "requires_confirmation": true
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "Repo name"},
+      "text": "demo",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+        self.assertEqual(len(plan.steps[0].actions), 2)
+
+    def test_rejects_empty_actions_list(self) -> None:
+        with self.assertRaises(TutorialPlanValidationError):
+            parse_tutorial_plan(
+                build_plan_json(
+                    """
+{
+  "step_id": "step_001",
+  "instruction": "Empty.",
+  "actions": [],
+  "confidence": 0.9
+}
+""".strip()
+                )
+            )
 
     def test_rejects_invalid_json_without_extracting_fragments(self) -> None:
         raw_plan = f"{build_plan_json(valid_click_step_json())}\n\n}}"
@@ -42,15 +84,12 @@ class TutorialSchemaTests(unittest.TestCase):
 {
   "step_id": "step_001",
   "instruction": "Submit the form.",
-  "action": {
+  "actions": [{
     "type": "submit",
-    "target": {
-      "kind": "element",
-      "label": "Create repository"
-    }
-  },
-  "confidence": 0.86,
-  "requires_confirmation": false
+    "target": {"kind": "element", "label": "Create repository"},
+    "requires_confirmation": false
+  }],
+  "confidence": 0.86
 }
 """.strip()
                 )
@@ -64,18 +103,13 @@ class TutorialSchemaTests(unittest.TestCase):
 {
   "step_id": "step_001",
   "instruction": "Type the repository name.",
-  "action": {
+  "actions": [{
     "type": "type",
-    "target": {
-      "kind": "element",
-      "label": "Repository name"
-    },
-    "payload": {
-      "text": "context-demo"
-    }
-  },
-  "confidence": 0.86,
-  "requires_confirmation": false
+    "target": {"kind": "element", "label": "Repository name"},
+    "payload": {"text": "context-demo"},
+    "requires_confirmation": false
+  }],
+  "confidence": 0.86
 }
 """.strip()
                 )
@@ -89,33 +123,11 @@ class TutorialSchemaTests(unittest.TestCase):
 {
   "step_id": "step_001",
   "instruction": "Confirm the page looks correct.",
-  "action": {
-    "type": "confirm"
-  },
-  "confidence": 0.86,
-  "requires_confirmation": false
-}
-""".strip()
-                )
-            )
-
-    def test_rejects_low_confidence_steps_without_confirmation(self) -> None:
-        with self.assertRaises(TutorialPlanValidationError):
-            parse_tutorial_plan(
-                build_plan_json(
-                    """
-{
-  "step_id": "step_001",
-  "instruction": "Click the likely matching button.",
-  "action": {
-    "type": "click",
-    "target": {
-      "kind": "element",
-      "description": "button near the top right"
-    }
-  },
-  "confidence": 0.69,
-  "requires_confirmation": false
+  "actions": [{
+    "type": "confirm",
+    "requires_confirmation": false
+  }],
+  "confidence": 0.86
 }
 """.strip()
                 )
@@ -129,11 +141,11 @@ class TutorialSchemaTests(unittest.TestCase):
 {
   "step_id": "step_001",
   "instruction": "Click the button.",
-  "action": {
-    "type": "click"
-  },
-  "confidence": 0.9,
-  "requires_confirmation": false
+  "actions": [{
+    "type": "click",
+    "requires_confirmation": true
+  }],
+  "confidence": 0.9
 }
 """.strip()
                 )
@@ -147,11 +159,11 @@ class TutorialSchemaTests(unittest.TestCase):
 {
   "step_id": "step_001",
   "instruction": "Wait for loading to finish.",
-  "action": {
-    "type": "wait"
-  },
-  "confidence": 0.9,
-  "requires_confirmation": false
+  "actions": [{
+    "type": "wait",
+    "requires_confirmation": false
+  }],
+  "confidence": 0.9
 }
 """.strip()
                 )
@@ -178,16 +190,16 @@ def valid_click_step_json() -> str:
 {
   "step_id": "step_001",
   "instruction": "Click the New repository button.",
-  "action": {
+  "actions": [{
     "type": "click",
     "target": {
       "kind": "element",
       "label": "New repository",
       "role": "button"
-    }
-  },
-  "confidence": 0.86,
-  "requires_confirmation": false
+    },
+    "requires_confirmation": true
+  }],
+  "confidence": 0.86
 }
 """.strip()
 

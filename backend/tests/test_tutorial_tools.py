@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from typing import Any
 
 from backend.tutorial_tools import (
     INVALID_TOOL_ARGUMENTS,
@@ -19,7 +20,7 @@ from backend.tutorial_tools import (
 )
 
 
-def _update_plan_args(plan: list[dict]) -> str:
+def _update_plan_args(plan: list[dict[str, Any]]) -> str:
     return json.dumps({"plan_reasoning": "test", "plan": plan})
 
 
@@ -47,20 +48,30 @@ class TutorialToolDispatchTests(unittest.TestCase):
         self.assertEqual(parse_request_screen_reason(call), "verify the click landed")
 
 
+def _click_payload(description: str = "Green New button.") -> dict[str, Any]:
+    return {"kind": "click", "agent_description": description}
+
+
+def _plan_item(
+    *actions: dict[str, Any],
+    human_text: str = "Do the thing.",
+    confidence: float = 0.9,
+    refines_current: bool = False,
+) -> dict[str, Any]:
+    return {
+        "human_text": human_text,
+        "confidence": confidence,
+        "refines_current": refines_current,
+        "actions": list(actions),
+    }
+
+
 class UpdatePlanParsingTests(unittest.TestCase):
     def test_parse_click_item(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
-                [
-                    {
-                        "kind": "click",
-                        "human_text": "Click New.",
-                        "agent_description": "Green New button.",
-                        "confidence": 0.9,
-                        "refines_current": False,
-                    }
-                ]
+                [_plan_item(_click_payload(), human_text="Click New.")]
             ),
         )
         args = parse_update_plan_arguments(call)
@@ -68,62 +79,67 @@ class UpdatePlanParsingTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         candidate = candidates[0]
         self.assertFalse(candidate.refines_current)
-        self.assertEqual(candidate.step_template.action.type, "click")
-        self.assertEqual(
-            candidate.step_template.action.target.description, "Green New button."
-        )
+        actions = candidate.step_template.actions
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].type, "click")
+        self.assertEqual(actions[0].target.description, "Green New button.")
+        self.assertTrue(actions[0].requires_confirmation)
         self.assertEqual(candidate.step_template.confidence, 0.9)
 
-    def test_parse_type_item(self) -> None:
+    def test_parse_multi_action_item(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
                 [
-                    {
-                        "kind": "type",
-                        "human_text": "Type the repo name.",
-                        "copiable_text": "context-demo",
-                        "agent_description": "Repository name field.",
-                        "confidence": 0.75,
-                        "refines_current": False,
-                    }
+                    _plan_item(
+                        {
+                            "kind": "type",
+                            "copiable_text": "context-demo",
+                            "agent_description": "Repository name field.",
+                        },
+                        {"kind": "press_key", "key": "Enter"},
+                        human_text="Name the repo and submit.",
+                    )
                 ]
             ),
         )
         candidates = candidates_from_arguments(parse_update_plan_arguments(call))
-        self.assertEqual(candidates[0].step_template.action.type, "type")
-        self.assertEqual(candidates[0].step_template.action.text, "context-demo")
+        actions = candidates[0].step_template.actions
+        self.assertEqual([a.type for a in actions], ["type", "press_key"])
+        self.assertEqual(actions[0].text, "context-demo")
+        self.assertTrue(actions[0].requires_confirmation)
+        self.assertFalse(actions[1].requires_confirmation)
 
     def test_parse_scroll_item_infers_direction(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
                 [
-                    {
-                        "kind": "scroll",
-                        "human_text": "Scroll down to billing.",
-                        "expected_end_state": "The Billing section is visible.",
-                        "confidence": 0.7,
-                        "refines_current": False,
-                    }
+                    _plan_item(
+                        {
+                            "kind": "scroll",
+                            "expected_end_state": "The Billing section is visible.",
+                        },
+                        human_text="Scroll down to billing.",
+                        confidence=0.7,
+                    )
                 ]
             ),
         )
         candidates = candidates_from_arguments(parse_update_plan_arguments(call))
-        self.assertEqual(candidates[0].step_template.action.direction, "down")
+        self.assertEqual(candidates[0].step_template.actions[0].direction, "down")
 
     def test_refines_current_passthrough(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
                 [
-                    {
-                        "kind": "press_key",
-                        "human_text": "Press Enter.",
-                        "key": "Enter",
-                        "confidence": 0.95,
-                        "refines_current": True,
-                    }
+                    _plan_item(
+                        {"kind": "press_key", "key": "Enter"},
+                        human_text="Press Enter.",
+                        confidence=0.95,
+                        refines_current=True,
+                    )
                 ]
             ),
         )
@@ -135,13 +151,12 @@ class UpdatePlanParsingTests(unittest.TestCase):
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
                 [
-                    {
-                        "kind": "type",
-                        "human_text": "Type.",
+                    _plan_item(
                         # missing copiable_text + agent_description
-                        "confidence": 0.8,
-                        "refines_current": False,
-                    }
+                        {"kind": "type"},
+                        human_text="Type.",
+                        confidence=0.8,
+                    )
                 ]
             ),
         )
@@ -153,13 +168,23 @@ class UpdatePlanParsingTests(unittest.TestCase):
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
+                [_plan_item(_click_payload("x"), human_text="   ")]
+            ),
+        )
+        with self.assertRaises(TutorialToolCallError) as error:
+            parse_update_plan_arguments(call)
+        self.assertEqual(error.exception.code, INVALID_TOOL_ARGUMENTS)
+
+    def test_rejects_empty_actions_list(self) -> None:
+        call = TutorialToolCall(
+            name=UPDATE_PLAN_TOOL_NAME,
+            arguments=_update_plan_args(
                 [
                     {
-                        "kind": "click",
-                        "human_text": "   ",
-                        "agent_description": "x",
+                        "human_text": "Nothing to do.",
                         "confidence": 0.9,
                         "refines_current": False,
+                        "actions": [],
                     }
                 ]
             ),
@@ -174,23 +199,21 @@ class UpdatePlanParsingTests(unittest.TestCase):
             parse_update_plan_arguments(call)
         self.assertEqual(error.exception.code, INVALID_TOOL_CALL)
 
-    def test_low_confidence_step_requires_confirmation(self) -> None:
+    def test_confirm_action_always_requires_confirmation(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
                 [
-                    {
-                        "kind": "press_key",
-                        "human_text": "Press Tab.",
-                        "key": "Tab",
-                        "confidence": 0.4,
-                        "refines_current": False,
-                    }
+                    _plan_item(
+                        {"kind": "confirm"},
+                        human_text="Check the page.",
+                        confidence=0.6,
+                    )
                 ]
             ),
         )
         candidates = candidates_from_arguments(parse_update_plan_arguments(call))
-        self.assertTrue(candidates[0].step_template.requires_confirmation)
+        self.assertTrue(candidates[0].step_template.actions[0].requires_confirmation)
 
 
 if __name__ == "__main__":

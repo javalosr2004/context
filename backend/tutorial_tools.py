@@ -89,55 +89,97 @@ REFINES_CURRENT_DESCRIPTION = (
 )
 
 
-class _PlanItemBase(_StrictModel):
+REQUIRES_CONFIRMATION_DESCRIPTION = (
+    "Pause and wait for the user to confirm this action landed correctly "
+    "before advancing. Default true for actions whose outcome is visible to "
+    "the user (clicks, typing, scrolling). False for mechanical actions "
+    "with no observable effect (press_key, wait). Always true for confirm."
+)
+
+
+class _ActionPayloadBase(_StrictModel):
+    requires_confirmation: bool = Field(description=REQUIRES_CONFIRMATION_DESCRIPTION)
+
+
+class ClickAction(_ActionPayloadBase):
+    kind: Literal["click"]
+    agent_description: str = Field(min_length=1)
+    requires_confirmation: bool = Field(
+        default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
+class TypeAction(_ActionPayloadBase):
+    kind: Literal["type"]
+    copiable_text: str = Field(min_length=1)
+    agent_description: str = Field(min_length=1)
+    requires_confirmation: bool = Field(
+        default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
+class ScrollAction(_ActionPayloadBase):
+    kind: Literal["scroll"]
+    expected_end_state: str = Field(min_length=1)
+    requires_confirmation: bool = Field(
+        default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
+class PressKeyAction(_ActionPayloadBase):
+    kind: Literal["press_key"]
+    key: str = Field(min_length=1)
+    requires_confirmation: bool = Field(
+        default=False, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
+class WaitAction(_ActionPayloadBase):
+    kind: Literal["wait"]
+    duration_ms: int = Field(ge=0, le=10000)
+    requires_confirmation: bool = Field(
+        default=False, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
+class ConfirmAction(_ActionPayloadBase):
+    kind: Literal["confirm"]
+    requires_confirmation: Literal[True] = Field(
+        default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
+ActionPayload = Annotated[
+    Union[
+        ClickAction,
+        TypeAction,
+        ScrollAction,
+        PressKeyAction,
+        WaitAction,
+        ConfirmAction,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+class PlanItem(_StrictModel):
     refines_current: bool = Field(
         default=False, description=REFINES_CURRENT_DESCRIPTION
     )
     human_text: str = Field(min_length=1, description="One concise on-screen instruction.")
     confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_DESCRIPTION)
+    actions: list[ActionPayload] = Field(
+        min_length=1,
+        description=(
+            "Ordered mechanical actions that together accomplish this step's "
+            "user-perceived intent. One step per intent; decompose into "
+            "atomic actions inside. End with a confirm action when the user "
+            "should verify state before the next step begins."
+        ),
+    )
 
 
-class ClickPlanItem(_PlanItemBase):
-    kind: Literal["click"]
-    agent_description: str = Field(min_length=1)
-
-
-class TypePlanItem(_PlanItemBase):
-    kind: Literal["type"]
-    copiable_text: str = Field(min_length=1)
-    agent_description: str = Field(min_length=1)
-
-
-class ScrollPlanItem(_PlanItemBase):
-    kind: Literal["scroll"]
-    expected_end_state: str = Field(min_length=1)
-
-
-class PressKeyPlanItem(_PlanItemBase):
-    kind: Literal["press_key"]
-    key: str = Field(min_length=1)
-
-
-class WaitPlanItem(_PlanItemBase):
-    kind: Literal["wait"]
-    duration_ms: int = Field(ge=0, le=10000)
-
-
-class ConfirmPlanItem(_PlanItemBase):
-    kind: Literal["confirm"]
-
-
-PlanTailItem = Annotated[
-    Union[
-        ClickPlanItem,
-        TypePlanItem,
-        ScrollPlanItem,
-        PressKeyPlanItem,
-        WaitPlanItem,
-        ConfirmPlanItem,
-    ],
-    Field(discriminator="kind"),
-]
+PlanTailItem = PlanItem
 
 
 class TutorialUpdatePlanArguments(_StrictModel):
@@ -320,50 +362,56 @@ def _candidate_from_item(item: PlanTailItem) -> TailCandidate:
     )
 
 
-def _step_template_from_item(item: PlanTailItem) -> TutorialStep:
-    requires_confirmation = item.confidence < 0.7 or isinstance(
-        item, ConfirmPlanItem
-    )
-    if isinstance(item, ClickPlanItem):
-        action = TutorialAction(
-            type="click",
-            target=ActionTarget(kind="element", description=item.agent_description),
-        )
-        requires_confirmation = True
-    elif isinstance(item, TypePlanItem):
-        action = TutorialAction(
-            type="type",
-            target=ActionTarget(kind="element", description=item.agent_description),
-            text=item.copiable_text,
-        )
-        requires_confirmation = True
-    elif isinstance(item, ScrollPlanItem):
-        action = TutorialAction(
-            type="scroll",
-            target=ActionTarget(kind="screen", description=item.expected_end_state),
-            direction=_infer_scroll_direction(
-                f"{item.human_text} {item.expected_end_state}"
-            ),
-        )
-        requires_confirmation = True
-    elif isinstance(item, PressKeyPlanItem):
-        action = TutorialAction(type="press_key", key=item.key)
-    elif isinstance(item, WaitPlanItem):
-        action = TutorialAction(type="wait", duration_ms=item.duration_ms)
-    elif isinstance(item, ConfirmPlanItem):
-        action = TutorialAction(type="confirm")
-    else:  # pragma: no cover — discriminated union is exhaustive
-        raise TutorialToolCallError(
-            INVALID_TOOL_ARGUMENTS,
-            f"Unsupported plan item kind: {type(item).__name__}",
-        )
-
+def _step_template_from_item(item: PlanItem) -> TutorialStep:
+    actions = [_action_from_payload(payload, item.human_text) for payload in item.actions]
     return TutorialStep(
         step_id=TEMPLATE_STEP_ID,
         instruction=item.human_text,
-        action=action,
+        actions=actions,
         confidence=item.confidence,
-        requires_confirmation=requires_confirmation,
+    )
+
+
+def _action_from_payload(payload: ActionPayload, human_text: str) -> TutorialAction:
+    if isinstance(payload, ClickAction):
+        return TutorialAction(
+            type="click",
+            target=ActionTarget(kind="element", description=payload.agent_description),
+            requires_confirmation=payload.requires_confirmation,
+        )
+    if isinstance(payload, TypeAction):
+        return TutorialAction(
+            type="type",
+            target=ActionTarget(kind="element", description=payload.agent_description),
+            text=payload.copiable_text,
+            requires_confirmation=payload.requires_confirmation,
+        )
+    if isinstance(payload, ScrollAction):
+        return TutorialAction(
+            type="scroll",
+            target=ActionTarget(kind="screen", description=payload.expected_end_state),
+            direction=_infer_scroll_direction(
+                f"{human_text} {payload.expected_end_state}"
+            ),
+            requires_confirmation=payload.requires_confirmation,
+        )
+    if isinstance(payload, PressKeyAction):
+        return TutorialAction(
+            type="press_key",
+            key=payload.key,
+            requires_confirmation=payload.requires_confirmation,
+        )
+    if isinstance(payload, WaitAction):
+        return TutorialAction(
+            type="wait",
+            duration_ms=payload.duration_ms,
+            requires_confirmation=payload.requires_confirmation,
+        )
+    if isinstance(payload, ConfirmAction):
+        return TutorialAction(type="confirm", requires_confirmation=True)
+    raise TutorialToolCallError(  # pragma: no cover — discriminated union is exhaustive
+        INVALID_TOOL_ARGUMENTS,
+        f"Unsupported action payload kind: {type(payload).__name__}",
     )
 
 

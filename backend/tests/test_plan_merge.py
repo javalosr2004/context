@@ -14,45 +14,53 @@ from backend.tutorial_schema import (
 )
 
 
+def make_action(action_type: str) -> TutorialAction:
+    if action_type == "click":
+        return TutorialAction(
+            type="click",
+            target=ActionTarget(kind="element", description="something"),
+            requires_confirmation=True,
+        )
+    if action_type == "type":
+        return TutorialAction(
+            type="type",
+            target=ActionTarget(kind="element", description="a field"),
+            text="hello",
+            requires_confirmation=True,
+        )
+    if action_type == "press_key":
+        return TutorialAction(
+            type="press_key", key="Enter", requires_confirmation=False
+        )
+    if action_type == "wait":
+        return TutorialAction(
+            type="wait", duration_ms=500, requires_confirmation=False
+        )
+    if action_type == "scroll":
+        return TutorialAction(
+            type="scroll",
+            target=ActionTarget(kind="screen", description="the bottom"),
+            direction="down",
+            requires_confirmation=True,
+        )
+    if action_type == "confirm":
+        return TutorialAction(type="confirm", requires_confirmation=True)
+    raise ValueError(f"unsupported action_type {action_type!r}")
+
+
 def make_step(
     step_id: str,
     *,
     action_type: str = "click",
+    actions: list[TutorialAction] | None = None,
     instruction: str | None = None,
     confidence: float = 0.85,
 ) -> TutorialStep:
-    if action_type == "click":
-        action = TutorialAction(
-            type="click",
-            target=ActionTarget(kind="element", description="something"),
-        )
-    elif action_type == "type":
-        action = TutorialAction(
-            type="type",
-            target=ActionTarget(kind="element", description="a field"),
-            text="hello",
-        )
-    elif action_type == "press_key":
-        action = TutorialAction(type="press_key", key="Enter")
-    elif action_type == "wait":
-        action = TutorialAction(type="wait", duration_ms=500)
-    elif action_type == "scroll":
-        action = TutorialAction(
-            type="scroll",
-            target=ActionTarget(kind="screen", description="the bottom"),
-            direction="down",
-        )
-    elif action_type == "confirm":
-        action = TutorialAction(type="confirm")
-    else:
-        raise ValueError(f"unsupported action_type {action_type!r}")
-
     return TutorialStep(
         step_id=step_id,
         instruction=instruction or f"do {action_type}",
-        action=action,
+        actions=actions if actions is not None else [make_action(action_type)],
         confidence=confidence,
-        requires_confirmation=True,
     )
 
 
@@ -216,9 +224,9 @@ class MergePlanTailTests(unittest.TestCase):
         bad = TutorialStep(
             step_id="ignored",
             instruction="bad",
-            action=TutorialAction(type="type"),  # missing text + target
+            # missing text + target
+            actions=[TutorialAction(type="type", requires_confirmation=True)],
             confidence=0.9,
-            requires_confirmation=True,
         )
         with self.assertRaises(ValueError):
             merge_plan_tail(

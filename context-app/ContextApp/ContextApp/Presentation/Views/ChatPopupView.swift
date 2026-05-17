@@ -34,6 +34,24 @@ private struct TutorialAnswerDisplay {
     let answer: String
 }
 
+private struct PopupBlurBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = .hudWindow
+        view.state = .active
+        view.isEmphasized = true
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.blendingMode = .behindWindow
+        view.material = .hudWindow
+        view.state = .active
+        view.isEmphasized = true
+    }
+}
+
 struct ChatPopupView: View {
     private static let maximumChatResponseHeight: CGFloat = 500
 
@@ -94,7 +112,7 @@ struct ChatPopupView: View {
             askBar
         }
         .frame(width: 340)
-        .background(overlayBackground)
+        .background(overlayBackground.ignoresSafeArea())
         .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous)
@@ -119,14 +137,13 @@ struct ChatPopupView: View {
 
     private var overlayBackground: some View {
         ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
+            PopupBlurBackground()
 
             LinearGradient(
                 colors: [
-                    Color(red: 0.86, green: 0.63, blue: 0.50).opacity(0.2),
-                    Color(red: 0.58, green: 0.40, blue: 0.49).opacity(0.23),
-                    Color(red: 0.34, green: 0.27, blue: 0.40).opacity(0.3)
+                    Color(red: 0.86, green: 0.63, blue: 0.50).opacity(0.12),
+                    Color(red: 0.58, green: 0.40, blue: 0.49).opacity(0.15),
+                    Color(red: 0.34, green: 0.27, blue: 0.40).opacity(0.18)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -134,7 +151,7 @@ struct ChatPopupView: View {
 
             RadialGradient(
                 colors: [
-                    Color.white.opacity(0.28),
+                    Color.white.opacity(0.12),
                     Color.white.opacity(0.00)
                 ],
                 center: .topLeading,
@@ -144,7 +161,7 @@ struct ChatPopupView: View {
 
             RadialGradient(
                 colors: [
-                    Color(red: 0.96, green: 0.72, blue: 0.60).opacity(0.26),
+                    Color(red: 0.96, green: 0.72, blue: 0.60).opacity(0.12),
                     Color.clear
                 ],
                 center: .topTrailing,
@@ -153,6 +170,7 @@ struct ChatPopupView: View {
             )
         }
         .saturation(1.18)
+        .allowsHitTesting(false)
     }
 
     private var handoffChrome: some View {

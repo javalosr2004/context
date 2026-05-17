@@ -200,37 +200,41 @@ class TutorialSession:
         request_id: str,
         screen: ScreenSnapshot,
     ) -> None:
+        # Always accept the screen — dropping it on a request_id mismatch
+        # leaves the agent loop parked on `pending_screen` forever, which
+        # presents as a hung session. A fresher frame is strictly better
+        # than a hang.
+        image = uploaded_image_from_snapshot(screen)
+        self.latest_screen = image
+        self.screen_is_stale = False
+        self.screen_captured_at = datetime.now(UTC)
+
         future = self.pending_screen
-        if future is None or self.pending_screen_request_id != request_id:
-            logger.info(
-                "Ignoring stray user_screen event",
+        if future is None:
+            logger.debug(
+                "user_screen arrived with no pending future; stored as latest_screen",
+                extra={
+                    "session_id": self.session_id,
+                    "request_id": request_id,
+                },
+            )
+            return
+        if self.pending_screen_request_id != request_id:
+            logger.debug(
+                "user_screen request_id mismatch; resolving pending future anyway",
                 extra={
                     "session_id": self.session_id,
                     "request_id": request_id,
                     "expected_request_id": self.pending_screen_request_id,
                 },
             )
-            return
-        image = uploaded_image_from_snapshot(screen)
-        self.latest_screen = image
-        self.screen_is_stale = False
-        self.screen_captured_at = datetime.now(UTC)
         if not future.done():
             future.set_result(image)
 
     async def handle_step_started(self, step_id: str, action_index: int) -> None:
-        if not self._is_awaiting_slot(step_id, action_index):
-            logger.info(
-                "Ignoring stray step_started event",
-                extra={
-                    "session_id": self.session_id,
-                    "step_id": step_id,
-                    "action_index": action_index,
-                    "expected_step_id": self.awaiting_step_id,
-                    "expected_action_index": self.awaiting_action_index,
-                },
-            )
-            return
+        # Record every step_started; the walk loop's `_has_later_event`
+        # uses out-of-slot signals to advance past stale steps, and an
+        # exact-slot signal unblocks the current wait.
         self.pending_step_starts.add((step_id, action_index))
         self.step_event.set()
 
@@ -241,9 +245,13 @@ class TutorialSession:
         confirmed: bool,
         note: str | None,
     ) -> None:
+        # Record every confirmation. Out-of-slot confirmations either
+        # advance the walk loop via `_has_later_event` (when the slot is
+        # past the current step) or sit harmlessly until garbage-collected
+        # on session reset. Dropping them silently stalls the walk loop.
         if not self._is_awaiting_slot(step_id, action_index):
-            logger.info(
-                "Ignoring stray user_confirmation event",
+            logger.debug(
+                "user_confirmation arrived for non-awaiting slot; recording anyway",
                 extra={
                     "session_id": self.session_id,
                     "step_id": step_id,
@@ -252,7 +260,6 @@ class TutorialSession:
                     "expected_action_index": self.awaiting_action_index,
                 },
             )
-            return
         self.pending_step_confirmations[(step_id, action_index)] = (
             confirmed,
             (note or "").strip(),
@@ -390,14 +397,16 @@ class TutorialSession:
                     )
                     continue
                 if text.strip():
-                    self.history.append(HistoryEntry(role="assistant", content=text))
+                    self.history.append(HistoryEntry(
+                        role="assistant", content=text))
                     await self.emit(TextResponseEventLike(text=text))
                 self.status = "ready"
                 await self.emit(StatusChangedEvent(status="ready", label="Ready"))
                 return
 
             request_screen_call = first_request_screen_call(tool_calls)
-            update_plan_calls = [c for c in tool_calls if is_update_plan_call(c)]
+            update_plan_calls = [
+                c for c in tool_calls if is_update_plan_call(c)]
             unknown_calls = [
                 c
                 for c in tool_calls
@@ -480,7 +489,8 @@ class TutorialSession:
 
     async def _stream_llm_once(self) -> tuple[list[TutorialToolCall], str]:
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[LLMStreamEvent | Exception | None] = asyncio.Queue()
+        queue: asyncio.Queue[LLMStreamEvent |
+                             Exception | None] = asyncio.Queue()
 
         def produce_events() -> None:
             try:
@@ -935,7 +945,8 @@ class TutorialSession:
 
         self.status = "awaiting_confirmation"
         await self.emit(
-            AwaitingConfirmationEvent(step_id=step_id, action_index=action_index)
+            AwaitingConfirmationEvent(
+                step_id=step_id, action_index=action_index)
         )
 
         while slot not in self.pending_step_confirmations:
@@ -1134,7 +1145,8 @@ def _render_plan_block(
             suffix = (
                 f" (attempts_without_progress={attempts})" if attempts else ""
             )
-            action_pointer = _format_action_pointer(awaiting_step, awaiting_action_index)
+            action_pointer = _format_action_pointer(
+                awaiting_step, awaiting_action_index)
             lines.append("  AWAITING (user is on this step now):")
             lines.append(
                 f"    - {awaiting_step.step_id}{suffix} "

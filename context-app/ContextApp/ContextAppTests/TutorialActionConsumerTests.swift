@@ -6,19 +6,18 @@ final class TutorialActionConsumerTests: XCTestCase {
         let step = TutorialStep(
             stepId: "step-1",
             instruction: "Click the New repository button.",
-            action: .click(ClickAction(target: ActionTarget(
+            actions: [.click(ClickAction(target: ActionTarget(
                 kind: .element,
                 label: "New repository",
                 role: "button",
                 description: "Starts repository creation",
                 textNearby: ["Repositories", "Import"]
-            ))),
-            confidence: 0.86,
-            requiresConfirmation: false
+            ), requiresConfirmation: false))],
+            confidence: 0.86
         )
 
         XCTAssertEqual(
-            TutorialActionConsumer.groundingInstructionText(for: step),
+            TutorialActionConsumer.groundingInstructionText(for: step, actionIndex: 0),
             "Click the New repository button.\n\nTarget: Starts repository creation"
         )
     }
@@ -27,19 +26,18 @@ final class TutorialActionConsumerTests: XCTestCase {
         let step = TutorialStep(
             stepId: "step-1b",
             instruction: "Click the icon.",
-            action: .click(ClickAction(target: ActionTarget(
+            actions: [.click(ClickAction(target: ActionTarget(
                 kind: .element,
                 label: "Icon",
                 role: "button",
                 description: nil,
                 textNearby: nil
-            ))),
-            confidence: 0.6,
-            requiresConfirmation: false
+            ), requiresConfirmation: false))],
+            confidence: 0.6
         )
 
         XCTAssertEqual(
-            TutorialActionConsumer.groundingInstructionText(for: step),
+            TutorialActionConsumer.groundingInstructionText(for: step, actionIndex: 0),
             "Click the icon."
         )
     }
@@ -48,7 +46,7 @@ final class TutorialActionConsumerTests: XCTestCase {
         let step = TutorialStep(
             stepId: "step-2",
             instruction: "Scroll down to the billing section.",
-            action: .scroll(ScrollAction(
+            actions: [.scroll(ScrollAction(
                 target: ActionTarget(
                     kind: .window,
                     label: "Settings",
@@ -56,13 +54,13 @@ final class TutorialActionConsumerTests: XCTestCase {
                     description: "The app settings window",
                     textNearby: nil
                 ),
-                direction: .down
-            )),
-            confidence: 0.75,
-            requiresConfirmation: false
+                direction: .down,
+                requiresConfirmation: false
+            ))],
+            confidence: 0.75
         )
 
-        let json = TutorialActionConsumer.groundingPayloadJSONString(for: step)
+        let json = TutorialActionConsumer.groundingPayloadJSONString(for: step, actionIndex: 0)
         let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
 
         XCTAssertEqual(object?.keys.sorted(), ["instruction"])
@@ -73,7 +71,7 @@ final class TutorialActionConsumerTests: XCTestCase {
     }
 
     func testSkipsGroundingForTypeWithoutTarget() {
-        let action: TutorialAction = .type(TypeAction(target: nil, text: "cmd+a"))
+        let action: TutorialAction = .type(TypeAction(target: nil, text: "cmd+a", requiresConfirmation: true))
         XCTAssertTrue(TutorialActionConsumer.skipsGrounding(action: action))
     }
 
@@ -85,7 +83,7 @@ final class TutorialActionConsumerTests: XCTestCase {
             description: nil,
             textNearby: nil
         )
-        let action: TutorialAction = .type(TypeAction(target: target, text: "hello"))
+        let action: TutorialAction = .type(TypeAction(target: target, text: "hello", requiresConfirmation: true))
         XCTAssertFalse(TutorialActionConsumer.skipsGrounding(action: action))
     }
 
@@ -93,15 +91,14 @@ final class TutorialActionConsumerTests: XCTestCase {
         let step = TutorialStep(
             stepId: "step-3",
             instruction: "Click the search field.",
-            action: .click(ClickAction(target: ActionTarget(
+            actions: [.click(ClickAction(target: ActionTarget(
                 kind: .element,
                 label: "Search",
                 role: "text field",
                 description: nil,
                 textNearby: nil
-            ))),
-            confidence: 0.91,
-            requiresConfirmation: false
+            ), requiresConfirmation: false))],
+            confidence: 0.91
         )
         var receivedText: String?
         let consumer = TutorialActionConsumer { instruction in
@@ -109,7 +106,7 @@ final class TutorialActionConsumerTests: XCTestCase {
             return "highlighted"
         }
 
-        let result = await consumer.consume(step: step)
+        let result = await consumer.consume(step: step, actionIndex: 0)
 
         XCTAssertEqual(result, "highlighted")
         XCTAssertEqual(receivedText, "Click the search field.")

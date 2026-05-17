@@ -4,7 +4,7 @@ import XCTest
 final class TutorialPlanDisplayTests: XCTestCase {
     func testDefaultsToFirstStepWhenNoCurrentStepIsReady() {
         let plan = tutorialPlan(steps: [
-            step(id: "step-1", instruction: "Open the address bar.", action: .pressKey(PressKeyAction(key: "command+l"))),
+            step(id: "step-1", instruction: "Open the address bar.", action: .pressKey(PressKeyAction(key: "command+l", requiresConfirmation: false))),
             step(id: "step-2", instruction: "Click Sign In.", action: .click(target("Sign In")))
         ])
 
@@ -17,8 +17,8 @@ final class TutorialPlanDisplayTests: XCTestCase {
 
     func testUsesCurrentStepIDForProgressAndUpcomingSteps() {
         let plan = tutorialPlan(steps: [
-            step(id: "step-1", instruction: "Open the address bar.", action: .pressKey(PressKeyAction(key: "command+l"))),
-            step(id: "step-2", instruction: "Enter the Runpod dashboard URL.", action: .type(TypeAction(target: nil, text: "https://runpod.io"))),
+            step(id: "step-1", instruction: "Open the address bar.", action: .pressKey(PressKeyAction(key: "command+l", requiresConfirmation: false))),
+            step(id: "step-2", instruction: "Enter the Runpod dashboard URL.", action: .type(TypeAction(target: nil, text: "https://runpod.io", requiresConfirmation: true))),
             step(id: "step-3", instruction: "Click Sign In.", action: .click(target("Sign In")))
         ])
 
@@ -31,8 +31,8 @@ final class TutorialPlanDisplayTests: XCTestCase {
 
     func testNormalizesNoisyAddressBarTypingStepsForDisplay() {
         let plan = tutorialPlan(steps: [
-            step(id: "step-1", instruction: "Type the Runpod dashboard URL into the address bar.", action: .type(TypeAction(target: nil, text: "https://runpod.io"))),
-            step(id: "step-2", instruction: "Replace the current address bar text with the Runpod dashboard URL.", action: .type(TypeAction(target: nil, text: "https://runpod.io"))),
+            step(id: "step-1", instruction: "Type the Runpod dashboard URL into the address bar.", action: .type(TypeAction(target: nil, text: "https://runpod.io", requiresConfirmation: true))),
+            step(id: "step-2", instruction: "Replace the current address bar text with the Runpod dashboard URL.", action: .type(TypeAction(target: nil, text: "https://runpod.io", requiresConfirmation: true))),
             step(id: "step-3", instruction: "Click Sign In.", action: .click(target("Sign In")))
         ])
 
@@ -44,8 +44,8 @@ final class TutorialPlanDisplayTests: XCTestCase {
 
     func testLimitsUpcomingSteps() {
         let plan = tutorialPlan(steps: [
-            step(id: "step-1", instruction: "Open the address bar.", action: .pressKey(PressKeyAction(key: "command+l"))),
-            step(id: "step-2", instruction: "Enter URL.", action: .type(TypeAction(target: nil, text: "https://runpod.io"))),
+            step(id: "step-1", instruction: "Open the address bar.", action: .pressKey(PressKeyAction(key: "command+l", requiresConfirmation: false))),
+            step(id: "step-2", instruction: "Enter URL.", action: .type(TypeAction(target: nil, text: "https://runpod.io", requiresConfirmation: true))),
             step(id: "step-3", instruction: "Click Sign In.", action: .click(target("Sign In"))),
             step(id: "step-4", instruction: "Dismiss cookie banner.", action: .click(target("Cookie banner")))
         ])
@@ -67,9 +67,8 @@ final class TutorialPlanDisplayTests: XCTestCase {
         TutorialStep(
             stepId: id,
             instruction: instruction,
-            action: action,
-            confidence: 0.92,
-            requiresConfirmation: false
+            actions: [action],
+            confidence: 0.92
         )
     }
 
@@ -80,6 +79,6 @@ final class TutorialPlanDisplayTests: XCTestCase {
             role: "button",
             description: label,
             textNearby: nil
-        ))
+        ), requiresConfirmation: true)
     }
 }

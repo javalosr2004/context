@@ -7,21 +7,25 @@ struct TutorialGroundingPayload: Codable, Equatable {
 
 final class TutorialActionConsumer {
     private let groundInstruction: (GroundingInstruction) async -> String
-    private let presentNonSpatial: (TutorialStep) async -> String
+    private let presentNonSpatial: (TutorialStep, Int) async -> String
 
     init(
         groundInstruction: @escaping (GroundingInstruction) async -> String,
-        presentNonSpatial: @escaping (TutorialStep) async -> String = { _ in "" }
+        presentNonSpatial: @escaping (TutorialStep, Int) async -> String = { _, _ in "" }
     ) {
         self.groundInstruction = groundInstruction
         self.presentNonSpatial = presentNonSpatial
     }
 
-    func consume(step: TutorialStep) async -> String {
-        if Self.skipsGrounding(action: step.action) {
-            return await presentNonSpatial(step)
+    func consume(step: TutorialStep, actionIndex: Int) async -> String {
+        guard actionIndex >= 0, actionIndex < step.actions.count else {
+            return ""
         }
-        let payload = Self.groundingPayload(for: step)
+        let action = step.actions[actionIndex]
+        if Self.skipsGrounding(action: action) {
+            return await presentNonSpatial(step, actionIndex)
+        }
+        let payload = Self.groundingPayload(for: step, actionIndex: actionIndex)
         let instruction = GroundingInstruction(
             text: payload.instruction,
             referenceImageData: nil,
@@ -43,14 +47,14 @@ final class TutorialActionConsumer {
         }
     }
 
-    static func groundingPayload(for step: TutorialStep) -> TutorialGroundingPayload {
-        TutorialGroundingPayload(instruction: groundingInstructionText(for: step))
+    static func groundingPayload(for step: TutorialStep, actionIndex: Int) -> TutorialGroundingPayload {
+        TutorialGroundingPayload(instruction: groundingInstructionText(for: step, actionIndex: actionIndex))
     }
 
-    static func groundingPayloadJSONString(for step: TutorialStep) -> String {
+    static func groundingPayloadJSONString(for step: TutorialStep, actionIndex: Int) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let payload = groundingPayload(for: step)
+        let payload = groundingPayload(for: step, actionIndex: actionIndex)
         guard
             let data = try? encoder.encode(payload),
             let json = String(data: data, encoding: .utf8)
@@ -60,9 +64,12 @@ final class TutorialActionConsumer {
         return json
     }
 
-    static func groundingInstructionText(for step: TutorialStep) -> String {
+    static func groundingInstructionText(for step: TutorialStep, actionIndex: Int) -> String {
+        guard actionIndex >= 0, actionIndex < step.actions.count else {
+            return step.instruction
+        }
         guard
-            let description = targetDescription(for: step.action)?
+            let description = targetDescription(for: step.actions[actionIndex])?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
             !description.isEmpty
         else {

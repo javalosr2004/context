@@ -12,7 +12,7 @@ final class TutorialPlanTests: XCTestCase {
             {
               "step_id": "step-1",
               "instruction": "Click the message field.",
-              "action": {
+              "actions": [{
                 "type": "click",
                 "target": {
                   "kind": "element",
@@ -20,10 +20,10 @@ final class TutorialPlanTests: XCTestCase {
                   "role": "text field",
                   "description": "The chat composer field",
                   "text_nearby": ["Send"]
-                }
-              },
-              "confidence": 0.93,
-              "requires_confirmation": false
+                },
+                "requires_confirmation": false
+              }],
+              "confidence": 0.93
             }
           ]
         }
@@ -33,8 +33,8 @@ final class TutorialPlanTests: XCTestCase {
 
         XCTAssertEqual(plan.schemaVersion, "tutorial_plan.v1")
         XCTAssertEqual(plan.steps.first?.stepId, "step-1")
-        XCTAssertEqual(plan.steps.first?.action.type, "click")
-        XCTAssertEqual(plan.steps.first?.requiresConfirmation, false)
+        XCTAssertEqual(plan.steps.first?.actions.first?.type, "click")
+        XCTAssertEqual(plan.steps.first?.actions.first?.requiresConfirmation, false)
     }
 
     func testRejectsUnsupportedSchemaVersion() {
@@ -66,9 +66,8 @@ final class TutorialPlanTests: XCTestCase {
             {
               "step_id": "step-1",
               "instruction": "Tap the field.",
-              "action": { "type": "tap" },
-              "confidence": 0.5,
-              "requires_confirmation": true
+              "actions": [{ "type": "tap", "requires_confirmation": true }],
+              "confidence": 0.5
             }
           ]
         }
@@ -84,46 +83,46 @@ final class TutorialPlanTests: XCTestCase {
     }
 
     func testActionEncodingPreservesDiscriminatorKeys() throws {
-        let action = TutorialAction.pressKey(PressKeyAction(key: "command+return"))
+        let action = TutorialAction.pressKey(PressKeyAction(key: "command+return", requiresConfirmation: false))
         let data = try JSONEncoder().encode(action)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
         XCTAssertEqual(object?["type"] as? String, "press_key")
         XCTAssertEqual(object?["key"] as? String, "command+return")
+        XCTAssertEqual(object?["requires_confirmation"] as? Bool, false)
     }
 
     func testStepJSONFormatterIncludesEntireStepPayload() throws {
         let step = TutorialStep(
             stepId: "step-1",
             instruction: "Click the message field.",
-            action: .click(ClickAction(target: ActionTarget(
+            actions: [.click(ClickAction(target: ActionTarget(
                 kind: .element,
                 label: "Message",
                 role: "text field",
                 description: "The chat composer field",
                 textNearby: ["Send"]
-            ))),
-            confidence: 0.93,
-            requiresConfirmation: false
+            ), requiresConfirmation: false))],
+            confidence: 0.93
         )
 
         let json = TutorialStepJSONFormatter.displayString(for: step)
         let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
-        let action = object?["action"] as? [String: Any]
+        let actions = object?["actions"] as? [[String: Any]]
+        let action = actions?.first
         let target = action?["target"] as? [String: Any]
 
         XCTAssertEqual(object?.keys.sorted(), [
-            "action",
+            "actions",
             "confidence",
             "instruction",
-            "requires_confirmation",
             "step_id"
         ])
         XCTAssertEqual(object?["step_id"] as? String, "step-1")
         XCTAssertEqual(object?["instruction"] as? String, "Click the message field.")
         XCTAssertEqual(object?["confidence"] as? Double, 0.93)
-        XCTAssertEqual(object?["requires_confirmation"] as? Bool, false)
         XCTAssertEqual(action?["type"] as? String, "click")
+        XCTAssertEqual(action?["requires_confirmation"] as? Bool, false)
         XCTAssertEqual(target?["label"] as? String, "Message")
         XCTAssertEqual(target?["text_nearby"] as? [String], ["Send"])
     }
@@ -132,19 +131,21 @@ final class TutorialPlanTests: XCTestCase {
         let data = Data("""
         {
           "type": "wait",
-          "duration_ms": 750
+          "duration_ms": 750,
+          "requires_confirmation": false
         }
         """.utf8)
 
         let action = try JSONDecoder().decode(TutorialAction.self, from: data)
 
-        XCTAssertEqual(action, .wait(WaitAction(durationMs: 750)))
+        XCTAssertEqual(action, .wait(WaitAction(durationMs: 750, requiresConfirmation: false)))
     }
 
     func testDecodesFlatConfirmAction() throws {
         let data = Data("""
         {
-          "type": "confirm"
+          "type": "confirm",
+          "requires_confirmation": true
         }
         """.utf8)
 
@@ -157,7 +158,8 @@ final class TutorialPlanTests: XCTestCase {
         let data = Data("""
         {
           "type": "type",
-          "target": { "kind": "element", "label": "Message" }
+          "target": { "kind": "element", "label": "Message" },
+          "requires_confirmation": true
         }
         """.utf8)
 

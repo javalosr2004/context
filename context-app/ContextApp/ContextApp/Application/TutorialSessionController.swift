@@ -45,7 +45,9 @@ enum TutorialSessionUIStatus: Equatable {
 @MainActor
 final class TutorialSessionController: ObservableObject {
     @Published private(set) var awaitingConfirmationStepID: String?
+    @Published private(set) var awaitingActionIndex: Int?
     @Published private(set) var currentStepID: String?
+    @Published private(set) var currentActionIndex: Int?
     @Published private(set) var draftPlan: DraftPlan?
     @Published private(set) var messages: [ChatMessage]
     @Published private(set) var pendingContinuePromptStepID: String?
@@ -61,7 +63,7 @@ final class TutorialSessionController: ObservableObject {
     private let screenCaptureTimeoutNanoseconds: UInt64
     private let screenProvider: () -> NSScreen?
 
-    private var tutorialActionHandler: ((TutorialStep) async -> String)?
+    private var tutorialActionHandler: ((TutorialStep, Int) async -> String)?
     private var listenTask: Task<Void, Never>?
     private var sessionID: String?
     private var socket: URLSessionWebSocketTask?
@@ -95,9 +97,9 @@ final class TutorialSessionController: ObservableObject {
         await sendUserMessage(trimmedText)
     }
 
-    func markStepStarted(stepID: String) async {
+    func markStepStarted(stepID: String, actionIndex: Int) async {
         do {
-            try await sendSessionEvent(.stepStarted(stepID: stepID))
+            try await sendSessionEvent(.stepStarted(stepID: stepID, actionIndex: actionIndex))
         } catch {
             applyFailure("Could not start tutorial step: \(error.localizedDescription)")
         }
@@ -111,18 +113,20 @@ final class TutorialSessionController: ObservableObject {
         pendingContinuePromptStepID = nil
     }
 
-    func confirmStep(stepID: String, confirmed: Bool, note: String?) async {
+    func confirmStep(stepID: String, actionIndex: Int, confirmed: Bool, note: String?) async {
         pendingContinuePromptStepID = nil
         do {
             status = .sending
             try await sendSessionEvent(
                 .userConfirmation(
                     stepID: stepID,
+                    actionIndex: actionIndex,
                     confirmed: confirmed,
                     note: note
                 )
             )
             awaitingConfirmationStepID = nil
+            awaitingActionIndex = nil
             status = confirmed ? .planning("Continuing") : .planning("Replanning from current screen")
         } catch {
             applyFailure("Could not confirm tutorial step: \(error.localizedDescription)")
@@ -152,7 +156,9 @@ final class TutorialSessionController: ObservableObject {
     func startNewChat() {
         clearSocket()
         currentStepID = nil
+        currentActionIndex = nil
         awaitingConfirmationStepID = nil
+        awaitingActionIndex = nil
         pendingContinuePromptStepID = nil
         draftPlan = nil
         status = .ready
@@ -160,7 +166,7 @@ final class TutorialSessionController: ObservableObject {
         messages = messageStore.messages
     }
 
-    func setTutorialActionHandler(_ handler: @escaping (TutorialStep) async -> String) {
+    func setTutorialActionHandler(_ handler: @escaping (TutorialStep, Int) async -> String) {
         tutorialActionHandler = handler
     }
 
@@ -311,16 +317,19 @@ final class TutorialSessionController: ObservableObject {
             // Backend no longer emits tutorial_action; grounding is triggered on .stepReady.
             // Kept as a decoded-but-ignored case for defensive forward/backward compatibility.
             break
-        case .stepReady(let stepID):
-            applyStepReady(stepID: stepID)
-        case .awaitingConfirmation(let stepID):
+        case .stepReady(let stepID, let actionIndex):
+            applyStepReady(stepID: stepID, actionIndex: actionIndex)
+        case .awaitingConfirmation(let stepID, let actionIndex):
             awaitingConfirmationStepID = stepID
+            awaitingActionIndex = actionIndex
             status = .awaitingConfirmation
         case .screenRequested(let requestID, let reason):
             handleScreenRequest(requestID: requestID, reason: reason)
         case .sessionCompleted:
             currentStepID = nil
+            currentActionIndex = nil
             awaitingConfirmationStepID = nil
+            awaitingActionIndex = nil
             appendTutorialText("Tutorial completed.")
             status = .completed
         case .error(_, let message):
@@ -353,16 +362,21 @@ final class TutorialSessionController: ObservableObject {
         messages = messageStore.messages
     }
 
-    private func applyStepReady(stepID: String) {
+    private func applyStepReady(stepID: String, actionIndex: Int) {
         currentStepID = stepID
+        currentActionIndex = actionIndex
         status = .ready
         guard let tutorialActionHandler else { return }
         guard let step = latestStep(withID: stepID) else {
             logger.debug("step_ready for unknown step id '\(stepID, privacy: .public)'; skipping grounding")
             return
         }
+        guard actionIndex >= 0, actionIndex < step.actions.count else {
+            logger.debug("step_ready action_index \(actionIndex, privacy: .public) out of range for step '\(stepID, privacy: .public)'; skipping grounding")
+            return
+        }
         Task { [weak self] in
-            _ = await tutorialActionHandler(step)
+            _ = await tutorialActionHandler(step, actionIndex)
             await MainActor.run {
                 self?.status = .ready
             }

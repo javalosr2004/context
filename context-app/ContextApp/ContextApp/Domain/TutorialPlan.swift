@@ -95,16 +95,14 @@ struct DraftStep: Codable, Equatable {
 struct TutorialStep: Codable, Equatable {
     let stepId: String
     let instruction: String
-    let action: TutorialAction
+    let actions: [TutorialAction]
     let confidence: Double
-    let requiresConfirmation: Bool
 
     private enum CodingKeys: String, CodingKey {
         case stepId = "step_id"
         case instruction
-        case action
+        case actions
         case confidence
-        case requiresConfirmation = "requires_confirmation"
     }
 }
 
@@ -161,6 +159,21 @@ enum TutorialAction: Codable, Equatable {
         }
     }
 
+    var requiresConfirmation: Bool {
+        switch self {
+        case .click(let a): return a.requiresConfirmation
+        case .doubleClick(let a): return a.requiresConfirmation
+        case .rightClick(let a): return a.requiresConfirmation
+        case .hover(let a): return a.requiresConfirmation
+        case .type(let a): return a.requiresConfirmation
+        case .pressKey(let a): return a.requiresConfirmation
+        case .scroll(let a): return a.requiresConfirmation
+        case .drag(let a): return a.requiresConfirmation
+        case .wait(let a): return a.requiresConfirmation
+        case .confirm: return true
+        }
+    }
+
     private enum CodingKeys: String, CodingKey {
         case type
         case target
@@ -168,6 +181,7 @@ enum TutorialAction: Codable, Equatable {
         case key
         case direction
         case durationMs = "duration_ms"
+        case requiresConfirmation = "requires_confirmation"
     }
 
     init(from decoder: Decoder) throws {
@@ -207,6 +221,7 @@ enum TutorialAction: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(type, forKey: .type)
+        try container.encode(requiresConfirmation, forKey: .requiresConfirmation)
 
         switch self {
         case .click(let action):
@@ -266,48 +281,200 @@ enum ScrollDirection: String, Codable, Equatable {
     case right
 }
 
+private enum _ActionConfirmKey: String, CodingKey {
+    case requiresConfirmation = "requires_confirmation"
+}
+
+private func _decodeRequiresConfirmation(from decoder: Decoder) throws -> Bool {
+    let container = try decoder.container(keyedBy: _ActionConfirmKey.self)
+    return try container.decode(Bool.self, forKey: .requiresConfirmation)
+}
+
 struct ClickAction: Codable, Equatable {
     let target: ActionTarget
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case target }
+
+    init(target: ActionTarget, requiresConfirmation: Bool) {
+        self.target = target
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.target = try container.decode(ActionTarget.self, forKey: .target)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct DoubleClickAction: Codable, Equatable {
     let target: ActionTarget
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case target }
+
+    init(target: ActionTarget, requiresConfirmation: Bool) {
+        self.target = target
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.target = try container.decode(ActionTarget.self, forKey: .target)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct RightClickAction: Codable, Equatable {
     let target: ActionTarget
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case target }
+
+    init(target: ActionTarget, requiresConfirmation: Bool) {
+        self.target = target
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.target = try container.decode(ActionTarget.self, forKey: .target)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct HoverAction: Codable, Equatable {
     let target: ActionTarget
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case target }
+
+    init(target: ActionTarget, requiresConfirmation: Bool) {
+        self.target = target
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.target = try container.decode(ActionTarget.self, forKey: .target)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct TypeAction: Codable, Equatable {
     let target: ActionTarget?
     let text: String
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case target, text }
+
+    init(target: ActionTarget?, text: String, requiresConfirmation: Bool) {
+        self.target = target
+        self.text = text
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.target = try container.decodeIfPresent(ActionTarget.self, forKey: .target)
+        self.text = try container.decode(String.self, forKey: .text)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct PressKeyAction: Codable, Equatable {
     let key: String
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case key }
+
+    init(key: String, requiresConfirmation: Bool) {
+        self.key = key
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.key = try container.decode(String.self, forKey: .key)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct ScrollAction: Codable, Equatable {
     let target: ActionTarget?
     let direction: ScrollDirection
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case target, direction }
+
+    init(target: ActionTarget?, direction: ScrollDirection, requiresConfirmation: Bool) {
+        self.target = target
+        self.direction = direction
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.target = try container.decodeIfPresent(ActionTarget.self, forKey: .target)
+        self.direction = try container.decode(ScrollDirection.self, forKey: .direction)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct DragAction: Codable, Equatable {
     let target: ActionTarget
     let direction: ScrollDirection
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case target, direction }
+
+    init(target: ActionTarget, direction: ScrollDirection, requiresConfirmation: Bool) {
+        self.target = target
+        self.direction = direction
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.target = try container.decode(ActionTarget.self, forKey: .target)
+        self.direction = try container.decode(ScrollDirection.self, forKey: .direction)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct WaitAction: Codable, Equatable {
     let durationMs: Int
+    let requiresConfirmation: Bool
 
     private enum CodingKeys: String, CodingKey {
         case durationMs = "duration_ms"
     }
+
+    init(durationMs: Int, requiresConfirmation: Bool) {
+        self.durationMs = durationMs
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.durationMs = try container.decode(Int.self, forKey: .durationMs)
+        self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
 }
 
 struct ConfirmAction: Codable, Equatable {
+    let requiresConfirmation: Bool
+
+    init(requiresConfirmation: Bool = true) {
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        self.requiresConfirmation = (try? _decodeRequiresConfirmation(from: decoder)) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        // requires_confirmation for confirm is encoded by TutorialAction.
+    }
 }

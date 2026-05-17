@@ -75,7 +75,8 @@ struct TutorialPlanDisplay: Equatable {
 
     private static func displayTitle(for step: TutorialStep) -> String {
         let cleanedInstruction = cleanInstruction(step.instruction)
-        if let addressBarTitle = addressBarDisplayTitle(for: cleanedInstruction, action: step.action) {
+        if let firstAction = step.actions.first,
+           let addressBarTitle = addressBarDisplayTitle(for: cleanedInstruction, action: firstAction) {
             return addressBarTitle
         }
         return cleanedInstruction

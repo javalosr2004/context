@@ -1042,7 +1042,7 @@ struct ChatPopupView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .center, spacing: 9) {
-                        Image(systemName: iconName(for: step.action))
+                        Image(systemName: iconName(for: step.actions.first))
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.accentColor)
                             .frame(width: 22, height: 22)
@@ -1181,12 +1181,15 @@ struct ChatPopupView: View {
     }
 
     private func stepCopyableText(for step: TutorialStep) -> String? {
-        if case .type(let action) = step.action { return action.text }
+        for action in step.actions {
+            if case .type(let typeAction) = action { return typeAction.text }
+        }
         return nil
     }
 
     private func stepTargetDescription(for step: TutorialStep) -> String? {
-        switch step.action {
+        guard let action = step.actions.first else { return nil }
+        switch action {
         case .click(let a): return a.target.description
         case .doubleClick(let a): return a.target.description
         case .rightClick(let a): return a.target.description
@@ -1218,7 +1221,8 @@ struct ChatPopupView: View {
         !sessionController.status.isBusy
     }
 
-    private func iconName(for action: TutorialAction) -> String {
+    private func iconName(for action: TutorialAction?) -> String {
+        guard let action else { return "circle" }
         switch action {
         case .click, .doubleClick, .rightClick:
             return "cursorarrow.click"
@@ -1293,7 +1297,8 @@ struct ChatPopupView: View {
         activeStepID = step.stepId
 
         Task {
-            await sessionController.markStepStarted(stepID: step.stepId)
+            let actionIndex = sessionController.awaitingActionIndex ?? sessionController.currentActionIndex ?? 0
+            await sessionController.markStepStarted(stepID: step.stepId, actionIndex: actionIndex)
             _ = await onTutorialStepSelected(step)
             await MainActor.run {
                 activeStepID = nil
@@ -1303,9 +1308,15 @@ struct ChatPopupView: View {
 
     private func advanceCurrentStep() {
         guard let step = currentStepForAdvance, canAdvanceCurrentStep else { return }
+        let actionIndex = sessionController.awaitingActionIndex ?? sessionController.currentActionIndex ?? 0
         expandedStepID = nil
         Task {
-            await sessionController.confirmStep(stepID: step.stepId, confirmed: true, note: nil)
+            await sessionController.confirmStep(
+                stepID: step.stepId,
+                actionIndex: actionIndex,
+                confirmed: true,
+                note: nil
+            )
         }
     }
 

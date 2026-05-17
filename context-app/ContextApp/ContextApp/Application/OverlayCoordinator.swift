@@ -50,7 +50,8 @@ final class OverlayCoordinator {
             onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak iconPanel, screenProvider] in
                 bboxPanel?.orderOut(nil)
                 guard let sessionController = sessionControllerRef,
-                      let stepID = sessionController.currentStepID else { return }
+                      let stepID = sessionController.currentStepID,
+                      let actionIndex = sessionController.currentActionIndex else { return }
                 Task { @MainActor in
                     if let screen = screenProvider(), let self {
                         self.stabilityIndicator?.show()
@@ -65,7 +66,7 @@ final class OverlayCoordinator {
                         )
                         self.stabilityIndicator?.hide()
                     }
-                    await sessionController.confirmStep(stepID: stepID, confirmed: true, note: nil)
+                    await sessionController.confirmStep(stepID: stepID, actionIndex: actionIndex, confirmed: true, note: nil)
                 }
             },
             onOutsideClick: { [weak bboxPanel, weak self] in
@@ -118,19 +119,20 @@ final class OverlayCoordinator {
                 }
                 return await screenGroundingController.submit(instruction)
             },
-            presentNonSpatial: { step in
-                "Showing instruction inline for \(step.action.type)."
+            presentNonSpatial: { step, actionIndex in
+                let kind = step.actions.indices.contains(actionIndex) ? step.actions[actionIndex].type : "<oor>"
+                return "Showing instruction inline for \(kind)."
             }
         )
-        let handleTutorialStep: (TutorialStep) async -> String = { step in
-            await tutorialActionConsumer.consume(step: step)
+        let handleTutorialStep: (TutorialStep, Int) async -> String = { step, actionIndex in
+            await tutorialActionConsumer.consume(step: step, actionIndex: actionIndex)
         }
         tutorialSessionController.setTutorialActionHandler(handleTutorialStep)
 
         popupPanel.contentView = NSHostingView(rootView: ChatPopupView(
             sessionController: tutorialSessionController,
             onTutorialStepSelected: { step in
-                await handleTutorialStep(step)
+                await handleTutorialStep(step, 0)
             },
             onInputInstruction: { input in
                 await screenGroundingController.submit(GroundingInstruction(

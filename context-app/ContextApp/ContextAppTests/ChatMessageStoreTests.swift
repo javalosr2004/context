@@ -125,15 +125,14 @@ final class ChatMessageStoreTests: XCTestCase {
                 TutorialStep(
                     stepId: "step-1",
                     instruction: "Click the message field.",
-                    action: .click(ClickAction(target: ActionTarget(
+                    actions: [.click(ClickAction(target: ActionTarget(
                         kind: .element,
                         label: "Message",
                         role: "text field",
                         description: "The chat composer field",
                         textNearby: ["Send"]
-                    ))),
-                    confidence: 0.93,
-                    requiresConfirmation: false
+                    ), requiresConfirmation: false))],
+                    confidence: 0.93
                 )
             ]
         )

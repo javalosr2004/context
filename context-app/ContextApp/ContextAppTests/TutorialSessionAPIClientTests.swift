@@ -27,6 +27,7 @@ final class TutorialSessionAPIClientTests: XCTestCase {
     func testClientEventEncodingUsesWireKeys() throws {
         let event = TutorialSessionClientEvent.userConfirmation(
             stepID: "step_001",
+            actionIndex: 1,
             confirmed: false,
             note: "Wrong target"
         )
@@ -36,6 +37,7 @@ final class TutorialSessionAPIClientTests: XCTestCase {
 
         XCTAssertEqual(object["type"] as? String, "user_confirmation")
         XCTAssertEqual(object["step_id"] as? String, "step_001")
+        XCTAssertEqual(object["action_index"] as? Int, 1)
         XCTAssertEqual(object["confirmed"] as? Bool, false)
         XCTAssertEqual(object["note"] as? String, "Wrong target")
         XCTAssertNil(object["screen"])
@@ -94,16 +96,16 @@ final class TutorialSessionAPIClientTests: XCTestCase {
               {
                 "step_id": "step_001",
                 "instruction": "Click the message field.",
-                "action": {
+                "actions": [{
                   "type": "click",
                   "target": {
                     "kind": "element",
                     "label": "Message",
                     "role": "text field"
-                  }
-                },
-                "confidence": 0.93,
-                "requires_confirmation": false
+                  },
+                  "requires_confirmation": false
+                }],
+                "confidence": 0.93
               }
             ]
           }
@@ -126,17 +128,17 @@ final class TutorialSessionAPIClientTests: XCTestCase {
           "step": {
             "step_id": "step_001",
             "instruction": "Click the message field.",
-            "action": {
+            "actions": [{
               "type": "click",
               "target": {
                 "kind": "element",
                 "label": "Message",
                 "role": "text field",
                 "description": "A rounded input at the bottom of the chat."
-              }
-            },
-            "confidence": 0.93,
-            "requires_confirmation": false
+              },
+              "requires_confirmation": false
+            }],
+            "confidence": 0.93
           }
         }
         """.utf8)
@@ -147,7 +149,7 @@ final class TutorialSessionAPIClientTests: XCTestCase {
             return XCTFail("Expected tutorialAction, got \(event)")
         }
         XCTAssertEqual(step.stepId, "step_001")
-        XCTAssertEqual(step.action.type, "click")
+        XCTAssertEqual(step.actions.first?.type, "click")
     }
 
     func testServerEventDecodingTextResponse() throws {

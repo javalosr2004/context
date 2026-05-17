@@ -68,6 +68,9 @@ final class TutorialSessionController: ObservableObject {
     private var sessionID: String?
     private var socket: URLSessionWebSocketTask?
     private var isStreamingTutorialText = false
+    // Slot we've already grounded via optimistic advance; suppresses the
+    // duplicate grounding when the matching step_ready eventually arrives.
+    private var optimisticallyGroundedSlot: (stepID: String, actionIndex: Int)?
 
     init(
         messageStore: ChatMessageStore,
@@ -128,9 +131,53 @@ final class TutorialSessionController: ObservableObject {
             awaitingConfirmationStepID = nil
             awaitingActionIndex = nil
             status = confirmed ? .planning("Continuing") : .planning("Replanning from current screen")
+            if confirmed {
+                advanceOptimistically(after: stepID, actionIndex: actionIndex)
+            }
         } catch {
             applyFailure("Could not confirm tutorial step: \(error.localizedDescription)")
         }
+    }
+
+    // The backend re-grounds via an LLM round-trip after every screen-changing
+    // confirm before emitting the next step_ready, which stalls the UI. Since
+    // the plan is already a hypothesis we render eagerly, advance to the next
+    // slot locally so the user can keep moving; if the re-ground amends the
+    // plan tail, planUpdated reconciles.
+    private func advanceOptimistically(after stepID: String, actionIndex: Int) {
+        guard let next = nextSlot(after: stepID, actionIndex: actionIndex) else {
+            return
+        }
+        currentStepID = next.stepID
+        currentActionIndex = next.actionIndex
+        optimisticallyGroundedSlot = next
+        groundStep(stepID: next.stepID, actionIndex: next.actionIndex)
+    }
+
+    private func nextSlot(after stepID: String, actionIndex: Int) -> (stepID: String, actionIndex: Int)? {
+        guard let plan = latestPlan() else { return nil }
+        guard let stepIndex = plan.steps.firstIndex(where: { $0.stepId == stepID }) else {
+            return nil
+        }
+        let step = plan.steps[stepIndex]
+        let nextActionIndex = actionIndex + 1
+        if nextActionIndex < step.actions.count {
+            return (step.stepId, nextActionIndex)
+        }
+        let nextStepIndex = stepIndex + 1
+        guard nextStepIndex < plan.steps.count else { return nil }
+        let nextStep = plan.steps[nextStepIndex]
+        guard !nextStep.actions.isEmpty else { return nil }
+        return (nextStep.stepId, 0)
+    }
+
+    private func latestPlan() -> TutorialPlan? {
+        for message in messageStore.messages.reversed() {
+            if case .tutorialPlan(let plan) = message.content {
+                return plan
+            }
+        }
+        return nil
     }
 
     func appendTutorialText(_ text: String) {
@@ -161,6 +208,7 @@ final class TutorialSessionController: ObservableObject {
         awaitingActionIndex = nil
         pendingContinuePromptStepID = nil
         draftPlan = nil
+        optimisticallyGroundedSlot = nil
         status = .ready
         messageStore.removeAll()
         messages = messageStore.messages
@@ -330,6 +378,7 @@ final class TutorialSessionController: ObservableObject {
             currentActionIndex = nil
             awaitingConfirmationStepID = nil
             awaitingActionIndex = nil
+            optimisticallyGroundedSlot = nil
             appendTutorialText("Tutorial completed.")
             status = .completed
         case .error(_, let message):
@@ -366,13 +415,24 @@ final class TutorialSessionController: ObservableObject {
         currentStepID = stepID
         currentActionIndex = actionIndex
         status = .ready
+        if let grounded = optimisticallyGroundedSlot,
+           grounded.stepID == stepID,
+           grounded.actionIndex == actionIndex {
+            optimisticallyGroundedSlot = nil
+            return
+        }
+        optimisticallyGroundedSlot = nil
+        groundStep(stepID: stepID, actionIndex: actionIndex)
+    }
+
+    private func groundStep(stepID: String, actionIndex: Int) {
         guard let tutorialActionHandler else { return }
         guard let step = latestStep(withID: stepID) else {
-            logger.debug("step_ready for unknown step id '\(stepID, privacy: .public)'; skipping grounding")
+            logger.debug("grounding skipped: unknown step id '\(stepID, privacy: .public)'")
             return
         }
         guard actionIndex >= 0, actionIndex < step.actions.count else {
-            logger.debug("step_ready action_index \(actionIndex, privacy: .public) out of range for step '\(stepID, privacy: .public)'; skipping grounding")
+            logger.debug("grounding skipped: action_index \(actionIndex, privacy: .public) out of range for step '\(stepID, privacy: .public)'")
             return
         }
         Task { [weak self] in

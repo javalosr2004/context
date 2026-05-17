@@ -1,0 +1,1626 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Context · Overlay Wireframes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@300;400;700&family=Caveat:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #f0eee9; }
+  body { font-family: 'Kalam', sans-serif; color: #1a1612; }
+
+  /* sketchy palette */
+  :root {
+    --ink: #1a1612;
+    --ink-2: #4a423a;
+    --paper: #fbfaf6;
+    --paper-2: #ededeb;
+    --line: #1a1612;
+    --line-soft: rgba(26,22,18,.35);
+    --line-faint: rgba(26,22,18,.18);
+    --accent: #ff5a3c;       /* highlighter coral */
+    --accent-soft: #ffd9d0;
+    --dim: rgba(26,22,18,.45);
+    --ghost: rgba(26,22,18,.28);
+  }
+
+  /* wireframe primitives */
+  .wf, .wf * { font-family: 'Kalam', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-weight: 500; letter-spacing: -.02em; }
+  .anno { font-family: 'Caveat', cursive; color: var(--dim); font-weight: 600; }
+
+  /* sketchy borders — slightly jittery look via two-tone shadow */
+  .sketch-box {
+    background: var(--paper);
+    border: 1.5px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 2px 3px 0 var(--line);
+  }
+  .sketch-box-soft {
+    background: var(--paper);
+    border: 1.25px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 1.5px 2px 0 rgba(26,22,18,.6);
+  }
+  .sketch-dashed {
+    border: 1.25px dashed var(--line-soft);
+    border-radius: 10px;
+    background: transparent;
+  }
+  .hl { background: linear-gradient(180deg, transparent 55%, var(--accent-soft) 55% 92%, transparent 92%); padding: 0 3px; }
+  .hl-strong { background: var(--accent); color: var(--paper); padding: 1px 7px; border-radius: 6px; }
+
+  /* skeleton text bars */
+  .bar { display: inline-block; height: 10px; background: var(--line-faint); border-radius: 4px; vertical-align: middle; }
+
+  /* desktop context sketch behind each artboard (optional via tweak) */
+  .desk {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      repeating-linear-gradient(135deg, transparent 0 18px, rgba(26,22,18,.04) 18px 19px);
+  }
+  .desk-browser {
+    position: absolute; inset: 18px;
+    border: 1.25px dashed var(--line-soft);
+    border-radius: 8px;
+    background: rgba(255,255,255,.5);
+  }
+  .desk-url {
+    position: absolute; top: 30px; left: 60px; right: 30px; height: 22px;
+    border: 1.25px solid var(--line-faint); border-radius: 11px;
+    background: var(--paper);
+  }
+  .desk-traffic { position: absolute; top: 34px; left: 28px; display: flex; gap: 5px; }
+  .desk-traffic span { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--line-soft); }
+  .desk-cursor {
+    position: absolute; right: 56px; top: 28px; width: 14px; height: 18px;
+    background: var(--ink); clip-path: polygon(0 0, 100% 60%, 50% 65%, 70% 100%, 50% 100%, 35% 70%, 0 85%);
+  }
+
+  /* fake screen highlight ring (the part that lives on the screen, not the overlay) */
+  .screen-highlight {
+    position: absolute; border: 2px solid var(--accent);
+    border-radius: 10px; box-shadow: 0 0 0 4px rgba(255,90,60,.18);
+  }
+
+  /* overlay shadow — sketchy, not rendered */
+  .overlay-shadow { box-shadow: 4px 5px 0 rgba(26,22,18,.85); }
+
+  /* the artboard inner stage */
+  .stage {
+    position: relative; width: 100%; height: 100%;
+    background: var(--paper-2);
+    overflow: hidden;
+  }
+  .stage.plain { background: var(--paper-2); }
+  .stage.context { background: #e9e5dd; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // EDITMODE tweak defaults — edited in place via the tweak panel + host
+  window.__WF_DEFAULTS__ = /*EDITMODE-BEGIN*/{
+    "state": "active",
+    "showContext": true,
+    "showInput": false,
+    "showAnnotations": true
+  }/*EDITMODE-END*/;
+</script>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel">
+// Wireframe components — five directions for the Context tutorial overlay.
+// All sketchy, low-fi. Each accepts { state, showInput, showAnnotations }.
+
+const Icon = {
+  // tiny lo-fi action icons
+  Click: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 3v6M5 5l2.5 2.5M3 9h6M5 13l2.5-2.5"/><path d="M11 11l8.5 3.2-3.6 1.5-1.5 3.6L11 11z"/>
+    </svg>
+  ),
+  Type: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="7" width="19" height="11" rx="2"/><path d="M6 11h.01M9 11h.01M12 11h.01M15 11h.01M18 11h.01M7 14.5h10"/>
+    </svg>
+  ),
+  Key: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h.01M11 9h.01M15 9h.01M19 9h.01M7 13h.01M19 13h.01M8 17h8"/>
+    </svg>
+  ),
+  Pause: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+  ),
+  Play: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+  ),
+  Close: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  ),
+  Book: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 4h7a3 3 0 013 3v13a2 2 0 00-2-2H4z"/><path d="M20 4h-7a3 3 0 00-3 3v13a2 2 0 012-2h8z"/>
+    </svg>
+  ),
+  Chevron: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||12} height={p.size||12} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+  ),
+  Mic: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>
+  ),
+  Sparkle: (p) => (
+    <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>
+  ),
+};
+
+// Tiny sketchy annotation arrow + caption
+function Anno({ x, y, w, text, dir = 'left', rotate = 0 }) {
+  return (
+    <div className="anno" style={{
+      position: 'absolute', left: x, top: y, width: w, fontSize: 18, lineHeight: 1.15,
+      transform: `rotate(${rotate}deg)`, transformOrigin: 'top left',
+    }}>
+      {dir === 'left' && <span style={{ marginRight: 4 }}>↙</span>}
+      {text}
+      {dir === 'right' && <span style={{ marginLeft: 4 }}>↘</span>}
+    </div>
+  );
+}
+
+// Faux app behind the overlay
+function DesktopContext({ kind = 'browser' }) {
+  return (
+    <>
+      <div className="desk" />
+      <div className="desk-browser">
+        <div className="desk-traffic"><span/><span/><span/></div>
+        <div className="desk-url" />
+        <div className="desk-cursor" />
+      </div>
+    </>
+  );
+}
+
+// Shared dot-row progress
+function DotRow({ total = 12, current = 2, w = 6, gap = 4 }) {
+  return (
+    <div style={{ display: 'flex', gap, alignItems: 'center' }}>
+      {Array.from({ length: total }).map((_, i) => (
+        <span key={i} style={{
+          width: i === current ? w + 2 : w, height: i === current ? w + 2 : w,
+          borderRadius: '50%',
+          background: i < current ? 'var(--ink)' : i === current ? 'var(--accent)' : 'transparent',
+          border: i > current ? '1.25px solid var(--line-faint)' : i === current ? '1.5px solid var(--accent)' : '1.5px solid var(--ink)',
+        }}/>
+      ))}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// V1 — PILL. Ultra-minimal one-line pill, instruction + dot progress.
+// --------------------------------------------------------------------------
+function V1_Pill({ state, showInput, showAnnotations }) {
+  const paused = state === 'paused';
+  const confirming = state === 'confirming';
+  return (
+    <div style={{ position: 'absolute', left: 60, top: 220, width: 360 }}>
+      <div className="sketch-box overlay-shadow" style={{
+        height: 56, borderRadius: 28, padding: '0 14px 0 14px',
+        display: 'flex', alignItems: 'center', gap: 12,
+        background: confirming ? 'var(--paper)' : 'var(--paper)',
+        borderColor: confirming ? 'var(--accent)' : 'var(--line)',
+        borderWidth: confirming ? 2 : 1.5,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 28, height: 28, borderRadius: 14, border: '1.25px solid var(--line)', flex: '0 0 auto' }}>
+          {paused ? <Icon.Play/> : confirming ? <Icon.Sparkle/> : <Icon.Click/>}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {confirming ? (
+            <div style={{ fontSize: 15, fontWeight: 700 }}>
+              Are you here? <span className="hl">Sign In page</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {paused ? <span style={{ color: 'var(--dim)' }}>Paused — tap to resume</span>
+                      : <>Click <span className="hl">Sign In</span> in top-right</>}
+            </div>
+          )}
+        </div>
+        {confirming ? (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="mono" style={{ height: 26, padding: '0 10px', border: '1.25px solid var(--line)', borderRadius: 13, background: 'var(--paper)', fontSize: 12 }}>No</button>
+            <button className="mono" style={{ height: 26, padding: '0 10px', border: 'none', borderRadius: 13, background: 'var(--accent)', color: 'var(--paper)', fontSize: 12, fontWeight: 600 }}>Yes</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: '0 0 auto' }}>
+            <DotRow total={12} current={2} />
+          </div>
+        )}
+      </div>
+
+      {/* drawer below — peek of last action */}
+      <div style={{ marginTop: 8, padding: '4px 16px', fontSize: 13, color: 'var(--dim)', display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ textDecoration: 'line-through' }}>✓ Open the address bar</span>
+        <span className="mono" style={{ fontSize: 11 }}>3/12</span>
+      </div>
+
+      {showAnnotations && (
+        <>
+          <Anno x={-40} y={-26} w={140} text="single line · ellipsis if long" rotate={-2}/>
+          <Anno x={250} y={70} w={140} dir="right" text="dots show progress at a glance" rotate={3}/>
+        </>
+      )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// V2 — SPOTLIGHT BAR. Wider command-bar style, inline controls + progress.
+// --------------------------------------------------------------------------
+function V2_Spotlight({ state, showInput, showAnnotations }) {
+  const paused = state === 'paused';
+  const confirming = state === 'confirming';
+  return (
+    <div style={{ position: 'absolute', left: 40, top: 200, width: 480 }}>
+      <div className="sketch-box overlay-shadow" style={{
+        borderRadius: 16, padding: 14, background: 'var(--paper)',
+      }}>
+        {/* top meta row */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>
+            CONTEXT · Runpod Setup
+          </span>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>3/12</span>
+        </div>
+        {/* main row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, border: '1.5px solid var(--line)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto', background: 'var(--paper-2)' }}>
+            {confirming ? <Icon.Sparkle size={18}/> : paused ? <Icon.Play size={18}/> : <Icon.Type size={18}/>}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.2 }}>
+              {confirming ? <>Did you click <span className="hl">Sign In</span>?</>
+               : paused ? <span style={{ color: 'var(--dim)' }}>Tutorial paused</span>
+               : <>Type the <span className="hl">Runpod URL</span></>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>
+            <BtnIcon><Icon.Book/></BtnIcon>
+            <BtnIcon active={paused}>{paused ? <Icon.Play/> : <Icon.Pause/>}</BtnIcon>
+            <BtnIcon><Icon.Close/></BtnIcon>
+          </div>
+        </div>
+        {/* progress bar */}
+        <div style={{ marginTop: 12, position: 'relative', height: 6 }}>
+          <div style={{ position: 'absolute', inset: 0, border: '1.25px solid var(--line)', borderRadius: 3 }}/>
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '22%', background: 'var(--accent)', borderRadius: 3 }}/>
+        </div>
+
+        {/* confirm row */}
+        {confirming && (
+          <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="mono" style={{ height: 28, padding: '0 14px', border: '1.25px solid var(--line)', borderRadius: 8, background: 'var(--paper)', fontSize: 12 }}>Not yet</button>
+            <button className="mono" style={{ height: 28, padding: '0 14px', border: 'none', borderRadius: 8, background: 'var(--accent)', color: 'var(--paper)', fontSize: 12, fontWeight: 600 }}>Yes, done</button>
+          </div>
+        )}
+
+        {/* input — hidden behind toggle */}
+        {showInput && !confirming && (
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, border: '1.25px dashed var(--line-soft)' }}>
+            <Icon.Mic/>
+            <span className="bar" style={{ width: '60%' }}/>
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--dim)' }} className="mono">⏎</span>
+          </div>
+        )}
+      </div>
+
+      {showAnnotations && (
+        <>
+          <Anno x={-30} y={-26} w={170} text="title row tells you which tutorial" rotate={-2}/>
+          <Anno x={350} y={-26} w={120} dir="right" text="x/12 lives here" rotate={2}/>
+          <Anno x={350} y={70} w={130} dir="right" text="controls always visible" rotate={4}/>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BtnIcon({ children, active }) {
+  return (
+    <button style={{
+      width: 28, height: 28, borderRadius: 8,
+      border: '1.25px solid var(--line)',
+      background: active ? 'var(--accent)' : 'var(--paper)',
+      color: active ? 'var(--paper)' : 'var(--ink)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+    }}>{children}</button>
+  );
+}
+
+// --------------------------------------------------------------------------
+// V3 — PEEK STACK. Just-did / Now / Up-next, three rows tightly stacked.
+// --------------------------------------------------------------------------
+function V3_PeekStack({ state, showInput, showAnnotations }) {
+  const paused = state === 'paused';
+  const confirming = state === 'confirming';
+  return (
+    <div style={{ position: 'absolute', left: 60, top: 180, width: 360 }}>
+      <div className="sketch-box overlay-shadow" style={{ borderRadius: 14, padding: '10px 14px', background: 'var(--paper)' }}>
+        {/* tiny header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>STEP 3 / 12</span>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <BtnIcon active={paused}>{paused ? <Icon.Play/> : <Icon.Pause/>}</BtnIcon>
+            <BtnIcon><Icon.Close/></BtnIcon>
+          </div>
+        </div>
+
+        {/* just did — dimmed */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', opacity: .45 }}>
+          <span className="mono" style={{ fontSize: 10 }}>✓</span>
+          <span style={{ fontSize: 13, textDecoration: 'line-through' }}>Open the address bar</span>
+        </div>
+
+        {/* now — emphasized */}
+        <div style={{
+          margin: '4px -8px', padding: '10px 8px', borderRadius: 10,
+          background: confirming ? 'transparent' : 'rgba(255,90,60,.10)',
+          border: confirming ? '1.5px solid var(--accent)' : 'none',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <div style={{ width: 28, height: 28, borderRadius: 8, border: '1.25px solid var(--line)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--paper)', flex: '0 0 auto' }}>
+            {confirming ? <Icon.Sparkle/> : <Icon.Type/>}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.2 }}>
+            {confirming ? <>Did you type the URL?</>
+             : <>Type the <span className="hl">Runpod URL</span></>}
+          </div>
+        </div>
+
+        {/* up next — ghosted */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', color: 'var(--ghost)' }}>
+          <span className="mono" style={{ fontSize: 10 }}>→</span>
+          <span style={{ fontSize: 13 }}>Click Sign In in top-right</span>
+        </div>
+
+        {confirming && (
+          <div style={{ marginTop: 6, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="mono" style={{ height: 26, padding: '0 12px', border: '1.25px solid var(--line)', borderRadius: 8, background: 'var(--paper)', fontSize: 11 }}>Not yet</button>
+            <button className="mono" style={{ height: 26, padding: '0 12px', border: 'none', borderRadius: 8, background: 'var(--accent)', color: 'var(--paper)', fontSize: 11, fontWeight: 600 }}>Yes</button>
+          </div>
+        )}
+
+        {showInput && !confirming && (
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, border: '1.25px dashed var(--line-soft)' }}>
+            <span style={{ fontSize: 12, color: 'var(--dim)' }}>Ask…</span>
+            <Icon.Mic/>
+          </div>
+        )}
+      </div>
+
+      {showAnnotations && (
+        <>
+          <Anno x={-30} y={70} w={130} text="just did (faded)" rotate={-3}/>
+          <Anno x={-50} y={108} w={140} text="NOW — accent fill" rotate={-2}/>
+          <Anno x={-30} y={158} w={130} text="up next (ghost)" rotate={-3}/>
+        </>
+      )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// V4 — PROGRESS RING. Compact square w/ big ring; tutorial feels like a quest.
+// --------------------------------------------------------------------------
+function V4_Ring({ state, showInput, showAnnotations }) {
+  const paused = state === 'paused';
+  const confirming = state === 'confirming';
+  // ring values
+  const r = 30, c = 2 * Math.PI * r;
+  const pct = confirming ? 0.18 : paused ? 0.18 : 0.22;
+  return (
+    <div style={{ position: 'absolute', left: 80, top: 130, width: 280 }}>
+      <div className="sketch-box overlay-shadow" style={{ borderRadius: 16, padding: 16, background: 'var(--paper)' }}>
+        {/* top — small controls only */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>RUNPOD SETUP</span>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <BtnIcon><Icon.Book/></BtnIcon>
+            <BtnIcon><Icon.Close/></BtnIcon>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8 }}>
+          {/* ring */}
+          <div style={{ position: 'relative', width: 72, height: 72, flex: '0 0 auto' }}>
+            <svg width="72" height="72" viewBox="0 0 72 72">
+              <circle cx="36" cy="36" r={r} fill="none" stroke="var(--line-faint)" strokeWidth="4"/>
+              <circle cx="36" cy="36" r={r} fill="none" stroke="var(--accent)" strokeWidth="4"
+                strokeDasharray={`${c * pct} ${c}`} strokeLinecap="round"
+                transform="rotate(-90 36 36)"/>
+            </svg>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <span className="mono" style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>3</span>
+              <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1 }}>of 12</span>
+            </div>
+          </div>
+          {/* text */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--dim)' }} className="mono">CURRENT STEP</div>
+            <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.2, marginTop: 2 }}>
+              {confirming ? <>Are you on Sign In?</>
+               : paused ? <span style={{ color: 'var(--dim)' }}>Paused</span>
+               : <>Type the <span className="hl">Runpod URL</span></>}
+            </div>
+          </div>
+        </div>
+
+        {/* bottom action row */}
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {confirming ? (
+            <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+              <button className="mono" style={{ flex: 1, height: 30, border: '1.25px solid var(--line)', borderRadius: 8, background: 'var(--paper)', fontSize: 12 }}>Not yet</button>
+              <button className="mono" style={{ flex: 1, height: 30, border: 'none', borderRadius: 8, background: 'var(--accent)', color: 'var(--paper)', fontSize: 12, fontWeight: 600 }}>Yes</button>
+            </div>
+          ) : (
+            <>
+              <button className="mono" style={{
+                height: 30, padding: '0 12px', borderRadius: 8,
+                border: '1.25px solid var(--line)', background: paused ? 'var(--accent)' : 'var(--paper)',
+                color: paused ? 'var(--paper)' : 'var(--ink)',
+                fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                {paused ? <><Icon.Play/> Resume</> : <><Icon.Pause/> Pause</>}
+              </button>
+              <span style={{ fontSize: 12, color: 'var(--dim)' }}>↓ next</span>
+            </>
+          )}
+        </div>
+
+        {showInput && !confirming && (
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, border: '1.25px dashed var(--line-soft)' }}>
+            <span style={{ fontSize: 12, color: 'var(--dim)' }}>Ask Context…</span>
+          </div>
+        )}
+      </div>
+
+      {showAnnotations && (
+        <>
+          <Anno x={-50} y={50} w={120} text="ring = progress" rotate={-4}/>
+          <Anno x={210} y={50} w={130} dir="right" text="feels like a quest" rotate={3}/>
+        </>
+      )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// V5 — ACTION CHIP. Floating tab; pull up a sheet to see history & input.
+// --------------------------------------------------------------------------
+function V5_Chip({ state, showInput, showAnnotations }) {
+  const paused = state === 'paused';
+  const confirming = state === 'confirming';
+  return (
+    <div style={{ position: 'absolute', left: 70, top: showInput ? 90 : 200, width: 340 }}>
+      {/* expanded history sheet (only when input/expanded) */}
+      {showInput && (
+        <div className="sketch-box-soft" style={{
+          borderRadius: '14px 14px 4px 4px', padding: '12px 14px 18px',
+          background: 'var(--paper)', marginBottom: -6,
+        }}>
+          <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 8 }}>HISTORY · 2 done</div>
+          {['Open the address bar', 'Focus the address bar input'].map((t, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', color: 'var(--dim)', fontSize: 13 }}>
+              <span className="mono" style={{ fontSize: 10 }}>✓</span>
+              <span style={{ textDecoration: 'line-through' }}>{t}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, border: '1.25px dashed var(--line-soft)' }}>
+            <span style={{ fontSize: 13, color: 'var(--dim)' }}>Ask Context anything…</span>
+            <Icon.Mic/>
+          </div>
+        </div>
+      )}
+
+      {/* main chip */}
+      <div className="sketch-box overlay-shadow" style={{
+        borderRadius: showInput ? '4px 4px 14px 14px' : 14,
+        padding: '0 10px 0 12px',
+        height: 60, display: 'flex', alignItems: 'center', gap: 10,
+        background: 'var(--paper)',
+        borderColor: confirming ? 'var(--accent)' : 'var(--line)',
+        borderWidth: confirming ? 2 : 1.5,
+      }}>
+        {/* state pip */}
+        <div style={{ width: 30, height: 30, borderRadius: 8, border: '1.25px solid var(--line)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--paper-2)', flex: '0 0 auto' }}>
+          {confirming ? <Icon.Sparkle/> : paused ? <Icon.Play/> : <Icon.Type/>}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="mono" style={{ fontSize: 10, color: 'var(--dim)', lineHeight: 1 }}>
+            {confirming ? 'CHECKING…' : paused ? 'PAUSED' : 'STEP 3 / 12'}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2, marginTop: 2,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {confirming ? <>Did you click <span className="hl">Sign In</span>?</>
+             : paused ? 'Resume to continue' :
+             <>Type the <span className="hl">Runpod URL</span></>}
+          </div>
+        </div>
+
+        {confirming ? (
+          <div style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>
+            <BtnIcon><Icon.Close/></BtnIcon>
+            <button className="mono" style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'var(--paper)', fontSize: 12, fontWeight: 600 }}>Yes</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>
+            <BtnIcon active={paused}>{paused ? <Icon.Play/> : <Icon.Pause/>}</BtnIcon>
+            <BtnIcon><Icon.Chevron/></BtnIcon>
+          </div>
+        )}
+      </div>
+
+      {/* thin progress bar peeking under */}
+      <div style={{ height: 3, background: 'var(--line-faint)', borderRadius: 2, marginTop: 6, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '22%', background: 'var(--accent)' }}/>
+      </div>
+
+      {showAnnotations && (
+        <>
+          <Anno x={-30} y={showInput ? -26 : -26} w={140} text="expands to history + ask" rotate={-2}/>
+          <Anno x={250} y={showInput ? 240 : 80} w={140} dir="right" text="chevron pulls drawer up" rotate={3}/>
+        </>
+      )}
+    </div>
+  );
+}
+
+// expose to other babel scripts
+Object.assign(window, { V1_Pill, V2_Spotlight, V3_PeekStack, V4_Ring, V5_Chip, DesktopContext });
+
+
+// Hybrid wireframes — Peek stack + Action chip fused with Q&A.
+// Four directions exploring "where does the conversation live?"
+
+// shared bits ────────────────────────────────────────────────────────────────
+
+function Chrome({ children, accent }) {
+  // outer overlay shell
+  return (
+    <div className="sketch-box overlay-shadow" style={{
+      background: 'var(--paper)',
+      borderRadius: 14,
+      borderColor: accent ? 'var(--accent)' : 'var(--line)',
+      borderWidth: accent ? 2 : 1.5,
+      overflow: 'hidden',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function StepRow({ state, text, action, highlight }) {
+  // state: 'done' | 'now' | 'next' | 'asked'
+  const opacity = state === 'done' ? .45 : state === 'next' ? .35 : 1;
+  const td = state === 'done' ? 'line-through' : 'none';
+  const bg = state === 'now' ? 'rgba(255,90,60,.10)' : 'transparent';
+  const fw = state === 'now' ? 700 : 500;
+  const fs = state === 'now' ? 16 : 13;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: state === 'now' ? '10px 10px' : '4px 10px',
+      margin: state === 'now' ? '4px -2px' : '0',
+      borderRadius: state === 'now' ? 10 : 0,
+      background: bg, opacity,
+    }}>
+      <span className="mono" style={{ fontSize: 11, width: 16, textAlign: 'center', color: 'var(--dim)' }}>
+        {state === 'done' ? '✓' : state === 'now' ? '●' : '→'}
+      </span>
+      <span style={{ fontSize: fs, fontWeight: fw, lineHeight: 1.25, textDecoration: td }}>
+        {highlight ? <>{text.split(highlight)[0]}<span className="hl">{highlight}</span>{text.split(highlight)[1]}</> : text}
+      </span>
+    </div>
+  );
+}
+
+function HeaderBar({ step = '3 / 12', label = 'RUNPOD SETUP', paused, children }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '10px 12px 8px', borderBottom: '1px solid var(--line-faint)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span className="mono" style={{ fontSize: 11, color: 'var(--dim)' }}>{label}</span>
+        <span className="mono" style={{ fontSize: 11, color: 'var(--ink)', fontWeight: 600 }}>{step}</span>
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {children || (
+          <>
+            <BtnIcon><Icon.Book/></BtnIcon>
+            <BtnIcon active={paused}>{paused ? <Icon.Play/> : <Icon.Pause/>}</BtnIcon>
+            <BtnIcon><Icon.Close/></BtnIcon>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ThinProgress({ pct = 0.22 }) {
+  return (
+    <div style={{ height: 3, background: 'var(--line-faint)', position: 'relative' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: (pct*100)+'%', background: 'var(--accent)' }}/>
+    </div>
+  );
+}
+
+function TypingDots() {
+  return (
+    <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
+      {[0,1,2].map(i => <span key={i} style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--ink)', opacity: .3 + i*.2 }}/>)}
+    </span>
+  );
+}
+
+// H1 — Always-on Ask bar ─────────────────────────────────────────────────────
+// Peek stack with a thin persistent input at the bottom. When user asks,
+// the answer slots in as its own card above the stack and tutorial pauses.
+function H1_AskBar({ state, showAnnotations }) {
+  const asking    = state === 'asking';
+  const answering = state === 'answering';
+  const answered  = state === 'answered';
+  const paused    = state === 'paused' || asking || answering || answered;
+  const confirming = state === 'confirming';
+
+  return (
+    <div style={{ position: 'absolute', left: 50, top: 80, width: 380 }}>
+      <Chrome accent={confirming}>
+        <HeaderBar paused={paused}/>
+        <ThinProgress/>
+
+        <div style={{ padding: '8px 8px 4px' }}>
+          {/* Q&A card slotted in when relevant */}
+          {(answering || answered) && (
+            <div style={{
+              margin: '4px 4px 8px', padding: 10, borderRadius: 10,
+              border: '1.25px solid var(--line)', background: 'var(--paper-2)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <Icon.Sparkle size={12}/>
+                <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>ANSWER · tutorial paused</span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>
+                You asked: <em>"what's a Runpod URL?"</em>
+              </div>
+              {answering ? (
+                <div style={{ fontSize: 13 }}><TypingDots/></div>
+              ) : (
+                <div style={{ fontSize: 13, lineHeight: 1.35 }}>
+                  Runpod's dashboard lives at <span className="mono" style={{ fontSize: 12 }}>console.runpod.io</span> — that's the URL you'll type next.
+                </div>
+              )}
+              <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                <button className="mono" style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1.25px solid var(--line)', background: 'var(--paper)' }}>↩ Resume</button>
+                <button className="mono" style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--dim)' }}>Ask follow-up</button>
+              </div>
+            </div>
+          )}
+
+          <StepRow state="done" text="Open the address bar"/>
+          {confirming
+            ? <div style={{ margin: '4px -2px', padding: '10px', borderRadius: 10, border: '1.5px solid var(--accent)' }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Are you on Sign In yet?</div>
+                <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: '1.25px solid var(--line)', borderRadius: 6, background: 'var(--paper)' }}>Not yet</button>
+                  <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)' }}>Yes</button>
+                </div>
+              </div>
+            : <StepRow state="now" text="Type the Runpod URL" highlight="Runpod URL"/>
+          }
+          <StepRow state="next" text="Click Sign In in top-right"/>
+        </div>
+
+        {/* persistent ask bar */}
+        <div style={{
+          borderTop: '1px solid var(--line-faint)',
+          padding: '8px 10px',
+          display: 'flex', alignItems: 'center', gap: 8,
+          background: asking ? 'var(--paper-2)' : 'var(--paper)',
+        }}>
+          {asking ? (
+            <>
+              <span style={{ fontSize: 13 }}>what's a Runpod URL</span>
+              <span style={{ width: 1.5, height: 14, background: 'var(--ink)', animation: 'blink 1s steps(2) infinite' }}/>
+              <button className="mono" style={{ marginLeft: 'auto', fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)', fontWeight: 600 }}>Send ⏎</button>
+            </>
+          ) : (
+            <>
+              <Icon.Sparkle size={13}/>
+              <span style={{ fontSize: 13, color: 'var(--dim)' }}>Ask Context anything…</span>
+              <span className="mono" style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)' }}>⌘K</span>
+            </>
+          )}
+        </div>
+      </Chrome>
+
+      {showAnnotations && (
+        <>
+          <Anno x={-30} y={-30} w={130} text="tutorial keeps streaming" rotate={-2}/>
+          <Anno x={300} y={300} w={150} dir="right" text="always-available ask · ⌘K opens it" rotate={3}/>
+          {(answering || answered) && <Anno x={-50} y={66} w={140} text="answer slots IN — tutorial pauses" rotate={-3}/>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// H2 — Pull-up Chat sheet ────────────────────────────────────────────────────
+// Steps view by default. A chip footer pulls up a chat sheet OVER the steps.
+// Two states shown depending on `state`.
+function H2_PullUp({ state, showAnnotations }) {
+  const inChat = state === 'asking' || state === 'answering' || state === 'answered';
+  const answering = state === 'answering';
+  const answered  = state === 'answered';
+  const confirming = state === 'confirming';
+  const paused = state === 'paused';
+
+  return (
+    <div style={{ position: 'absolute', left: 50, top: 60, width: 380 }}>
+      <Chrome accent={confirming}>
+        {inChat ? (
+          <>
+            {/* chat header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 12px 8px', borderBottom: '1px solid var(--line-faint)',
+            }}>
+              <button style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', fontSize: 13, fontWeight: 600 }}>
+                <span style={{ fontSize: 14 }}>←</span> Back to steps
+              </button>
+              <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>PAUSED ON 3/12</span>
+            </div>
+
+            <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* user q */}
+              <div style={{ alignSelf: 'flex-end', maxWidth: '78%', padding: '8px 12px', borderRadius: '14px 14px 4px 14px', background: 'var(--ink)', color: 'var(--paper)', fontSize: 13 }}>
+                what's a Runpod URL?
+              </div>
+              {/* ai a */}
+              <div style={{ alignSelf: 'flex-start', maxWidth: '85%', padding: '8px 12px', borderRadius: '14px 14px 14px 4px', border: '1.25px solid var(--line)', fontSize: 13, lineHeight: 1.35 }}>
+                {answering
+                  ? <TypingDots/>
+                  : <>It's <span className="mono" style={{ fontSize: 12 }}>console.runpod.io</span> — your dashboard.</>}
+              </div>
+              {answered && (
+                <div style={{ alignSelf: 'flex-start', display: 'flex', gap: 6, marginTop: 2 }}>
+                  <button className="mono" style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, border: '1.25px solid var(--line-faint)', background: 'var(--paper)', color: 'var(--dim)' }}>Show me</button>
+                  <button className="mono" style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, border: '1.25px solid var(--line-faint)', background: 'var(--paper)', color: 'var(--dim)' }}>↩ resume</button>
+                </div>
+              )}
+            </div>
+            {/* input */}
+            <div style={{ borderTop: '1px solid var(--line-faint)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--dim)', flex: 1 }}>Ask a follow-up…</span>
+              <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)' }}>⏎</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <HeaderBar paused={paused}/>
+            <ThinProgress/>
+            <div style={{ padding: '8px 8px 4px' }}>
+              <StepRow state="done" text="Open the address bar"/>
+              {confirming
+                ? <div style={{ margin: '4px -2px', padding: '10px', borderRadius: 10, border: '1.5px solid var(--accent)' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>Are you on Sign In yet?</div>
+                    <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: '1.25px solid var(--line)', borderRadius: 6, background: 'var(--paper)' }}>Not yet</button>
+                      <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)' }}>Yes</button>
+                    </div>
+                  </div>
+                : <StepRow state="now" text="Type the Runpod URL" highlight="Runpod URL"/>
+              }
+              <StepRow state="next" text="Click Sign In in top-right"/>
+            </div>
+            {/* pull-up chip */}
+            <button style={{
+              width: '100%', borderTop: '1px solid var(--line-faint)',
+              padding: '10px 12px',
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'var(--paper-2)', border: 'none', cursor: 'pointer',
+            }}>
+              <span style={{ fontSize: 14 }}>↑</span>
+              <Icon.Sparkle size={13}/>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Ask Context</span>
+              <span className="mono" style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)' }}>⌘K</span>
+            </button>
+          </>
+        )}
+      </Chrome>
+
+      {showAnnotations && (
+        <>
+          {inChat
+            ? <>
+                <Anno x={-50} y={-30} w={140} text="full chat takes over · steps paused" rotate={-2}/>
+                <Anno x={290} y={-26} w={120} dir="right" text="back returns to steps" rotate={3}/>
+              </>
+            : <>
+                <Anno x={-30} y={-30} w={130} text="steps fill the surface" rotate={-2}/>
+                <Anno x={280} y={280} w={140} dir="right" text="footer pulls up to chat" rotate={3}/>
+              </>
+          }
+        </>
+      )}
+    </div>
+  );
+}
+
+// H3 — Inline conversational stream ──────────────────────────────────────────
+// Everything in one chronological feed — actions, questions, answers
+// interleave. The tutorial IS the conversation.
+function H3_Stream({ state, showAnnotations }) {
+  const asking = state === 'asking';
+  const answering = state === 'answering';
+  const answered = state === 'answered';
+  const confirming = state === 'confirming';
+  const paused = state === 'paused';
+  // when not in Q&A flow, hide the inline question entries
+  const showQA = answering || answered;
+
+  const Row = ({ icon, label, children, accent, dim, indent }) => (
+    <div style={{
+      display: 'flex', gap: 10, padding: '6px 10px',
+      paddingLeft: 10 + (indent || 0),
+      opacity: dim ? .55 : 1,
+    }}>
+      <span className="mono" style={{ fontSize: 10, color: 'var(--dim)', width: 22, paddingTop: 3, flexShrink: 0 }}>{label}</span>
+      <div style={{ fontSize: 13, lineHeight: 1.35, flex: 1 }}>{children}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ position: 'absolute', left: 50, top: 50, width: 380 }}>
+      <Chrome accent={confirming}>
+        <HeaderBar paused={paused}/>
+        <ThinProgress/>
+
+        <div style={{ padding: '6px 0 4px' }}>
+          <Row label="STEP 1" dim>
+            <span style={{ textDecoration: 'line-through' }}>Open the address bar</span> <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>✓</span>
+          </Row>
+          <Row label="STEP 2" dim>
+            <span style={{ textDecoration: 'line-through' }}>Focus the address input</span> <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>✓</span>
+          </Row>
+
+          {showQA && (
+            <>
+              <div style={{ padding: '4px 10px 4px 32px' }}>
+                <div style={{ display: 'inline-block', padding: '6px 10px', borderRadius: '12px 12px 4px 12px', background: 'var(--ink)', color: 'var(--paper)', fontSize: 12 }}>
+                  what's a Runpod URL?
+                </div>
+              </div>
+              <div style={{ padding: '4px 10px 4px 32px' }}>
+                <div style={{ display: 'inline-block', maxWidth: '90%', padding: '6px 10px', borderRadius: '12px 12px 12px 4px', border: '1.25px solid var(--line)', fontSize: 12, lineHeight: 1.35 }}>
+                  <Icon.Sparkle size={10}/> {answering ? <TypingDots/> : <>Your dashboard at <span className="mono" style={{ fontSize: 11 }}>console.runpod.io</span></>}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* current step — emphasized */}
+          {confirming ? (
+            <div style={{ margin: '6px 8px', padding: 10, borderRadius: 10, border: '1.5px solid var(--accent)' }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Did you type the URL?</div>
+              <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: '1.25px solid var(--line)', borderRadius: 6, background: 'var(--paper)' }}>Not yet</button>
+                <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)' }}>Yes</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ margin: '6px 8px', padding: '10px 12px', borderRadius: 10, background: 'rgba(255,90,60,.10)', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span className="mono" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700, width: 38 }}>STEP 3</span>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Type the <span className="hl">Runpod URL</span></span>
+            </div>
+          )}
+
+          <Row label="STEP 4" dim>Click Sign In in top-right</Row>
+        </div>
+
+        {/* always-on input */}
+        <div style={{ borderTop: '1px solid var(--line-faint)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, background: asking ? 'var(--paper-2)' : 'var(--paper)' }}>
+          {asking ? (
+            <>
+              <span style={{ fontSize: 13 }}>what's a Runpod URL</span>
+              <span style={{ width: 1.5, height: 14, background: 'var(--ink)' }}/>
+              <button className="mono" style={{ marginLeft: 'auto', fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)' }}>⏎</button>
+            </>
+          ) : (
+            <>
+              <Icon.Sparkle size={13}/>
+              <span style={{ fontSize: 13, color: 'var(--dim)' }}>Ask, or wait for next step…</span>
+              <span className="mono" style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)' }}>⌘K</span>
+            </>
+          )}
+        </div>
+      </Chrome>
+
+      {showAnnotations && (
+        <>
+          <Anno x={-50} y={-30} w={150} text="one timeline · actions + chat woven" rotate={-2}/>
+          <Anno x={290} y={120} w={130} dir="right" text="questions inline · don't pause" rotate={3}/>
+          <Anno x={-30} y={350} w={130} text="always-on ask" rotate={-3}/>
+        </>
+      )}
+    </div>
+  );
+}
+
+// H4 — Split focus ──────────────────────────────────────────────────────────
+// Default: full peek stack. When user asks, stack collapses to a single
+// "paused on step 3" reminder line, chat takes over the body. Resume button
+// snaps back.
+function H4_Split({ state, showAnnotations }) {
+  const inChat = state === 'asking' || state === 'answering' || state === 'answered';
+  const answering = state === 'answering';
+  const answered  = state === 'answered';
+  const confirming = state === 'confirming';
+  const paused = state === 'paused';
+
+  return (
+    <div style={{ position: 'absolute', left: 50, top: 60, width: 380 }}>
+      <Chrome accent={confirming}>
+        <HeaderBar paused={paused || inChat}/>
+        <ThinProgress/>
+
+        {inChat ? (
+          <>
+            {/* collapsed reminder strip */}
+            <div style={{
+              padding: '6px 10px',
+              background: 'var(--paper-2)',
+              borderBottom: '1px solid var(--line-faint)',
+              display: 'flex', alignItems: 'center', gap: 8,
+              fontSize: 12,
+            }}>
+              <span className="mono" style={{ fontSize: 10, color: 'var(--dim)' }}>STEP 3 ·</span>
+              <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                Type the Runpod URL
+              </span>
+              <button className="mono" style={{ marginLeft: 'auto', fontSize: 10, padding: '3px 8px', borderRadius: 5, border: '1.25px solid var(--line)', background: 'var(--paper)' }}>↩ resume</button>
+            </div>
+
+            {/* chat thread */}
+            <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ alignSelf: 'flex-end', maxWidth: '78%', padding: '8px 12px', borderRadius: '14px 14px 4px 14px', background: 'var(--ink)', color: 'var(--paper)', fontSize: 13 }}>
+                what's a Runpod URL?
+              </div>
+              <div style={{ alignSelf: 'flex-start', maxWidth: '85%', padding: '8px 12px', borderRadius: '14px 14px 14px 4px', border: '1.25px solid var(--line)', fontSize: 13, lineHeight: 1.35 }}>
+                {answering ? <TypingDots/> : <>Runpod's dashboard at <span className="mono" style={{ fontSize: 12 }}>console.runpod.io</span>.</>}
+              </div>
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--line-faint)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--dim)', flex: 1 }}>Ask follow-up…</span>
+              <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)' }}>⏎</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ padding: '8px 8px 4px' }}>
+              <StepRow state="done" text="Open the address bar"/>
+              {confirming
+                ? <div style={{ margin: '4px -2px', padding: '10px', borderRadius: 10, border: '1.5px solid var(--accent)' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>Are you on Sign In yet?</div>
+                    <div style={{ marginTop: 8, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: '1.25px solid var(--line)', borderRadius: 6, background: 'var(--paper)' }}>Not yet</button>
+                      <button className="mono" style={{ fontSize: 11, padding: '4px 10px', border: 'none', borderRadius: 6, background: 'var(--accent)', color: 'var(--paper)' }}>Yes</button>
+                    </div>
+                  </div>
+                : <StepRow state="now" text="Type the Runpod URL" highlight="Runpod URL"/>
+              }
+              <StepRow state="next" text="Click Sign In in top-right"/>
+            </div>
+            <div style={{
+              borderTop: '1px solid var(--line-faint)',
+              padding: '8px 10px',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <Icon.Sparkle size={13}/>
+              <span style={{ fontSize: 13, color: 'var(--dim)' }}>Ask Context anything…</span>
+              <span className="mono" style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--dim)' }}>⌘K</span>
+            </div>
+          </>
+        )}
+      </Chrome>
+
+      {showAnnotations && (
+        <>
+          {inChat
+            ? <>
+                <Anno x={-60} y={36} w={150} text="step collapses to 1 line · resume any time" rotate={-2}/>
+                <Anno x={290} y={130} w={140} dir="right" text="chat owns the body" rotate={3}/>
+              </>
+            : <>
+                <Anno x={-30} y={-30} w={140} text="steps view · same chrome" rotate={-2}/>
+                <Anno x={290} y={250} w={140} dir="right" text="asking → mode swap" rotate={3}/>
+              </>
+          }
+        </>
+      )}
+    </div>
+  );
+}
+
+Object.assign(window, { H1_AskBar, H2_PullUp, H3_Stream, H4_Split });
+
+
+// Hi-fi pass — Hybrid A (Always-on Ask bar)
+// macOS vibrancy · subtle grays · traffic lights + pencil only · 5 states.
+
+const HFCSS = `
+  .hf, .hf * {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hf-mono { font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace; }
+
+  /* a soft warm wallpaper so vibrancy is visible */
+  .hf-wall {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(60% 80% at 15% 20%, #f0c9a4 0%, transparent 60%),
+      radial-gradient(50% 70% at 90% 30%, #d8a890 0%, transparent 60%),
+      radial-gradient(80% 80% at 40% 90%, #a48aa8 0%, transparent 70%),
+      linear-gradient(180deg, #c79b7d 0%, #8a6a78 100%);
+  }
+  .hf-wall::after{
+    content: ''; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(255,255,255,.18), transparent 25%),
+      radial-gradient(circle at 80% 70%, rgba(0,0,0,.12), transparent 28%);
+  }
+
+  /* the overlay card — vibrancy */
+  .hf-card {
+    position: relative;
+    background: rgba(248, 246, 244, 0.62);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-radius: 14px;
+    box-shadow:
+      inset 0 0.5px 0 rgba(255,255,255,0.7),
+      inset 0 0 0 0.5px rgba(0,0,0,0.10),
+      0 1px 2px rgba(0,0,0,0.12),
+      0 12px 40px rgba(0,0,0,0.22),
+      0 24px 80px rgba(0,0,0,0.18);
+    color: #1a1a1c;
+    overflow: hidden;
+  }
+
+  /* chrome bar */
+  .hf-chrome {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 36px; padding: 0 12px;
+    -webkit-app-region: drag;
+  }
+  .hf-lights { display: flex; gap: 6px; align-items: center; }
+  .hf-light { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+  .hf-light.close{ background: #fb6058; }
+  .hf-light.min  { background: #fdbe40; }
+  .hf-light.max  { background: #2dc940; }
+
+  .hf-iconbtn {
+    width: 24px; height: 24px; border-radius: 6px;
+    border: none; background: transparent; cursor: pointer;
+    color: rgba(0,0,0,0.55);
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .12s;
+  }
+  .hf-iconbtn:hover { background: rgba(0,0,0,0.06); color: rgba(0,0,0,0.8); }
+
+  /* meta row */
+  .hf-meta {
+    padding: 2px 16px 10px;
+    display: flex; align-items: baseline; justify-content: space-between;
+    color: rgba(0,0,0,0.5); font-size: 11px; letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .hf-progress {
+    height: 2px; background: rgba(0,0,0,0.07);
+    margin: 0 14px; border-radius: 1px; overflow: hidden;
+  }
+  .hf-progress > span { display: block; height: 100%; background: rgba(0,0,0,0.55); border-radius: 1px; }
+
+  /* steps */
+  .hf-steps { padding: 12px 10px 8px; }
+  .hf-step {
+    display: flex; align-items: center; gap: 12px;
+    padding: 7px 10px; border-radius: 9px;
+    font-size: 13px; line-height: 1.35;
+  }
+  .hf-step.done { color: rgba(0,0,0,0.42); }
+  .hf-step.done .hf-step-text { text-decoration: line-through; text-decoration-color: rgba(0,0,0,0.25); }
+  .hf-step.now  {
+    background: rgba(0,0,0,0.05);
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.08);
+    font-weight: 600; font-size: 14px; color: #0a0a0c;
+  }
+  .hf-step.next { color: rgba(0,0,0,0.4); }
+  .hf-step-marker {
+    width: 18px; height: 18px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    flex: 0 0 auto;
+  }
+  .hf-step.done .hf-step-marker { color: rgba(0,0,0,0.4); }
+  .hf-step.now  .hf-step-marker { background: #1a1a1c; color: #f8f6f4; box-shadow: 0 0 0 3px rgba(0,0,0,0.06); }
+  .hf-step.next .hf-step-marker { color: rgba(0,0,0,0.35); border: 1px dashed rgba(0,0,0,0.25); }
+
+  /* ask bar */
+  .hf-ask {
+    border-top: 0.5px solid rgba(0,0,0,0.08);
+    padding: 9px 12px;
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.32);
+  }
+  .hf-ask .hf-spark { color: rgba(0,0,0,0.45); display: inline-flex; }
+  .hf-ask-placeholder { font-size: 13px; color: rgba(0,0,0,0.42); flex: 1; }
+  .hf-ask-text { font-size: 13px; color: #0a0a0c; flex: 1; display: flex; align-items: center; }
+  .hf-cursor { display: inline-block; width: 1.2px; height: 14px; background: #0a0a0c; margin-left: 1px; animation: hfblink 1s steps(2) infinite; vertical-align: middle; }
+  @keyframes hfblink { 50% { opacity: 0; } }
+  .hf-kbd {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    font-size: 10.5px; color: rgba(0,0,0,0.4);
+    padding: 2px 6px; border-radius: 4px;
+    background: rgba(0,0,0,0.04);
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.08);
+  }
+  .hf-send {
+    width: 22px; height: 22px; border-radius: 6px; border: none;
+    background: rgba(0,0,0,0.85); color: #f8f6f4; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+
+  /* answer card */
+  .hf-answer {
+    margin: 10px 12px 4px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.55);
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.08);
+  }
+  .hf-answer-meta {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+    color: rgba(0,0,0,0.45); margin-bottom: 6px;
+  }
+  .hf-answer-q { font-size: 12px; color: rgba(0,0,0,0.55); margin-bottom: 6px; font-style: italic; }
+  .hf-answer-body { font-size: 13.5px; line-height: 1.45; color: #0a0a0c; }
+  .hf-answer-actions { margin-top: 10px; display: flex; gap: 6px; align-items: center; }
+  .hf-btn {
+    font-size: 12px; padding: 5px 11px;
+    border-radius: 7px; border: none; cursor: pointer;
+    background: rgba(0,0,0,0.06);
+    color: #0a0a0c;
+    transition: background .12s;
+  }
+  .hf-btn:hover { background: rgba(0,0,0,0.1); }
+  .hf-btn.primary { background: #1a1a1c; color: #f8f6f4; }
+  .hf-btn.primary:hover { background: #000; }
+  .hf-btn.ghost { background: transparent; color: rgba(0,0,0,0.55); }
+
+  /* steps faded behind answer */
+  .hf-steps.faded { opacity: 0.35; pointer-events: none; }
+
+  /* finished state */
+  .hf-finished { padding: 28px 24px 24px; text-align: center; }
+  .hf-finished-check {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #1a1a1c; color: #f8f6f4;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-bottom: 14px;
+  }
+  .hf-finished-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .hf-finished-sub { font-size: 12px; color: rgba(0,0,0,0.5); margin-top: 4px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .hf-finished-actions { margin-top: 18px; display: flex; gap: 8px; justify-content: center; }
+
+  /* typing dots */
+  .hf-dots { display: inline-flex; gap: 4px; align-items: center; }
+  .hf-dots span { width: 5px; height: 5px; border-radius: 50%; background: #0a0a0c; opacity: 0.3; animation: hfbounce 1.2s infinite ease-in-out; }
+  .hf-dots span:nth-child(2){ animation-delay: 0.15s; }
+  .hf-dots span:nth-child(3){ animation-delay: 0.3s; }
+  @keyframes hfbounce { 0%,80%,100%{ opacity:.2; transform:translateY(0); } 40%{ opacity:.7; transform:translateY(-1px); } }
+
+  /* caret cursor on screen */
+  .hf-cursor-graphic {
+    position: absolute; right: 80px; top: 60px; width: 14px; height: 18px;
+    background: #fff; clip-path: polygon(0 0, 100% 60%, 50% 65%, 70% 100%, 50% 100%, 35% 70%, 0 85%);
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));
+  }
+  /* artboard label hint */
+  .hf-state-label {
+    position: absolute; bottom: 16px; left: 18px;
+    font-family: 'SF Mono', ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    padding: 4px 8px; border-radius: 5px;
+    background: rgba(0,0,0,0.18);
+    backdrop-filter: blur(6px);
+  }
+`;
+
+if (typeof document !== 'undefined' && !document.getElementById('hf-css')) {
+  const s = document.createElement('style'); s.id = 'hf-css'; s.textContent = HFCSS;
+  document.head.appendChild(s);
+}
+
+const HFIcon = {
+  Pencil: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||14} height={p.size||14} fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 14l3.5-.7L13.3 5.5a1.5 1.5 0 000-2.1l-.7-.7a1.5 1.5 0 00-2.1 0L2.7 10.5 2 14z"/>
+      <path d="M9.5 4.2l2.3 2.3"/>
+    </svg>
+  ),
+  Spark: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||13} height={p.size||13} fill="currentColor">
+      <path d="M8 1.5l1.2 3.7 3.7 1.2-3.7 1.2L8 11.3 6.8 7.6 3.1 6.4l3.7-1.2z"/>
+    </svg>
+  ),
+  Send: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||12} height={p.size||12} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 13V3M4 7l4-4 4 4"/>
+    </svg>
+  ),
+  Check: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||20} height={p.size||20} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 8.5l3.5 3.5L13 5"/>
+    </svg>
+  ),
+  CheckSmall: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||10} height={p.size||10} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 8.5l3 3 7-7"/>
+    </svg>
+  ),
+};
+
+function HFChrome() {
+  return (
+    <div className="hf-chrome">
+      <div className="hf-lights">
+        <span className="hf-light close"/>
+        <span className="hf-light min"/>
+        <span className="hf-light max"/>
+      </div>
+      <button className="hf-iconbtn" title="New chat"><HFIcon.Pencil/></button>
+    </div>
+  );
+}
+
+function HFMeta({ step, total, label = 'Runpod Setup', right }) {
+  return (
+    <>
+      <div className="hf-meta">
+        <span>{label}</span>
+        <span className="hf-mono" style={{ textTransform: 'none', letterSpacing: 0 }}>{right ?? `${step} of ${total}`}</span>
+      </div>
+      <div className="hf-progress"><span style={{ width: `${(step/total)*100}%` }}/></div>
+    </>
+  );
+}
+
+function HFSteps({ faded, current = 3, total = 12 }) {
+  return (
+    <div className={'hf-steps' + (faded ? ' faded' : '')}>
+      <div className="hf-step done">
+        <span className="hf-step-marker"><HFIcon.CheckSmall/></span>
+        <span className="hf-step-text">Open the address bar</span>
+      </div>
+      <div className="hf-step now">
+        <span className="hf-step-marker">●</span>
+        <span className="hf-step-text">Type the Runpod URL into the address bar</span>
+      </div>
+      <div className="hf-step next">
+        <span className="hf-step-marker">→</span>
+        <span className="hf-step-text">Click Sign In in the top-right corner</span>
+      </div>
+    </div>
+  );
+}
+
+function HFAskBar({ mode = 'idle' }) {
+  // mode: idle | typing
+  if (mode === 'typing') {
+    return (
+      <div className="hf-ask">
+        <span className="hf-spark"><HFIcon.Spark/></span>
+        <div className="hf-ask-text">what's a Runpod URL<span className="hf-cursor"/></div>
+        <span className="hf-kbd">esc</span>
+        <button className="hf-send" title="Send"><HFIcon.Send/></button>
+      </div>
+    );
+  }
+  return (
+    <div className="hf-ask">
+      <span className="hf-spark"><HFIcon.Spark/></span>
+      <span className="hf-ask-placeholder">Ask Context anything</span>
+      <span className="hf-kbd">⌘K</span>
+    </div>
+  );
+}
+
+// ── 5 STATE COMPOSITIONS ────────────────────────────────────────────────────
+
+function HFIdle() {
+  return (
+    <div className="hf">
+      <div className="hf-card" style={{ width: 340 }}>
+        <HFChrome/>
+        <HFMeta step={3} total={12}/>
+        <HFSteps/>
+        <HFAskBar mode="idle"/>
+      </div>
+    </div>
+  );
+}
+
+function HFTyping() {
+  return (
+    <div className="hf">
+      <div className="hf-card" style={{ width: 340 }}>
+        <HFChrome/>
+        <HFMeta step={3} total={12}/>
+        <HFSteps/>
+        <HFAskBar mode="typing"/>
+      </div>
+    </div>
+  );
+}
+
+function HFStreaming() {
+  return (
+    <div className="hf">
+      <div className="hf-card" style={{ width: 340 }}>
+        <HFChrome/>
+        <HFMeta step={3} total={12} right="paused"/>
+        <div className="hf-answer">
+          <div className="hf-answer-meta">
+            <HFIcon.Spark size={11}/>
+            <span>Answer · tutorial paused</span>
+          </div>
+          <div className="hf-answer-q">"what's a Runpod URL?"</div>
+          <div className="hf-answer-body">
+            Runpod's dashboard lives at <span className="hf-mono" style={{ fontSize: 12, padding: '1px 5px', background: 'rgba(0,0,0,0.05)', borderRadius: 4 }}>console.runpod.io</span> — it's where you<span className="hf-dots" style={{ marginLeft: 4 }}><span/><span/><span/></span>
+          </div>
+        </div>
+        <HFSteps faded/>
+        <HFAskBar mode="idle"/>
+      </div>
+    </div>
+  );
+}
+
+function HFAnswered() {
+  return (
+    <div className="hf">
+      <div className="hf-card" style={{ width: 340 }}>
+        <HFChrome/>
+        <HFMeta step={3} total={12} right="paused"/>
+        <div className="hf-answer">
+          <div className="hf-answer-meta">
+            <HFIcon.Spark size={11}/>
+            <span>Answer · tutorial paused</span>
+          </div>
+          <div className="hf-answer-q">"what's a Runpod URL?"</div>
+          <div className="hf-answer-body">
+            Runpod's dashboard lives at <span className="hf-mono" style={{ fontSize: 12, padding: '1px 5px', background: 'rgba(0,0,0,0.05)', borderRadius: 4 }}>console.runpod.io</span>. It's the page you'll sign into to spin up GPUs.
+          </div>
+          <div className="hf-answer-actions">
+            <button className="hf-btn primary">↩ Resume tutorial</button>
+            <button className="hf-btn ghost">Ask follow-up</button>
+          </div>
+        </div>
+        <HFSteps faded/>
+        <HFAskBar mode="idle"/>
+      </div>
+    </div>
+  );
+}
+
+function HFFinished() {
+  return (
+    <div className="hf">
+      <div className="hf-card" style={{ width: 340 }}>
+        <HFChrome/>
+        <div className="hf-finished">
+          <div className="hf-finished-check"><HFIcon.Check/></div>
+          <div className="hf-finished-title">All done</div>
+          <div className="hf-finished-sub">12 steps · Runpod Setup</div>
+          <div className="hf-finished-actions">
+            <button className="hf-btn primary">Start new tutorial</button>
+          </div>
+        </div>
+        <HFAskBar mode="idle"/>
+      </div>
+    </div>
+  );
+}
+
+// stage wrapper that gives us the wallpaper background
+function HFStage({ children, label }) {
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+      <div className="hf-wall"/>
+      <div className="hf-cursor-graphic"/>
+      <div style={{ position: 'absolute', left: 30, top: 36 }}>
+        {children}
+      </div>
+      <div className="hf-state-label">{label}</div>
+    </div>
+  );
+}
+
+Object.assign(window, { HFIdle, HFTyping, HFStreaming, HFAnswered, HFFinished, HFStage });
+
+
+// App shell — wires the design canvas with five wireframe artboards + a tweak panel.
+
+function Artboard({ children, showContext, height = 480 }) {
+  return (
+    <div className={'stage ' + (showContext ? 'context' : 'plain')}>
+      {showContext && <DesktopContext/>}
+      {children}
+    </div>
+  );
+}
+
+function App() {
+  const [tw, setTweak] = useTweaks(window.__WF_DEFAULTS__);
+
+  const common = { state: tw.state, showInput: tw.showInput, showAnnotations: tw.showAnnotations };
+
+  return (
+    <>
+      <style>{`@keyframes blink{50%{opacity:0}}`}</style>
+      <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
+        <DesignCanvas>
+          <DCSection
+            id="hifi"
+            title="Hi-fi · Hybrid A"
+            subtitle="macOS vibrancy · subtle grays · traffic lights + new-chat pencil · 5 states"
+          >
+            <DCArtboard id="hf-idle" label="1 · Idle" width={400} height={400}>
+              <HFStage label="IDLE"><HFIdle/></HFStage>
+            </DCArtboard>
+            <DCArtboard id="hf-typing" label="2 · User typing" width={400} height={400}>
+              <HFStage label="USER TYPING"><HFTyping/></HFStage>
+            </DCArtboard>
+            <DCArtboard id="hf-stream" label="3 · AI streaming" width={400} height={500}>
+              <HFStage label="AI STREAMING"><HFStreaming/></HFStage>
+            </DCArtboard>
+            <DCArtboard id="hf-answered" label="4 · Answer · Resume" width={400} height={500}>
+              <HFStage label="ANSWER · RESUME"><HFAnswered/></HFStage>
+            </DCArtboard>
+            <DCArtboard id="hf-finished" label="5 · Tutorial finished" width={400} height={400}>
+              <HFStage label="FINISHED"><HFFinished/></HFStage>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection
+            id="hybrids"
+            title="Hybrids · Tutor + Q&A"
+            subtitle="Peek stack × Action chip · weaves in ask/answer · use Tweaks to step through states"
+          >
+            <DCArtboard id="h1" label="A · Always-on Ask bar" width={520} height={520}>
+              <Artboard showContext={tw.showContext}>
+                <H1_AskBar {...common}/>
+              </Artboard>
+            </DCArtboard>
+            <DCArtboard id="h2" label="B · Pull-up Chat sheet" width={520} height={520}>
+              <Artboard showContext={tw.showContext}>
+                <H2_PullUp {...common}/>
+              </Artboard>
+            </DCArtboard>
+            <DCArtboard id="h3" label="C · Inline conversational stream" width={520} height={520}>
+              <Artboard showContext={tw.showContext}>
+                <H3_Stream {...common}/>
+              </Artboard>
+            </DCArtboard>
+            <DCArtboard id="h4" label="D · Split focus" width={520} height={520}>
+              <Artboard showContext={tw.showContext}>
+                <H4_Split {...common}/>
+              </Artboard>
+            </DCArtboard>
+          </DCSection>
+          <DCSection
+            id="overlays"
+            title="Original directions"
+            subtitle="5 starting points · keep for reference"
+          >
+            <DCArtboard id="v1" label="A · Pill" width={520} height={420}>
+              <Artboard showContext={tw.showContext}>
+                <V1_Pill {...common}/>
+              </Artboard>
+            </DCArtboard>
+            <DCArtboard id="v2" label="B · Spotlight Bar" width={580} height={420}>
+              <Artboard showContext={tw.showContext}>
+                <V2_Spotlight {...common}/>
+              </Artboard>
+            </DCArtboard>
+            <DCArtboard id="v3" label="C · Peek Stack" width={520} height={420}>
+              <Artboard showContext={tw.showContext}>
+                <V3_PeekStack {...common}/>
+              </Artboard>
+            </DCArtboard>
+            <DCArtboard id="v4" label="D · Progress Ring" width={520} height={420}>
+              <Artboard showContext={tw.showContext}>
+                <V4_Ring {...common}/>
+              </Artboard>
+            </DCArtboard>
+            <DCArtboard id="v5" label="E · Action Chip" width={520} height={460}>
+              <Artboard showContext={tw.showContext}>
+                <V5_Chip {...common}/>
+              </Artboard>
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      </div>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="State">
+          <TweakSelect
+            label="Mode"
+            value={tw.state}
+            onChange={(v) => setTweak('state', v)}
+            options={[
+              { value: 'active', label: 'Active (tutoring)' },
+              { value: 'asking', label: 'User typing question' },
+              { value: 'answering', label: 'AI generating answer' },
+              { value: 'answered', label: 'Answer shown' },
+              { value: 'paused', label: 'Paused' },
+              { value: 'confirming', label: 'Confirming step' },
+            ]}
+          />
+        </TweakSection>
+        <TweakSection label="Display">
+          <TweakToggle
+            label="Show input field"
+            value={tw.showInput}
+            onChange={(v) => setTweak('showInput', v)}
+          />
+          <TweakToggle
+            label="Desktop context behind overlay"
+            value={tw.showContext}
+            onChange={(v) => setTweak('showContext', v)}
+          />
+          <TweakToggle
+            label="Show annotations"
+            value={tw.showAnnotations}
+            onChange={(v) => setTweak('showAnnotations', v)}
+          />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+
+</script>
+</body>
+</html>

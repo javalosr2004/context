@@ -14,7 +14,7 @@ final class PopupPanel: NSPanel {
     private func configurePanel() {
         backgroundColor = .clear
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        hasShadow = true
+        hasShadow = false
         isMovableByWindowBackground = true
         isOpaque = false
         isReleasedWhenClosed = false
@@ -28,4 +28,3 @@ final class PopupPanel: NSPanel {
         true
     }
 }
-

@@ -22,5 +22,4 @@ exec .venv/bin/python -m uvicorn app:app \
   --host "${HOST:-0.0.0.0}" \
   --port "${PORT:-8080}" \
   --reload \
-  --reload_excludes tests \ 
   --env-file "${ENV_FILE}"

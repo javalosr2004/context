@@ -384,7 +384,7 @@ struct ChatPopupView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .background(canSubmitDraft ? Color.black.opacity(0.85) : Color.black.opacity(0.18))
+                .background(canSubmitDraft ? Color.white.opacity(0.85) : Color.white.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .disabled(!canSubmitDraft)
                 .help("Send")
@@ -400,7 +400,7 @@ struct ChatPopupView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(canAdvanceCurrentStep ? Color.black.opacity(0.85) : Color.black.opacity(0.12))
+            .background(canAdvanceCurrentStep ? Color.white.opacity(0.85) : Color.white.opacity(0.12))
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .disabled(!canAdvanceCurrentStep)
             .help("Next step")

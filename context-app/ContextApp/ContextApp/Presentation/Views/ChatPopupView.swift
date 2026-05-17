@@ -500,6 +500,21 @@ struct ChatPopupView: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if let copyText = typeActionText(for: action) {
+                Button {
+                    copyTypeTextToPasteboard(copyText)
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(foreground.opacity(0.75))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Copy \"\(copyText)\"")
+                .accessibilityLabel("Copy text to clipboard")
+            }
+
             if kind == .done {
                 Image(systemName: "checkmark")
                     .font(.system(size: 9, weight: .bold))
@@ -515,6 +530,11 @@ struct ChatPopupView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(borderColor, style: borderStyle)
         )
+    }
+
+    private func typeActionText(for action: TutorialAction) -> String? {
+        if case .type(let a) = action, !a.text.isEmpty { return a.text }
+        return nil
     }
 
     private func actionChipLabel(for action: TutorialAction) -> String {

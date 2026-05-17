@@ -39,11 +39,10 @@ def update_plan_call(*items: dict[str, Any], reasoning: str = "hypothesis") -> T
 
 def click_item(human_text: str, description: str, confidence: float = 0.9) -> dict[str, Any]:
     return {
-        "kind": "click",
         "human_text": human_text,
-        "agent_description": description,
         "confidence": confidence,
         "refines_current": False,
+        "actions": [{"kind": "click", "agent_description": description}],
     }
 
 
@@ -146,11 +145,11 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         await session.handle_user_message("Walk me through it.")
         await send_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
-        await session.handle_step_started("step_001")
+        await session.handle_step_started("step_001", action_index=0)
         await wait_until(
             lambda: any(type(e).__name__ == "AwaitingConfirmationEvent" for e in events)
         )
-        await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
 
         await wait_until(lambda: session.awaiting_step_id == "step_002")
         self.assertEqual(
@@ -158,12 +157,12 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(session.completed_step_ids, ["step_001"])
 
-        await session.handle_step_started("step_002")
+        await session.handle_step_started("step_002", action_index=0)
         await wait_until(
             lambda: session.status == "awaiting_confirmation"
             and session.awaiting_step_id == "step_002"
         )
-        await session.handle_user_confirmation("step_002", confirmed=True, note=None)
+        await session.handle_user_confirmation("step_002", action_index=0, confirmed=True, note=None)
         await send_screen(session, events)
         await wait_for_idle(session)
 
@@ -194,15 +193,15 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         await session.handle_user_message("Walk me through it.")
         await send_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
-        await session.handle_step_started("step_001")
+        await session.handle_step_started("step_001", action_index=0)
         await wait_until(lambda: session.status == "awaiting_confirmation")
-        await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
 
         await wait_until(lambda: session.awaiting_step_id == "step_002")
-        await session.handle_step_started("step_002")
+        await session.handle_step_started("step_002", action_index=0)
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation(
-            "step_002", confirmed=False, note="Button is gone."
+            "step_002", action_index=0, confirmed=False, note="Button is gone."
         )
         await send_screen(session, events)
         await wait_for_idle(session)
@@ -217,30 +216,37 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         click_step = TutorialStep(
             step_id="step_001",
             instruction="Click New.",
-            action=TutorialAction(
-                type="click",
-                target=ActionTarget(kind="element", description="green button"),
-            ),
+            actions=[
+                TutorialAction(
+                    type="click",
+                    target=ActionTarget(kind="element", description="green button"),
+                    requires_confirmation=True,
+                )
+            ],
             confidence=0.9,
-            requires_confirmation=True,
         )
         type_step = TutorialStep(
             step_id="step_002",
             instruction="Type the URL.",
-            action=TutorialAction(
-                type="type",
-                target=ActionTarget(kind="element", description="URL field"),
-                text="x",
-            ),
+            actions=[
+                TutorialAction(
+                    type="type",
+                    target=ActionTarget(kind="element", description="URL field"),
+                    text="x",
+                    requires_confirmation=True,
+                )
+            ],
             confidence=0.6,
-            requires_confirmation=True,
         )
         third_step = TutorialStep(
             step_id="step_003",
             instruction="Press Enter.",
-            action=TutorialAction(type="press_key", key="Enter"),
+            actions=[
+                TutorialAction(
+                    type="press_key", key="Enter", requires_confirmation=False
+                )
+            ],
             confidence=0.4,
-            requires_confirmation=True,
         )
 
         text = render_history(
@@ -265,12 +271,14 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         step = TutorialStep(
             step_id="step_005",
             instruction="Click something.",
-            action=TutorialAction(
-                type="click",
-                target=ActionTarget(kind="element", description="x"),
-            ),
+            actions=[
+                TutorialAction(
+                    type="click",
+                    target=ActionTarget(kind="element", description="x"),
+                    requires_confirmation=True,
+                )
+            ],
             confidence=0.9,
-            requires_confirmation=True,
         )
         text = render_history(
             goal="x",
@@ -282,6 +290,112 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("STALL", text)
         self.assertIn("step_005", text)
+
+
+class MultiActionWalkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_two_action_step_walks_action_by_action(self) -> None:
+        events: list[Any] = []
+
+        async def emit(event: Any) -> None:
+            events.append(event)
+
+        two_action_call = update_plan_call(
+            {
+                "human_text": "Name and submit the repo.",
+                "confidence": 0.9,
+                "refines_current": False,
+                "actions": [
+                    {
+                        "kind": "type",
+                        "copiable_text": "demo",
+                        "agent_description": "Name field.",
+                    },
+                    {"kind": "press_key", "key": "Enter"},
+                ],
+            }
+        )
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=two_action_call)],
+                [LLMTextDelta(text="All done.")],
+            ]
+        )
+        session = TutorialSession(session_id="s1", llm=llm, emit=emit)
+
+        await session.handle_user_message("Walk me.")
+        await send_screen(session, events)
+        await wait_until(
+            lambda: session.awaiting_step_id == "step_001"
+            and session.awaiting_action_index == 0
+        )
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+
+        # press_key has requires_confirmation=False by default; it should
+        # auto-advance once started.
+        await wait_until(lambda: session.awaiting_action_index == 1)
+        await session.handle_step_started("step_001", action_index=1)
+        await wait_until(lambda: "step_001" in session.completed_step_ids)
+
+        await send_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertEqual(session.completed_step_ids, ["step_001"])
+        self.assertIn(SessionCompletedEvent(), events)
+
+    async def test_action_rejection_truncates_plan(self) -> None:
+        events: list[Any] = []
+
+        async def emit(event: Any) -> None:
+            events.append(event)
+
+        three_action_call = update_plan_call(
+            {
+                "human_text": "Open settings, scroll, click save.",
+                "confidence": 0.9,
+                "refines_current": False,
+                "actions": [
+                    {"kind": "click", "agent_description": "Settings gear."},
+                    {
+                        "kind": "scroll",
+                        "expected_end_state": "Save button is visible.",
+                    },
+                    {"kind": "click", "agent_description": "Save button."},
+                ],
+            }
+        )
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=three_action_call)],
+                [LLMTextDelta(text="Got it, replanning.")],
+            ]
+        )
+        session = TutorialSession(session_id="s1", llm=llm, emit=emit)
+
+        await session.handle_user_message("Help.")
+        await send_screen(session, events)
+        await wait_until(lambda: session.awaiting_action_index == 0)
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+
+        await wait_until(lambda: session.awaiting_action_index == 1)
+        await session.handle_step_started("step_001", action_index=1)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=1, confirmed=False, note="Save not visible."
+        )
+        await send_screen(session, events)
+        await wait_for_idle(session)
+
+        # Step never completed; truncated.
+        self.assertEqual(session.completed_step_ids, [])
+        self.assertEqual(session.plan_steps, [])
 
 
 if __name__ == "__main__":

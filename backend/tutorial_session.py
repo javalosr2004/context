@@ -35,7 +35,7 @@ from backend.tutorial_guide import (
     classify_user_message_intent,
     generate_draft_plan,
 )
-from backend.tutorial_schema import DraftPlan, TutorialPlan, TutorialStep
+from backend.tutorial_schema import DraftPlan, TutorialAction, TutorialPlan, TutorialStep
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
     DraftPlanReadyEvent,
@@ -83,6 +83,12 @@ SCREEN_CHANGING_ACTION_TYPES = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class _ActionOutcome:
+    replan_note: str | None = None
+    advanced_past_step: bool = False
+
+
 @dataclass
 class HistoryEntry:
     role: str  # "user" | "assistant" | "tool"
@@ -102,12 +108,13 @@ class TutorialSession:
     uploaded_images: list[UploadedImage] = field(default_factory=list)
     pending_screen: asyncio.Future[UploadedImage] | None = None
     pending_screen_request_id: str | None = None
-    pending_step_starts: set[str] = field(default_factory=set)
-    pending_step_confirmations: dict[str, tuple[bool, str]] = field(
+    pending_step_starts: set[tuple[str, int]] = field(default_factory=set)
+    pending_step_confirmations: dict[tuple[str, int], tuple[bool, str]] = field(
         default_factory=dict
     )
     step_event: asyncio.Event = field(default_factory=asyncio.Event)
     awaiting_step_id: str | None = None
+    awaiting_action_index: int | None = None
     current_task: asyncio.Task[None] | None = None
     plan_emitted: bool = False
     screen_request_counter: int = 0
@@ -211,38 +218,55 @@ class TutorialSession:
         if not future.done():
             future.set_result(image)
 
-    async def handle_step_started(self, step_id: str) -> None:
-        if not self._is_pending_plan_step(step_id):
+    async def handle_step_started(self, step_id: str, action_index: int) -> None:
+        if not self._is_awaiting_slot(step_id, action_index):
             logger.info(
                 "Ignoring stray step_started event",
                 extra={
                     "session_id": self.session_id,
                     "step_id": step_id,
+                    "action_index": action_index,
                     "expected_step_id": self.awaiting_step_id,
+                    "expected_action_index": self.awaiting_action_index,
                 },
             )
             return
-        self.pending_step_starts.add(step_id)
+        self.pending_step_starts.add((step_id, action_index))
         self.step_event.set()
 
     async def handle_user_confirmation(
         self,
         step_id: str,
+        action_index: int,
         confirmed: bool,
         note: str | None,
     ) -> None:
-        if not self._is_pending_plan_step(step_id):
+        if not self._is_awaiting_slot(step_id, action_index):
             logger.info(
                 "Ignoring stray user_confirmation event",
                 extra={
                     "session_id": self.session_id,
                     "step_id": step_id,
+                    "action_index": action_index,
                     "expected_step_id": self.awaiting_step_id,
+                    "expected_action_index": self.awaiting_action_index,
                 },
             )
             return
-        self.pending_step_confirmations[step_id] = (confirmed, (note or "").strip())
+        self.pending_step_confirmations[(step_id, action_index)] = (
+            confirmed,
+            (note or "").strip(),
+        )
         self.step_event.set()
+
+    def _is_awaiting_slot(self, step_id: str, action_index: int) -> bool:
+        if step_id in self.completed_step_ids:
+            return False
+        if self.awaiting_step_id != step_id:
+            return False
+        if self.awaiting_action_index is None:
+            return False
+        return action_index == self.awaiting_action_index
 
     def _is_pending_plan_step(self, step_id: str) -> bool:
         if step_id in self.completed_step_ids:
@@ -303,7 +327,7 @@ class TutorialSession:
         steps_by_id = {step.step_id: step for step in self.plan_steps}
         return any(
             sid in steps_by_id
-            and steps_by_id[sid].action.type in SCREEN_CHANGING_ACTION_TYPES
+            and any(a.type in SCREEN_CHANGING_ACTION_TYPES for a in steps_by_id[sid].actions)
             for sid in completed_step_ids
         )
 
@@ -657,7 +681,7 @@ class TutorialSession:
         )
         live_tail_start = len(self.completed_step_ids)
         tail_summary = ", ".join(
-            f"{step.step_id}={step.action.type}"
+            f"{step.step_id}=[{','.join(a.type for a in step.actions)}]"
             for step in result.plan_steps[live_tail_start:]
         )
         self.history.append(
@@ -770,7 +794,8 @@ class TutorialSession:
         if last_step is not None:
             reason = (
                 f"Verifying the result of completed {last_step.step_id} "
-                f"({last_step.action.type}: {last_step.instruction}). "
+                f"([{','.join(a.type for a in last_step.actions)}]: "
+                f"{last_step.instruction}). "
                 "The attached screen is the post-action state — confirm the "
                 "action achieved its goal before planning the next move, "
                 "and switch strategy rather than re-emitting an equivalent "
@@ -831,61 +856,103 @@ class TutorialSession:
     async def _await_step(self, step: TutorialStep) -> str | None:
         self.awaiting_step_id = step.step_id
         step_index = self._plan_index(step.step_id)
-        self.status = "step_ready"
-        await self.emit(StepReadyEvent(step_id=step.step_id))
-
         try:
-            # Phase 1: wait until this step starts, or the user advances past it.
-            while step.step_id not in self.pending_step_starts:
-                if self._has_later_event(step_index):
-                    self.completed_step_ids.append(step.step_id)
+            # Re-resolve the live step each iteration; a mid-await
+            # refines_current merge may have replaced the actions list while
+            # keeping the same step_id.
+            action_index = 0
+            while True:
+                current = next(
+                    (s for s in self.plan_steps if s.step_id == step.step_id),
+                    step,
+                )
+                if action_index >= len(current.actions):
+                    break
+                action = current.actions[action_index]
+                outcome = await self._await_action(
+                    step_id=step.step_id,
+                    action_index=action_index,
+                    action=action,
+                    step_index=step_index,
+                )
+                if outcome.advanced_past_step:
                     return None
-                if step.step_id in self.pending_step_confirmations:
-                    break  # Confirmation arrived without an explicit start.
-                await self._wait_for_step_event()
-            self.pending_step_starts.discard(step.step_id)
-
-            self.status = "awaiting_confirmation"
-            await self.emit(AwaitingConfirmationEvent(step_id=step.step_id))
-
-            # Phase 2: wait for this step's confirmation, or skip if user advanced.
-            while step.step_id not in self.pending_step_confirmations:
-                if self._has_later_event(step_index):
-                    self.completed_step_ids.append(step.step_id)
-                    return None
-                await self._wait_for_step_event()
-            confirmed, note = self.pending_step_confirmations.pop(step.step_id)
+                if outcome.replan_note is not None:
+                    return outcome.replan_note
+                action_index += 1
         finally:
             self.awaiting_step_id = None
+            self.awaiting_action_index = None
+
+        current = next(
+            (s for s in self.plan_steps if s.step_id == step.step_id), step
+        )
+        self.completed_step_ids.append(current.step_id)
+        last_action = current.actions[-1]
+        self.last_action_kind = last_action.type
+        if any(a.type in SCREEN_CHANGING_ACTION_TYPES for a in current.actions):
+            self.screen_is_stale = True
+        action_summary = ", ".join(a.type for a in current.actions)
+        self.history.append(
+            HistoryEntry(
+                role="user",
+                content=(
+                    f"confirmed {current.step_id} ({action_summary}): "
+                    f"{current.instruction}. The next attached screen is "
+                    "the post-action state — verify the action achieved "
+                    "its goal before emitting another step, and do not "
+                    "re-emit any action equivalent to this one."
+                ),
+            )
+        )
+        return None
+
+    async def _await_action(
+        self,
+        *,
+        step_id: str,
+        action_index: int,
+        action: "TutorialAction",
+        step_index: int,
+    ) -> "_ActionOutcome":
+        self.awaiting_action_index = action_index
+        slot = (step_id, action_index)
+        self.status = "step_ready"
+        await self.emit(StepReadyEvent(step_id=step_id, action_index=action_index))
+
+        while slot not in self.pending_step_starts:
+            if self._has_later_event(step_index):
+                self.completed_step_ids.append(step_id)
+                return _ActionOutcome(advanced_past_step=True)
+            if slot in self.pending_step_confirmations:
+                break
+            await self._wait_for_step_event()
+        self.pending_step_starts.discard(slot)
+
+        if not action.requires_confirmation:
+            return _ActionOutcome()
+
+        self.status = "awaiting_confirmation"
+        await self.emit(
+            AwaitingConfirmationEvent(step_id=step_id, action_index=action_index)
+        )
+
+        while slot not in self.pending_step_confirmations:
+            if self._has_later_event(step_index):
+                self.completed_step_ids.append(step_id)
+                return _ActionOutcome(advanced_past_step=True)
+            await self._wait_for_step_event()
+        confirmed, note = self.pending_step_confirmations.pop(slot)
 
         if confirmed:
-            # Re-lookup by step_id: a mid-await refines_current merge may
-            # have replaced this step's payload while preserving its id.
-            current = next(
-                (s for s in self.plan_steps if s.step_id == step.step_id), step
-            )
-            self.completed_step_ids.append(current.step_id)
-            self.last_action_kind = current.action.type
-            if current.action.type in SCREEN_CHANGING_ACTION_TYPES:
-                self.screen_is_stale = True
-            self.history.append(
-                HistoryEntry(
-                    role="user",
-                    content=(
-                        f"confirmed {current.step_id} ({current.action.type}): "
-                        f"{current.instruction}. The next attached screen is "
-                        "the post-action state — verify the action achieved "
-                        "its goal before emitting another step, and do not "
-                        "re-emit any action equivalent to this one."
-                    ),
-                )
-            )
-            return None
+            return _ActionOutcome()
 
-        message = f"Step {step.step_id} was rejected."
+        message = (
+            f"Step {step_id} action {action_index + 1} ({action.type}) was rejected."
+        )
         if note:
             message = f"{message} User note: {note}"
-        return message
+        return _ActionOutcome(replan_note=message)
 
     def _plan_index(self, step_id: str) -> int:
         for index, step in enumerate(self.plan_steps):
@@ -894,7 +961,9 @@ class TutorialSession:
         return -1
 
     def _has_later_event(self, current_index: int) -> bool:
-        signaled_ids = self.pending_step_starts | self.pending_step_confirmations.keys()
+        signaled_ids = {sid for sid, _ in self.pending_step_starts} | {
+            sid for sid, _ in self.pending_step_confirmations.keys()
+        }
         for sid in signaled_ids:
             if self._plan_index(sid) > current_index:
                 return True
@@ -928,6 +997,7 @@ class TutorialSession:
             self.pending_step_confirmations.clear()
             self.step_event.clear()
             self.awaiting_step_id = None
+            self.awaiting_action_index = None
 
     def _next_screen_request_id(self) -> str:
         self.screen_request_counter += 1
@@ -1047,8 +1117,8 @@ def _render_plan_block(
     else:
         for step in completed_steps:
             lines.append(
-                f"    - {step.step_id} [done] {step.action.type}: "
-                f"{step.instruction}"
+                f"    - {step.step_id} [done] "
+                f"{_format_action_summary(step)}: {step.instruction}"
             )
 
     if awaiting_step_id is not None:
@@ -1063,7 +1133,7 @@ def _render_plan_block(
             lines.append("  AWAITING (user is on this step now):")
             lines.append(
                 f"    - {awaiting_step.step_id}{suffix} "
-                f"[{awaiting_step.action.type}] "
+                f"[{_format_action_summary(awaiting_step)}] "
                 f"conf={awaiting_step.confidence:.2f}: "
                 f"{awaiting_step.instruction}"
             )
@@ -1075,7 +1145,7 @@ def _render_plan_block(
     else:
         for step in tail:
             lines.append(
-                f"    - {step.step_id} [{step.action.type}] "
+                f"    - {step.step_id} [{_format_action_summary(step)}] "
                 f"conf={step.confidence:.2f}: {step.instruction}"
             )
 
@@ -1096,6 +1166,13 @@ def _render_plan_block(
     lines.append("")
 
 
+def _format_action_summary(step: TutorialStep) -> str:
+    kinds = [a.type for a in step.actions]
+    if len(kinds) == 1:
+        return kinds[0]
+    return f"{len(kinds)} actions: {','.join(kinds)}"
+
+
 def first_request_screen_call(
     tool_calls: list[TutorialToolCall],
 ) -> TutorialToolCall | None:
@@ -1111,7 +1188,8 @@ def has_screen_changing_step(
 ) -> bool:
     completed = set(completed_step_ids)
     return any(
-        step.step_id in completed and step.action.type in SCREEN_CHANGING_ACTION_TYPES
+        step.step_id in completed
+        and any(a.type in SCREEN_CHANGING_ACTION_TYPES for a in step.actions)
         for step in steps
     )
 

@@ -250,11 +250,11 @@ async def dispatch_client_event(session, event) -> None:  # type: ignore[no-unty
         await session.handle_user_screen(event.request_id, event.screen)
         return
     if isinstance(event, StepStartedEvent):
-        await session.handle_step_started(event.step_id)
+        await session.handle_step_started(event.step_id, event.action_index)
         return
     if isinstance(event, UserConfirmationEvent):
         await session.handle_user_confirmation(
-            event.step_id, event.confirmed, event.note
+            event.step_id, event.action_index, event.confirmed, event.note
         )
         return
 

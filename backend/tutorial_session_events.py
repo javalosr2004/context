@@ -47,11 +47,13 @@ class UserAnswerEvent(TutorialSessionEventModel):
 class StepStartedEvent(TutorialSessionEventModel):
     type: Literal["step_started"]
     step_id: str = Field(min_length=1)
+    action_index: int = Field(ge=0)
 
 
 class UserConfirmationEvent(TutorialSessionEventModel):
     type: Literal["user_confirmation"]
     step_id: str = Field(min_length=1)
+    action_index: int = Field(ge=0)
     confirmed: bool
     note: str | None = None
 
@@ -133,11 +135,13 @@ class TextResponseEventLike(TutorialSessionEventModel):
 class StepReadyEvent(TutorialSessionEventModel):
     type: Literal["step_ready"] = "step_ready"
     step_id: str
+    action_index: int = Field(ge=0)
 
 
 class AwaitingConfirmationEvent(TutorialSessionEventModel):
     type: Literal["awaiting_confirmation"] = "awaiting_confirmation"
     step_id: str
+    action_index: int = Field(ge=0)
 
 
 class ScreenRequestedEvent(TutorialSessionEventModel):

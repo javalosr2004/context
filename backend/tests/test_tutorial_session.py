@@ -37,11 +37,10 @@ def click_item(
     refines_current: bool = False,
 ) -> dict[str, Any]:
     return {
-        "kind": "click",
         "human_text": human_text,
-        "agent_description": description,
         "confidence": confidence,
         "refines_current": refines_current,
+        "actions": [{"kind": "click", "agent_description": description}],
     }
 
 
@@ -178,11 +177,11 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(plan_events[0].plan.steps), 1)
         self.assertEqual(plan_events[0].plan.steps[0].instruction, "Click New.")
 
-        await session.handle_step_started("step_001")
+        await session.handle_step_started("step_001", action_index=0)
         await wait_until(lambda: any(
             isinstance(e, AwaitingConfirmationEvent) for e in events
         ))
-        await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
         await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
@@ -203,9 +202,9 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await session.handle_user_message("Click New.")
         await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
-        await session.handle_step_started("step_001")
+        await session.handle_step_started("step_001", action_index=0)
         await wait_until(lambda: session.status == "awaiting_confirmation")
-        await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
         await wait_until(
             lambda: session.pending_screen_request_id is not None
         )
@@ -243,9 +242,9 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         # the walk hands the step to the user.
         await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
-        await session.handle_step_started("step_001")
+        await session.handle_step_started("step_001", action_index=0)
         await wait_until(lambda: session.status == "awaiting_confirmation")
-        await session.handle_user_confirmation("step_001", confirmed=True, note=None)
+        await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
         await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
@@ -313,10 +312,10 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await session.handle_user_message("Click New.")
         await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
-        await session.handle_step_started("step_001")
+        await session.handle_step_started("step_001", action_index=0)
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation(
-            "step_001", confirmed=False, note="That button is gone."
+            "step_001", action_index=0, confirmed=False, note="That button is gone."
         )
         await send_next_requested_screen(session, events)
         await wait_for_idle(session)

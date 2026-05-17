@@ -24,16 +24,16 @@ VALID_PLAN_JSON = """
     {
       "step_id": "step_001",
       "instruction": "Click the New repository button.",
-      "action": {
+      "actions": [{
         "type": "click",
         "target": {
           "kind": "element",
           "label": "New repository",
           "role": "button"
-        }
-      },
-      "confidence": 0.86,
-      "requires_confirmation": false
+        },
+        "requires_confirmation": true
+      }],
+      "confidence": 0.86
     }
   ]
 }
@@ -127,7 +127,7 @@ class TutorialGuideTests(unittest.TestCase):
         )
 
         self.assertEqual(plan.schema_version, "tutorial_plan.v1")
-        self.assertEqual(plan.steps[0].action.type, "click")
+        self.assertEqual(plan.steps[0].actions[0].type, "click")
         self.assertEqual(len(llm.requests), 1)
         self.assertEqual(llm.requests[0].system_prompt, TUTORIAL_PLAN_SYSTEM_PROMPT)
         self.assertIn("Show me how to create a repo.", llm.requests[0].user_text)

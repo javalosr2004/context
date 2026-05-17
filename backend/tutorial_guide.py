@@ -176,9 +176,44 @@ describe the target generically so the user can match it.
 
 For each plan item, human_text is one concise on-screen instruction
 the user reads on the overlay. Each action's payload carries the
-mechanical detail: agent_description for click/type (where to look
-and what the target looks like), copiable_text for type, key for
-press_key, expected_end_state for scroll, duration_ms for wait.
+mechanical detail: agent_description for click/type, copiable_text
+for type, key for press_key, expected_end_state for scroll,
+duration_ms for wait.
+
+Writing human_text (user-facing):
+- One short imperative sentence. Name the thing the user is doing,
+  not how to find it visually. "Open the Apple menu." not "Click
+  the small Apple logo in the top-left of the menu bar."
+- No coordinates, no color cues, no position language. Visual
+  scaffolding belongs in agent_description, not here.
+- Atomic. One verb, one target per step. If the recipe says
+  "click X, then choose Y, then click Z," that is three steps,
+  not one sentence.
+
+Writing agent_description (visual grounding hint, never shown to
+the user verbatim):
+- This is read by a vision model that will be tempted to text-match
+  the label you write. Avoid leading with the literal on-screen
+  label or proper noun ("Apple menu", "System Settings", "General").
+  Describe the target by SHAPE, POSITION, REGION, and CONTAINER
+  instead, so grounding works even when the label is rendered as
+  an icon, truncated, localized, or styled unusually.
+- Prefer spatial anchors the model can verify against pixels:
+  which edge of the screen, which side of which window, which
+  region of which panel, relative position within a list ("near
+  the top of the dropdown that just opened", "row in the
+  left-hand vertical list", "mid-page in the right-hand scroll
+  area"). Mention the container before the item.
+- Mention distinguishing visual properties when they help: icon
+  vs text, monochrome vs colored, leading glyph, group separator
+  above/below, approximate vertical order ("second or third from
+  the top"). Skip properties that are not actually visible.
+- Keep it one short phrase, not a sentence. No instructions, no
+  verbs directed at the user — this is a description of where the
+  target sits, not what to do with it.
+- If the exact target is not visible in the attached screen, say
+  so generically ("a row in the left sidebar of the window that
+  opens after the previous click") rather than inventing a label.
 
 Do not narrate your reasoning. Do not announce what you are about to
 do. Do not refer to yourself as a planner, generator, tutorial, or

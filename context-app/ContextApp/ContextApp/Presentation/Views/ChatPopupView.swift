@@ -448,11 +448,9 @@ struct ChatPopupView: View {
         let activeIndex = sessionController.awaitingActionIndex
             ?? sessionController.currentActionIndex
             ?? 0
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(step.actions.enumerated()), id: \.offset) { idx, action in
-                    actionChip(action: action, kind: chipKind(index: idx, active: activeIndex))
-                }
+        return VStack(spacing: 4) {
+            ForEach(Array(step.actions.enumerated()), id: \.offset) { idx, action in
+                actionCard(action: action, kind: chipKind(index: idx, active: activeIndex))
             }
         }
     }
@@ -463,8 +461,8 @@ struct ChatPopupView: View {
         return .upcoming
     }
 
-    private func actionChip(action: TutorialAction, kind: ActionChipKind) -> some View {
-        let weight: Font.Weight = kind == .current ? .semibold : .regular
+    private func actionCard(action: TutorialAction, kind: ActionChipKind) -> some View {
+        let titleWeight: Font.Weight = kind == .current ? .semibold : .regular
         let foreground: Color
         let background: Color
         let borderColor: Color
@@ -473,51 +471,66 @@ struct ChatPopupView: View {
         switch kind {
         case .done:
             foreground = OverlayTheme.doneText
-            background = Color.clear
+            background = Color.white.opacity(0.04)
             borderColor = OverlayTheme.hairline
             borderStyle = StrokeStyle(lineWidth: 0.5)
         case .current:
-            foreground = OverlayTheme.primaryText
-            background = Color.white.opacity(0.85)
+            foreground = OverlayTheme.invertedForeground
+            background = Color.white.opacity(0.92)
             borderColor = Color.clear
             borderStyle = StrokeStyle(lineWidth: 0)
         case .upcoming:
             foreground = OverlayTheme.quaternaryText
-            background = Color.clear
-            borderColor = Color.white.opacity(0.34)
+            background = Color.white.opacity(0.05)
+            borderColor = Color.white.opacity(0.22)
             borderStyle = StrokeStyle(lineWidth: 1, dash: [3, 2])
         }
 
-        return HStack(spacing: 5) {
+        return HStack(alignment: .center, spacing: 9) {
             Image(systemName: iconName(for: action))
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(foreground.opacity(kind == .current ? 0.85 : 1))
+                .frame(width: 18, height: 18)
+
             Text(actionChipLabel(for: action))
-                .font(.system(size: 11, weight: weight))
-                .lineLimit(1)
+                .font(.system(size: 12, weight: titleWeight))
                 .strikethrough(kind == .done, color: foreground.opacity(0.5))
+                .foregroundStyle(foreground)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if kind == .done {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(foreground.opacity(0.7))
+            }
         }
-        .foregroundStyle(kind == .current ? OverlayTheme.invertedAccent : foreground)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(background)
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(borderColor, style: borderStyle))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(borderColor, style: borderStyle)
+        )
     }
 
     private func actionChipLabel(for action: TutorialAction) -> String {
         switch action {
-        case .click(let a): return shortTargetLabel(a.target)
-        case .doubleClick(let a): return "2× \(shortTargetLabel(a.target))"
-        case .rightClick(let a): return "↪ \(shortTargetLabel(a.target))"
-        case .hover(let a): return "hover \(shortTargetLabel(a.target))"
-        case .drag(let a): return "drag \(shortTargetLabel(a.target))"
+        case .click(let a): return "Click \(shortTargetLabel(a.target))"
+        case .doubleClick(let a): return "Double-click \(shortTargetLabel(a.target))"
+        case .rightClick(let a): return "Right-click \(shortTargetLabel(a.target))"
+        case .hover(let a): return "Hover \(shortTargetLabel(a.target))"
+        case .drag(let a): return "Drag \(shortTargetLabel(a.target))"
         case .type(let a):
             let trimmed = a.text.replacingOccurrences(of: "\n", with: " ")
-            return "\"\(truncate(trimmed, max: 18))\""
-        case .pressKey(let a): return a.key
-        case .scroll(let a): return "scroll \(a.direction.rawValue)"
-        case .wait(let a): return "wait \(a.durationMs)ms"
-        case .confirm: return "confirm"
+            return "Type \"\(truncate(trimmed, max: 36))\""
+        case .pressKey(let a): return "Press \(a.key)"
+        case .scroll(let a): return "Scroll \(a.direction.rawValue)"
+        case .wait(let a): return "Wait \(a.durationMs)ms"
+        case .confirm: return "Confirm"
         }
     }
 
@@ -526,7 +539,7 @@ struct ChatPopupView: View {
             ?? target.description
             ?? target.role
             ?? target.kind.rawValue
-        return truncate(raw, max: 18)
+        return truncate(raw, max: 32)
     }
 
     private func truncate(_ text: String, max: Int) -> String {

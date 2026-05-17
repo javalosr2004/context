@@ -632,16 +632,19 @@ class TutorialSession:
 
         candidates = candidates_from_arguments(arguments)
         frozen_prefix_ids = list(self.completed_step_ids)
+        awaiting_in_prefix: str | None = None
         if (
             self.awaiting_step_id is not None
             and self.awaiting_step_id not in self.completed_step_ids
         ):
             frozen_prefix_ids.append(self.awaiting_step_id)
+            awaiting_in_prefix = self.awaiting_step_id
 
         try:
             result: PlanMergeResult = merge_plan_tail(
                 current_plan_steps=self.plan_steps,
                 frozen_prefix_ids=frozen_prefix_ids,
+                awaiting_step_id=awaiting_in_prefix,
                 new_tail=candidates,
                 step_counter=self.step_counter,
             )

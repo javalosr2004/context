@@ -307,11 +307,12 @@ final class TutorialSessionController: ObservableObject {
             draftPlan = plan
         case .unknown(let type):
             logger.debug("Ignoring unknown tutorial session event '\(type, privacy: .public)'")
-        case .tutorialAction(let step):
-            applyTutorialAction(step)
+        case .tutorialAction:
+            // Backend no longer emits tutorial_action; grounding is triggered on .stepReady.
+            // Kept as a decoded-but-ignored case for defensive forward/backward compatibility.
+            break
         case .stepReady(let stepID):
-            currentStepID = stepID
-            status = .ready
+            applyStepReady(stepID: stepID)
         case .awaitingConfirmation(let stepID):
             awaitingConfirmationStepID = stepID
             status = .awaitingConfirmation
@@ -352,15 +353,30 @@ final class TutorialSessionController: ObservableObject {
         messages = messageStore.messages
     }
 
-    private func applyTutorialAction(_ step: TutorialStep) {
-        currentStepID = step.stepId
+    private func applyStepReady(stepID: String) {
+        currentStepID = stepID
+        status = .ready
         guard let tutorialActionHandler else { return }
+        guard let step = latestStep(withID: stepID) else {
+            logger.debug("step_ready for unknown step id '\(stepID, privacy: .public)'; skipping grounding")
+            return
+        }
         Task { [weak self] in
             _ = await tutorialActionHandler(step)
             await MainActor.run {
                 self?.status = .ready
             }
         }
+    }
+
+    private func latestStep(withID stepID: String) -> TutorialStep? {
+        for message in messageStore.messages.reversed() {
+            if case .tutorialPlan(let plan) = message.content,
+               let step = plan.steps.first(where: { $0.stepId == stepID }) {
+                return step
+            }
+        }
+        return nil
     }
 
     private func applyFailure(_ message: String) {

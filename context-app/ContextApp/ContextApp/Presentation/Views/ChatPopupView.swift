@@ -80,7 +80,20 @@ struct ChatPopupView: View {
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
     @State private var dismissedAnswerID: UUID?
+    @State private var nowPulse: Bool = false
     @FocusState private var isMessageFieldFocused: Bool
+
+    private static let launcherSuggestions: [String] = [
+        "Explain what's on my screen",
+        "Walk me through setting up Git",
+        "Help me deploy this to Vercel"
+    ]
+
+    private static let launcherSuggestionIcons: [String] = [
+        "camera.viewfinder",
+        "book",
+        "gearshape"
+    ]
 
     private static let loadingRowID = "tutorial-plan-loading-row"
     private static let loadingWords = ["preparing", "sending", "planning"]
@@ -103,6 +116,12 @@ struct ChatPopupView: View {
 
             if isTutorialFinished {
                 finishedTutorialView
+            } else if latestPlan == nil {
+                if let answer = latestTutorialAnswer {
+                    answerCard(answer)
+                }
+
+                launcherView
             } else {
                 tutorialMeta
 
@@ -243,6 +262,87 @@ struct ChatPopupView: View {
         }
     }
 
+    private var launcherView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("What should we figure out?")
+                    .font(.system(size: 20, weight: .semibold))
+                    .tracking(-0.3)
+                    .foregroundStyle(OverlayTheme.primaryText)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                Text("Ask anything about what's on your screen, or pick a tutorial below.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(OverlayTheme.tertiaryText)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Try asking")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.63)
+                    .textCase(.uppercase)
+                    .foregroundStyle(OverlayTheme.tertiaryText)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 6)
+                    .padding(.bottom, 8)
+
+                VStack(spacing: 2) {
+                    ForEach(Array(Self.launcherSuggestions.enumerated()), id: \.offset) { idx, prompt in
+                        launcherSuggestionRow(prompt: prompt, icon: Self.launcherSuggestionIcons[idx])
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func launcherSuggestionRow(prompt: String, icon: String) -> some View {
+        Button {
+            submitSuggestion(prompt)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(OverlayTheme.tertiaryText)
+                    .frame(width: 22, height: 22)
+                    .background(OverlayTheme.quietFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                Text(prompt)
+                    .font(.system(size: 13))
+                    .foregroundStyle(OverlayTheme.primaryText)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(OverlayTheme.quaternaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(OverlayTheme.quietFill.opacity(0))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .disabled(sessionController.status.isBusy)
+    }
+
+    private func submitSuggestion(_ prompt: String) {
+        guard !sessionController.status.isBusy else { return }
+        draft = prompt
+        submitDraft()
+    }
+
     private var peekStack: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let doneStep = peekSteps.done {
@@ -271,16 +371,28 @@ struct ChatPopupView: View {
             handlePeekStepTap(kind: kind, step: step)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .center, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     stepMarker(kind: kind)
+                        .padding(.top, kind == .now ? 4 : 0)
 
-                    Text(title)
-                        .font(.system(size: kind == .now ? 14 : 13, weight: kind == .now ? .semibold : .regular))
-                        .strikethrough(kind == .done, color: Color.white.opacity(0.34))
-                        .foregroundStyle(stepTextColor(kind))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: kind == .now ? 4 : 0) {
+                        if kind == .now {
+                            Text("Now")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .tracking(0.63)
+                                .textCase(.uppercase)
+                                .foregroundStyle(OverlayTheme.tertiaryText)
+                        }
+
+                        Text(title)
+                            .font(.system(size: kind == .now ? 17 : 13, weight: kind == .now ? .semibold : .regular))
+                            .tracking(kind == .now ? -0.17 : 0)
+                            .strikethrough(kind == .done, color: Color.white.opacity(0.34))
+                            .foregroundStyle(stepTextColor(kind))
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
                     if kind == .now && activeStepID == step.stepId {
                         ProgressView()
@@ -434,15 +546,17 @@ struct ChatPopupView: View {
         case .now:
             ZStack {
                 Circle()
-                    .fill(OverlayTheme.invertedAccent)
+                    .fill(Color(red: 0.176, green: 0.788, blue: 0.251).opacity(0.22))
                     .frame(width: 18, height: 18)
-                    .shadow(color: Color.white.opacity(0.18), radius: 0, x: 0, y: 0)
+                    .scaleEffect(nowPulse ? 1.15 : 0.92)
+                    .opacity(nowPulse ? 0.0 : 0.9)
 
                 Circle()
-                    .fill(OverlayTheme.invertedForeground)
-                    .frame(width: 5, height: 5)
+                    .fill(Color(red: 0.176, green: 0.788, blue: 0.251))
+                    .frame(width: 8, height: 8)
             }
-            .overlay(Circle().stroke(Color.white.opacity(0.16), lineWidth: 3))
+            .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: false), value: nowPulse)
+            .onAppear { nowPulse = true }
         case .next:
             Image(systemName: "arrow.right")
                 .font(.system(size: 10, weight: .medium))

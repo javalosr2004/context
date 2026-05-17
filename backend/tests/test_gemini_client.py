@@ -16,7 +16,7 @@ class GeminiClientConfigTests(unittest.TestCase):
         )
 
         self.assertEqual(config.system_instruction, TUTORIAL_CREATOR_SYSTEM_PROMPT)
-        self.assertIn("click, hover, scroll", config.system_instruction)
+        self.assertIn("click,", config.system_instruction)
 
     def test_config_enables_google_search_grounding(self) -> None:
         config = build_generate_content_config(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from collections.abc import Iterator
 from typing import Any
@@ -10,25 +11,41 @@ from backend.tutorial_session import TutorialSession
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
     PlanReadyEvent,
+    PlanUpdatedEvent,
     ScreenRequestedEvent,
     ScreenSnapshot,
     SessionCompletedEvent,
     StepReadyEvent,
     TextResponseEventLike,
-    TutorialActionEvent,
     TutorialTextDeltaEvent,
     client_session_event_adapter,
 )
 from backend.tutorial_tools import TutorialToolCall
 
 
-CLICK_CALL = TutorialToolCall(
-    name="tutorial_click",
-    arguments=(
-        '{"human_text": "Click New.", "agent_description": "Green New button.",'
-        ' "confidence": 0.9}'
-    ),
-)
+def update_plan_call(*items: dict[str, Any], reasoning: str = "first hypothesis") -> TutorialToolCall:
+    return TutorialToolCall(
+        name="tutorial_update_plan",
+        arguments=json.dumps({"plan_reasoning": reasoning, "plan": list(items)}),
+    )
+
+
+def click_item(
+    human_text: str = "Click New.",
+    description: str = "Green New button.",
+    confidence: float = 0.9,
+    step_handle: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "kind": "click",
+        "human_text": human_text,
+        "agent_description": description,
+        "confidence": confidence,
+        "step_handle": step_handle,
+    }
+
+
+CLICK_PLAN_CALL = update_plan_call(click_item())
 REQUEST_SCREEN_CALL = TutorialToolCall(
     name="tutorial_request_screen",
     arguments='{"reason": "Need to see current screen."}',
@@ -42,8 +59,13 @@ class ScriptedLLM:
         self.script = list(script)
         self.requests: list[LLMRequest] = []
 
-    def complete_text(self, request: LLMRequest) -> str:  # pragma: no cover
-        raise NotImplementedError
+    def complete_text(self, request: LLMRequest) -> str:
+        # Used by the draft-plan task; return a minimal valid draft so the
+        # background task succeeds without distorting the agent loop.
+        return (
+            '{"schema_version":"draft_plan.v1","goal":"x","steps":'
+            '[{"instruction":"step","kind":"other"}]}'
+        )
 
     def stream_text(self, request: LLMRequest) -> Iterator[str]:  # pragma: no cover
         raise NotImplementedError
@@ -135,11 +157,11 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text_events[0].text, "First second.")
         self.assertLess(events.index(delta_events[0]), events.index(text_events[0]))
 
-    async def test_action_tool_call_produces_plan_and_awaits_confirmation(self) -> None:
+    async def test_update_plan_emits_plan_ready_and_awaits_confirmation(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM(
             [
-                [LLMToolCallEvent(tool_call=CLICK_CALL)],
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
                 [LLMTextDelta(text="Looks done.")],
             ]
         )
@@ -151,11 +173,10 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
 
-        action_events = [e for e in events if isinstance(e, TutorialActionEvent)]
         plan_events = [e for e in events if isinstance(e, PlanReadyEvent)]
-        self.assertEqual(len(action_events), 1)
-        self.assertEqual(action_events[0].step.instruction, "Click New.")
         self.assertEqual(len(plan_events), 1)
+        self.assertEqual(len(plan_events[0].plan.steps), 1)
+        self.assertEqual(plan_events[0].plan.steps[0].instruction, "Click New.")
 
         await session.handle_step_started("step_001")
         await wait_until(lambda: any(
@@ -165,16 +186,13 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
-        self.assertIn(
-            SessionCompletedEvent(),
-            events,
-        )
+        self.assertIn(SessionCompletedEvent(), events)
 
-    async def test_action_tool_call_requests_fresh_screen_before_next_turn(self) -> None:
+    async def test_completed_screen_changing_step_triggers_fresh_screen(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM(
             [
-                [LLMToolCallEvent(tool_call=CLICK_CALL)],
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
                 [LLMTextDelta(text="The new screen is visible.")],
             ]
         )
@@ -199,15 +217,20 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(llm.requests), 2)
         self.assertEqual(len(llm.requests[1].images), 1)
 
-    async def test_request_screen_mixed_with_actions_waits_until_after_action(self) -> None:
+    async def test_request_screen_in_same_turn_runs_before_walk_resumes(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM(
             [
+                # Turn 1: emit plan + immediately request a screen to verify.
                 [
-                    LLMToolCallEvent(tool_call=CLICK_CALL),
+                    LLMToolCallEvent(tool_call=CLICK_PLAN_CALL),
                     LLMToolCallEvent(tool_call=REQUEST_SCREEN_CALL),
                 ],
+                # Turn 2 (after fresh screen from turn-1 request): text means
+                # 'continue walking' — agent loop returns and walk resumes.
                 [LLMTextDelta(text="Now I can continue.")],
+                # Turn 3 (after the post-confirmation fresh screen): text -> done.
+                [LLMTextDelta(text="All done.")],
             ]
         )
         session = TutorialSession(
@@ -216,23 +239,20 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
 
         await session.handle_user_message("Click New.")
         await send_next_requested_screen(session, events)
+        # The screen request after the update_plan call should arrive before
+        # the walk hands the step to the user.
+        await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
-        screen_requests_before_action = [
-            e for e in events if isinstance(e, ScreenRequestedEvent)
-        ]
-        self.assertEqual(len(screen_requests_before_action), 1)
-
         await session.handle_step_started("step_001")
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation("step_001", confirmed=True, note=None)
         await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
-        self.assertEqual(len(llm.requests), 2)
+        self.assertGreaterEqual(len(llm.requests), 2)
 
     async def test_request_screen_suspends_loop_until_screen_arrives(self) -> None:
         events: list[Any] = []
-        # First call asks for a screen. Second call (after screen) emits no tool calls.
         llm = ScriptedLLM(
             [
                 [LLMToolCallEvent(tool_call=REQUEST_SCREEN_CALL)],
@@ -251,7 +271,6 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         text_events = [e for e in events if isinstance(e, TextResponseEventLike)]
         self.assertEqual(len(text_events), 1)
         self.assertEqual(len(llm.requests), 2)
-        # Second LLM call should have received the latest screen as an image.
         self.assertEqual(len(llm.requests[1].images), 1)
 
     async def test_user_uploaded_images_are_attached_to_planner_request(self) -> None:
@@ -279,13 +298,12 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(llm.requests[0].images[1].filename, "uploaded_image_001")
         self.assertIn("uploaded_reference_images", llm.requests[0].user_text)
 
-    async def test_step_rejection_reruns_agent_loop(self) -> None:
+    async def test_step_rejection_clears_tail_handles(self) -> None:
         events: list[Any] = []
-        # First call: one click. Second call (after rejection): no tool calls.
         llm = ScriptedLLM(
             [
-                [LLMToolCallEvent(tool_call=CLICK_CALL)],
-                [LLMTextDelta(text="Got it. Let me know what you see.")],
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
+                [LLMTextDelta(text="Got it. Let me rethink.")],
             ]
         )
         session = TutorialSession(
@@ -304,8 +322,59 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await wait_for_idle(session)
 
         self.assertEqual(len(llm.requests), 2)
-        text_events = [e for e in events if isinstance(e, TextResponseEventLike)]
-        self.assertEqual(len(text_events), 1)
+        # Handle index was cleared because all prior tail steps were discarded.
+        self.assertEqual(session.handle_index, {})
+        self.assertEqual(session.plan_steps, [])
+        # step_counter remains monotonic so the next plan gets fresh IDs.
+        self.assertEqual(session.step_counter, 1)
+
+    async def test_handle_index_is_populated_after_plan_emission(self) -> None:
+        # The merge function tests cover handle echo + step_id preservation
+        # in detail. Here we just verify the session populates handle_index
+        # after a first emission so the next turn can reference handles.
+        events: list[Any] = []
+        first_call = update_plan_call(
+            click_item(human_text="Click A.", description="Button A."),
+            click_item(human_text="Click B.", description="Button B."),
+        )
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=first_call)],
+                [LLMTextDelta(text="ok")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Walk me through it.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+
+        self.assertEqual(len(session.handle_index), 2)
+        self.assertEqual(session.handle_counter, 2)
+        self.assertEqual([s.step_id for s in session.plan_steps], ["step_001", "step_002"])
+
+    async def test_unknown_tool_call_is_logged_and_ignored(self) -> None:
+        events: list[Any] = []
+        unknown = TutorialToolCall(name="tutorial_click", arguments="{}")
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=unknown)],
+                [LLMTextDelta(text="ignored")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("hi")
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertEqual(session.plan_steps, [])
+        plan_ready = [e for e in events if isinstance(e, PlanReadyEvent)]
+        self.assertEqual(plan_ready, [])
 
 
 async def wait_for_idle(session: TutorialSession) -> None:

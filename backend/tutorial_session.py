@@ -1,20 +1,21 @@
 """Async agent-loop tutorial session.
 
-Replaces the LangGraph-based ``TutorialSessionGraph``. Each session owns
-one ``asyncio.Task`` running a Codex/Claude-Code-style loop: call the
+Each session owns one ``asyncio.Task`` running an agent loop: call the
 model with tools, execute the tool calls, feed the results back into the
 next call, repeat until the model emits a final text answer.
 
-Two kinds of tool calls are executed inline:
-    - action tools (``tutorial_click``, ``tutorial_type``, ...) become
-      ``TutorialStep`` records appended to the current plan.
+The model has two tools:
+    - ``tutorial_update_plan`` proposes the full remaining plan as a
+      hypothesis. The backend merges the proposal against the frozen
+      prefix (completed + awaiting steps) via
+      :func:`backend.plan_merge.merge_plan_tail`. A turn that does not
+      call this tool means "the existing plan stands."
     - ``tutorial_request_screen`` suspends the loop on an ``asyncio.Future``
       until the WebSocket layer delivers a fresh screenshot.
 
-After the loop returns, any accumulated steps are walked one-by-one,
-awaiting client confirmation between each. If a step is rejected the
-agent loop is re-entered with the rejection note appended to the
-conversation.
+After each agent loop the pending plan steps are walked one-by-one,
+awaiting client confirmation between each. The next agent loop sees a
+"frozen prefix" of completed + awaiting steps that it may not rewrite.
 """
 
 from __future__ import annotations
@@ -48,15 +49,23 @@ from backend.tutorial_session_events import (
     StepReadyEvent,
     TutorialTextDeltaEvent,
     TextResponseEventLike,
-    TutorialActionEvent,
+)
+from backend.plan_merge import (
+    PlanMergeError,
+    PlanMergeResult,
+    merge_plan_tail,
 )
 from backend.tutorial_tools import (
     REQUEST_SCREEN_TOOL_NAME,
+    UPDATE_PLAN_TOOL_NAME,
     TutorialToolCall,
     TutorialToolCallError,
+    candidates_from_arguments,
+    is_request_screen_call,
+    is_update_plan_call,
     parse_request_screen_reason,
+    parse_update_plan_arguments,
     plan_from_steps,
-    step_from_tool_call,
 )
 
 
@@ -68,6 +77,7 @@ EventSink = Callable[[ServerSessionEvent], Awaitable[None]]
 
 MAX_AGENT_TURNS = 8
 MAX_CONSECUTIVE_SCREEN_REQUESTS = 3
+STALL_ATTEMPT_THRESHOLD = 2
 SCREEN_CHANGING_ACTION_TYPES = frozenset(
     {"click", "double_click", "right_click", "type", "press_key", "scroll", "drag"}
 )
@@ -102,6 +112,10 @@ class TutorialSession:
     plan_emitted: bool = False
     screen_request_counter: int = 0
     step_counter: int = 0
+    handle_counter: int = 0
+    handle_index: dict[str, TutorialStep] = field(default_factory=dict)
+    attempts_without_progress: dict[str, int] = field(default_factory=dict)
+    prev_active_step_id: str | None = None
     last_action_kind: str | None = None
     screen_is_stale: bool = False
     screen_captured_at: datetime | None = None
@@ -170,6 +184,10 @@ class TutorialSession:
         self.draft_plan = None
         self.uploaded_images = list(uploaded_images)
         self.step_counter = 0
+        self.handle_counter = 0
+        self.handle_index = {}
+        self.attempts_without_progress = {}
+        self.prev_active_step_id = None
         self.last_action_kind = None
         self.screen_is_stale = False
         self.history.append(HistoryEntry(role="user", content=text))
@@ -359,70 +377,42 @@ class TutorialSession:
                 return
 
             request_screen_call = first_request_screen_call(tool_calls)
-            action_calls = [
-                call for call in tool_calls if call.name != REQUEST_SCREEN_TOOL_NAME
+            update_plan_calls = [c for c in tool_calls if is_update_plan_call(c)]
+            unknown_calls = [
+                c
+                for c in tool_calls
+                if not is_update_plan_call(c) and not is_request_screen_call(c)
             ]
-
-            # Hard guard: if the screen is stale (user just performed a
-            # screen-changing action) and the model is about to emit more
-            # actions without first asking for a fresh screen, override.
-            # Otherwise the agent keeps re-emitting scrolls/clicks based on
-            # a pre-action view it cannot verify.
-            if (
-                self.screen_is_stale
-                and action_calls
-                and request_screen_call is None
-            ):
-                logger.info(
-                    "Forcing tutorial_request_screen due to stale screen",
-                    extra={
-                        "session_id": self.session_id,
-                        "last_action_kind": self.last_action_kind,
-                        "dropped_action_names": [c.name for c in action_calls],
-                    },
-                )
+            for call in unknown_calls:
                 self.history.append(
                     HistoryEntry(
                         role="tool",
                         content=(
-                            "Loop guard: dropped action calls "
-                            f"{[c.name for c in action_calls]} because the "
-                            f"screen is stale after a {self.last_action_kind}. "
-                            "Requesting a fresh screen first."
+                            f"{call.name} rejected: unknown tool. The only "
+                            f"available tools are {UPDATE_PLAN_TOOL_NAME} "
+                            f"and {REQUEST_SCREEN_TOOL_NAME}."
                         ),
                     )
                 )
-                synthetic_reason = (
-                    f"verifying the result of the last {self.last_action_kind} "
-                    "before continuing"
-                )
-                consecutive_screen_requests += 1
-                if consecutive_screen_requests >= MAX_CONSECUTIVE_SCREEN_REQUESTS:
-                    await self._emit_screen_request_stall(synthetic_reason)
-                    return
-                await self._execute_screen_request(
-                    TutorialToolCall(
-                        name=REQUEST_SCREEN_TOOL_NAME,
-                        arguments=json.dumps({"reason": synthetic_reason}),
+
+            # Only the most recent update_plan in a turn is honored; earlier
+            # ones would be immediately overwritten and just confuse history.
+            if len(update_plan_calls) > 1:
+                self.history.append(
+                    HistoryEntry(
+                        role="tool",
+                        content=(
+                            f"Multiple {UPDATE_PLAN_TOOL_NAME} calls in one "
+                            "turn; only the last one was applied."
+                        ),
                     )
                 )
-                continue
-
-            for call in action_calls:
-                await self._execute_action_call(call)
+            for call in update_plan_calls[:-1]:
+                self._log_dropped_update_plan(call)
+            if update_plan_calls:
+                await self._execute_plan_update_call(update_plan_calls[-1])
 
             if request_screen_call is not None:
-                if action_calls:
-                    self.history.append(
-                        HistoryEntry(
-                            role="tool",
-                            content=(
-                                f"{REQUEST_SCREEN_TOOL_NAME} deferred until after "
-                                "the user completes the planned action steps."
-                            ),
-                        )
-                    )
-                    return
                 try:
                     last_screen_reason = parse_request_screen_reason(
                         request_screen_call
@@ -439,7 +429,7 @@ class TutorialSession:
 
             consecutive_screen_requests = 0
 
-            # All calls were action tools — agent loop is done for this turn.
+            # No request_screen this turn — agent loop is done.
             return
 
         logger.warning(
@@ -532,6 +522,9 @@ class TutorialSession:
                 draft_plan=self.draft_plan,
                 plan_steps=self.plan_steps,
                 completed_step_ids=self.completed_step_ids,
+                awaiting_step_id=self.awaiting_step_id,
+                handle_index=self.handle_index,
+                attempts_without_progress=self.attempts_without_progress,
                 last_action_kind=self.last_action_kind,
                 screen_is_stale=self.screen_is_stale,
                 uploaded_image_count=len(self.uploaded_images),
@@ -601,17 +594,13 @@ class TutorialSession:
         finally:
             self.draft_plan_task = None
 
-    async def _execute_action_call(self, call: TutorialToolCall) -> None:
+    async def _execute_plan_update_call(self, call: TutorialToolCall) -> None:
         try:
-            step = step_from_tool_call(call, self.step_counter)
+            arguments = parse_update_plan_arguments(call)
         except TutorialToolCallError as error:
             logger.warning(
-                "Discarding invalid tool call",
-                extra={
-                    "session_id": self.session_id,
-                    "tool": call.name,
-                    "error": error.message,
-                },
+                "Rejected tutorial_update_plan args",
+                extra={"session_id": self.session_id, "error": error.message},
             )
             self.history.append(
                 HistoryEntry(
@@ -621,21 +610,112 @@ class TutorialSession:
             )
             return
 
-        self.plan_steps.append(step)
-        self.step_counter += 1
-        await self.emit(TutorialActionEvent(step=step))
+        candidates = candidates_from_arguments(arguments)
+        frozen_prefix_ids = list(self.completed_step_ids)
+        if (
+            self.awaiting_step_id is not None
+            and self.awaiting_step_id not in self.completed_step_ids
+        ):
+            frozen_prefix_ids.append(self.awaiting_step_id)
+
+        try:
+            result: PlanMergeResult = merge_plan_tail(
+                current_plan_steps=self.plan_steps,
+                frozen_prefix_ids=frozen_prefix_ids,
+                prior_handle_index=self.handle_index,
+                new_tail=candidates,
+                step_counter=self.step_counter,
+                handle_counter=self.handle_counter,
+            )
+        except (PlanMergeError, ValueError) as error:
+            logger.warning(
+                "Rejected plan merge",
+                extra={"session_id": self.session_id, "error": str(error)},
+            )
+            self.history.append(
+                HistoryEntry(
+                    role="tool",
+                    content=f"{call.name} rejected: {error}",
+                )
+            )
+            return
+
+        self.plan_steps = result.plan_steps
+        self.handle_index = result.handle_index
+        self.step_counter = result.step_counter
+        self.handle_counter = result.handle_counter
+
+        plan = plan_from_steps(self.goal or "", self.plan_steps)
+        if not self.plan_emitted:
+            await self.emit(PlanReadyEvent(plan=plan))
+            self.plan_emitted = True
+        else:
+            await self.emit(PlanUpdatedEvent(plan=plan))
+
         self.history.append(
             HistoryEntry(
                 role="assistant",
-                content=f"called {call.name}({_redact_action_args(call.arguments)})",
+                content=(
+                    f"called {call.name}(reasoning={arguments.plan_reasoning!r}, "
+                    f"tail_len={len(candidates)})"
+                ),
             )
+        )
+        tail_summary = ", ".join(
+            f"{handle}={step.action.type}"
+            for handle, step in result.handle_index.items()
         )
         self.history.append(
             HistoryEntry(
                 role="tool",
-                content=f"{call.name} ok step_id={step.step_id}",
+                content=(
+                    f"{call.name} ok — new tail: [{tail_summary}]. "
+                    "Frozen prefix preserved."
+                ),
             )
         )
+
+    def _log_dropped_update_plan(self, call: TutorialToolCall) -> None:
+        self.history.append(
+            HistoryEntry(
+                role="tool",
+                content=(
+                    f"{call.name} dropped (superseded by a later "
+                    f"{UPDATE_PLAN_TOOL_NAME} call in the same turn)."
+                ),
+            )
+        )
+
+    def _active_step_id(self) -> str | None:
+        """The step the model is currently 'pointed at' — awaiting step if
+        any, otherwise the first unwalked step in the plan."""
+        if self.awaiting_step_id is not None:
+            return self.awaiting_step_id
+        completed = set(self.completed_step_ids)
+        for step in self.plan_steps:
+            if step.step_id not in completed:
+                return step.step_id
+        return None
+
+    def _record_screen_progress(self) -> None:
+        """Update the stall counter after a fresh screen lands.
+
+        If the active step is the same one we were pointing at before the
+        request, the user did not advance and the model's prior plan did
+        not get the user unstuck — bump that step's counter. Otherwise
+        progress was made; reset.
+        """
+        active = self._active_step_id()
+        if active is None:
+            self.prev_active_step_id = None
+            return
+        if active == self.prev_active_step_id:
+            self.attempts_without_progress[active] = (
+                self.attempts_without_progress.get(active, 0) + 1
+            )
+        else:
+            self.attempts_without_progress.pop(active, None)
+        self.prev_active_step_id = active
 
     async def _execute_screen_request(self, call: TutorialToolCall) -> None:
         try:
@@ -668,6 +748,7 @@ class TutorialSession:
             self.pending_screen = None
             self.pending_screen_request_id = None
 
+        self._record_screen_progress()
         captured_at = datetime.now(UTC).isoformat(timespec="seconds")
         self.history.append(
             HistoryEntry(
@@ -727,12 +808,8 @@ class TutorialSession:
     # -------- Step walkthrough --------
 
     async def _walk_steps(self) -> bool:
-        plan = plan_from_steps(self.goal or "", self.plan_steps)
-        if not self.plan_emitted:
-            await self.emit(PlanReadyEvent(plan=plan))
-            self.plan_emitted = True
-        else:
-            await self.emit(PlanUpdatedEvent(plan=plan))
+        # Plan ready/updated events are emitted by _execute_plan_update_call
+        # at the moment the plan changes — no need to re-emit on every walk.
 
         # Snapshot the pending steps. New steps added later (e.g. after a
         # replan) will be walked in the next outer iteration.
@@ -745,12 +822,16 @@ class TutorialSession:
                     HistoryEntry(role="user", content=replan_note)
                 )
                 # Truncate the plan to what was actually completed; keep
-                # completion history and step_counter so re-planned steps
-                # get fresh IDs that don't collide with rejected ones.
+                # step_counter and handle_counter monotonic so re-planned
+                # steps get fresh IDs that don't collide with rejected
+                # ones. The handle index also gets cleared because all
+                # tail handles pointed at the now-discarded steps.
                 completed = set(self.completed_step_ids)
                 self.plan_steps = [
                     s for s in self.plan_steps if s.step_id in completed
                 ]
+                self.handle_index = {}
+                self.prev_active_step_id = None
                 return True
 
         return False
@@ -874,6 +955,9 @@ def render_history(
     draft_plan: DraftPlan | None = None,
     plan_steps: list[TutorialStep] | None = None,
     completed_step_ids: list[str] | None = None,
+    awaiting_step_id: str | None = None,
+    handle_index: dict[str, TutorialStep] | None = None,
+    attempts_without_progress: dict[str, int] | None = None,
     last_action_kind: str | None = None,
     screen_is_stale: bool = False,
 ) -> str:
@@ -886,8 +970,8 @@ def render_history(
         if screen_is_stale:
             lines.append(
                 "- latest_screen: attached but STALE — taken before the last "
-                "action. Call tutorial_request_screen before emitting another "
-                "action; do not trust the attached image for verification."
+                "action. Prefer tutorial_request_screen before rewriting the "
+                "plan; do not trust the attached image for verification."
             )
         else:
             lines.append("- latest_screen: attached to this request")
@@ -910,24 +994,22 @@ def render_history(
     lines.append("")
     if draft_plan is not None:
         lines.append(
-            "Draft plan hypothesis (refine against the screen, batch confidently "
-            "when the screen agrees, deviate when it does not):"
+            "Draft plan hypothesis (use to seed your first tutorial_update_plan "
+            "call; refine against the screen, drop or rewrite items that the "
+            "screen contradicts):"
         )
         for index, step in enumerate(draft_plan.steps, start=1):
             lines.append(f"  {index}. [{step.kind}] {step.instruction}")
         lines.append("")
     if plan_steps:
-        completed = set(completed_step_ids or [])
-        lines.append(
-            "Current plan state (do NOT re-emit completed steps; append only "
-            "what comes next):"
+        _render_plan_block(
+            lines,
+            plan_steps=plan_steps,
+            completed_step_ids=completed_step_ids or [],
+            awaiting_step_id=awaiting_step_id,
+            handle_index=handle_index or {},
+            attempts_without_progress=attempts_without_progress or {},
         )
-        for step in plan_steps:
-            status = "done" if step.step_id in completed else "pending"
-            lines.append(
-                f"  - {step.step_id} [{status}] {step.action.type}: {step.instruction}"
-            )
-        lines.append("")
     lines.append("Conversation so far:")
     if not history:
         lines.append("- <none yet>")
@@ -937,19 +1019,78 @@ def render_history(
     return "\n".join(lines)
 
 
-def _redact_action_args(arguments: str) -> str:
-    """Drop perception-shaped fields from a tool-call arg string before it
-    enters history. agent_description and confidence are evidence for a single
-    decision; replaying them as 'facts' in the prompt makes the model anchor
-    on its own prior description rather than the fresh screen."""
-    try:
-        parsed = json.loads(arguments)
-    except (TypeError, ValueError):
-        return arguments
-    if not isinstance(parsed, dict):
-        return arguments
-    keep = {k: v for k, v in parsed.items() if k not in {"agent_description", "confidence"}}
-    return json.dumps(keep, ensure_ascii=False)
+def _render_plan_block(
+    lines: list[str],
+    *,
+    plan_steps: list[TutorialStep],
+    completed_step_ids: list[str],
+    awaiting_step_id: str | None,
+    handle_index: dict[str, TutorialStep],
+    attempts_without_progress: dict[str, int],
+) -> None:
+    completed = set(completed_step_ids)
+    handle_by_step_id = {step.step_id: h for h, step in handle_index.items()}
+    lines.append(
+        "Plan state — your next tutorial_update_plan replaces the TAIL only. "
+        "Frozen entries are immutable; echo a step_handle to keep a tail item, "
+        "omit it to drop, or emit a new item without a handle to add:"
+    )
+    frozen_split_index = 0
+    for index, step in enumerate(plan_steps):
+        if step.step_id in completed or step.step_id == awaiting_step_id:
+            frozen_split_index = index + 1
+        else:
+            break
+
+    lines.append("  FROZEN (immutable):")
+    if frozen_split_index == 0:
+        lines.append("    <none>")
+    else:
+        for step in plan_steps[:frozen_split_index]:
+            if step.step_id in completed:
+                status = "done"
+            elif step.step_id == awaiting_step_id:
+                attempts = attempts_without_progress.get(step.step_id, 0)
+                status = (
+                    f"AWAITING (attempts_without_progress={attempts})"
+                    if attempts
+                    else "AWAITING"
+                )
+            else:
+                status = "pending"
+            lines.append(
+                f"    - {step.step_id} [{status}] {step.action.type}: "
+                f"{step.instruction}"
+            )
+
+    lines.append("  TAIL (rewrite freely):")
+    tail = plan_steps[frozen_split_index:]
+    if not tail:
+        lines.append("    <empty>")
+    else:
+        for step in tail:
+            handle = handle_by_step_id.get(step.step_id, "?")
+            lines.append(
+                f"    - handle={handle} step_id={step.step_id} "
+                f"[{step.action.type}] conf={step.confidence:.2f}: "
+                f"{step.instruction}"
+            )
+
+    if awaiting_step_id is not None:
+        attempts = attempts_without_progress.get(awaiting_step_id, 0)
+        if attempts >= STALL_ATTEMPT_THRESHOLD:
+            lines.append("")
+            lines.append(
+                f"  STALL: {awaiting_step_id} has been pending across "
+                f"{attempts} fresh screens without user progress. The "
+                "instruction may be wrong, the target may have moved, or "
+                "the user is stuck. On your next tutorial_update_plan: "
+                "rewrite the tail to take a different approach to this "
+                "step, OR insert a confirm step to check state, OR lower "
+                "confidence to surface uncertainty. Do not simply re-emit "
+                "the same tail."
+            )
+    lines.append("")
 
 
 def first_request_screen_call(

@@ -23,15 +23,19 @@ enum StabilityProgress {
 /// comparison downscales 3× and applies a Gaussian blur to wash out cursor
 /// jitter and aliasing; once the mean per-channel difference is below
 /// `stabilityThreshold`, the screen is considered settled. A hard `timeout`
-/// guarantees we never block the tutorial indefinitely.
+/// guarantees we never block the tutorial indefinitely. If the difference is
+/// stuck above the threshold for several comparison windows, we also proceed so
+/// persistent animations do not block the next screenshot forever.
 @MainActor
 final class ScreenStabilityWatcher {
-    static let initialDelay: TimeInterval = 0.2
+    static let initialDelay: TimeInterval = 0.5
     static let pollInterval: TimeInterval = 0.1
-    static let comparisonWindow: TimeInterval = 0.2
+    static let comparisonWindow: TimeInterval = 0.3
     static let timeout: TimeInterval = 5.0
-    static let stabilityThreshold: Double = 0.004
-    static let downscaleFactor: CGFloat = 3.0
+    static let stabilityThreshold: Double = 0.02
+    static let unchangedDifferenceFrameLimit = 3
+    static let unchangedDifferenceTolerance: Double = 0.001
+    static let downscaleFactor: CGFloat = 2.0
     static let blurRadius: Double = 2.0
 
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
@@ -112,18 +116,27 @@ final class ScreenStabilityWatcher {
         try? await Task.sleep(nanoseconds: UInt64(Self.initialDelay * 1_000_000_000))
 
         let start = Date()
+        var stabilityCounter = StabilityCounter(
+            requiredUnchangedFrames: Self.unchangedDifferenceFrameLimit,
+            differenceTolerance: Self.unchangedDifferenceTolerance
+        )
         while Date().timeIntervalSince(start) < (Self.timeout - Self.initialDelay) {
             try? await Task.sleep(nanoseconds: UInt64(Self.pollInterval * 1_000_000_000))
             guard let pair = collector.framePair(window: Self.comparisonWindow) else {
                 onProgress?(.warmingUp(frameCount: collector.frameCount()))
+                stabilityCounter.reset()
                 continue
             }
             guard let diff = meanDifference(current: pair.current, past: pair.past) else {
                 onProgress?(.comparisonFailed)
+                stabilityCounter.reset()
                 continue
             }
             onProgress?(.comparing(diff: diff))
             if diff <= Self.stabilityThreshold {
+                return
+            }
+            if stabilityCounter.didReachUnchangedLimit(diff: diff) {
                 return
             }
         }
@@ -216,6 +229,42 @@ final class ScreenStabilityWatcher {
             throw ScreenStabilityWatcherError.noDisplay
         }
         return CGDirectDisplayID(value.uint32Value)
+    }
+}
+
+struct StabilityCounter {
+    private let requiredUnchangedFrames: Int
+    private let differenceTolerance: Double
+    private var lastDifference: Double?
+    private var unchangedFrameCount = 0
+
+    init(requiredUnchangedFrames: Int, differenceTolerance: Double) {
+        self.requiredUnchangedFrames = requiredUnchangedFrames
+        self.differenceTolerance = differenceTolerance
+    }
+
+    mutating func didReachUnchangedLimit(diff: Double) -> Bool {
+        guard requiredUnchangedFrames > 0 else { return true }
+
+        guard let previousDifference = lastDifference else {
+            lastDifference = diff
+            unchangedFrameCount = 1
+            return unchangedFrameCount >= requiredUnchangedFrames
+        }
+
+        if abs(diff - previousDifference) <= differenceTolerance {
+            unchangedFrameCount += 1
+        } else {
+            unchangedFrameCount = 1
+        }
+
+        lastDifference = diff
+        return unchangedFrameCount >= requiredUnchangedFrames
+    }
+
+    mutating func reset() {
+        lastDifference = nil
+        unchangedFrameCount = 0
     }
 }
 

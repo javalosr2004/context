@@ -35,6 +35,7 @@
 		A2000000000000000000001A /* ScreenFrameCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004A /* ScreenFrameCapture.swift */; };
 		AC0000000000000000000001 /* ScreenStabilityWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000011 /* ScreenStabilityWatcher.swift */; };
 		AC0000000000000000000002 /* StabilityIndicatorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000012 /* StabilityIndicatorController.swift */; };
+		AC0000000000000000000003 /* ScreenStabilityWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000013 /* ScreenStabilityWatcherTests.swift */; };
 		A2000000000000000000001B /* ScreenGroundingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004B /* ScreenGroundingController.swift */; };
 		A2000000000000000000001C /* GroundingBoundingBoxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004C /* GroundingBoundingBoxTests.swift */; };
 		A2000000000000000000001D /* GroundingEndpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004D /* GroundingEndpointStore.swift */; };
@@ -117,6 +118,7 @@
 		A2000000000000000000004A /* ScreenFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameCapture.swift; sourceTree = "<group>"; };
 		AC0000000000000000000011 /* ScreenStabilityWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenStabilityWatcher.swift; sourceTree = "<group>"; };
 		AC0000000000000000000012 /* StabilityIndicatorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StabilityIndicatorController.swift; sourceTree = "<group>"; };
+		AC0000000000000000000013 /* ScreenStabilityWatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenStabilityWatcherTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000004B /* ScreenGroundingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGroundingController.swift; sourceTree = "<group>"; };
 		A2000000000000000000004C /* GroundingBoundingBoxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingBoundingBoxTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000004D /* GroundingEndpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingEndpointStore.swift; sourceTree = "<group>"; };
@@ -206,6 +208,7 @@
 				A2000000000000000000004C /* GroundingBoundingBoxTests.swift */,
 				A20000000000000000000050 /* GroundingEndpointStoreTests.swift */,
 				A20000000000000000000052 /* ScreenFrameMaskerTests.swift */,
+				AC0000000000000000000013 /* ScreenStabilityWatcherTests.swift */,
 				A50000000000000000000016 /* FocusMaskLayoutTests.swift */,
 				A50000000000000000000018 /* FocusMaskClickClassifierTests.swift */,
 				A60000000000000000000014 /* TutorialPlanTests.swift */,
@@ -511,6 +514,7 @@
 				A2000000000000000000001C /* GroundingBoundingBoxTests.swift in Sources */,
 				A20000000000000000000020 /* GroundingEndpointStoreTests.swift in Sources */,
 				A30000000000000000000002 /* ScreenFrameMaskerTests.swift in Sources */,
+				AC0000000000000000000003 /* ScreenStabilityWatcherTests.swift in Sources */,
 				A50000000000000000000006 /* FocusMaskLayoutTests.swift in Sources */,
 				A50000000000000000000008 /* FocusMaskClickClassifierTests.swift in Sources */,
 				A60000000000000000000004 /* TutorialPlanTests.swift in Sources */,

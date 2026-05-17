@@ -43,7 +43,7 @@ def click_item(human_text: str, description: str, confidence: float = 0.9) -> di
         "human_text": human_text,
         "agent_description": description,
         "confidence": confidence,
-        "step_handle": None,
+        "refines_current": False,
     }
 
 
@@ -212,8 +212,6 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         # step_counter must NOT roll back — must remain at 2 so any future
         # step takes step_003+.
         self.assertEqual(session.step_counter, 2)
-        # All tail handles cleared on rejection.
-        self.assertEqual(session.handle_index, {})
 
     async def test_render_history_renders_frozen_and_tail_blocks(self) -> None:
         click_step = TutorialStep(
@@ -252,15 +250,15 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
             plan_steps=[click_step, type_step, third_step],
             completed_step_ids=["step_001"],
             awaiting_step_id="step_002",
-            handle_index={"h_003": third_step},
             attempts_without_progress={},
             last_action_kind="click",
         )
-        self.assertIn("FROZEN", text)
+        self.assertIn("COMPLETED", text)
+        self.assertIn("AWAITING", text)
         self.assertIn("TAIL", text)
         self.assertIn("step_001 [done]", text)
-        self.assertIn("step_002 [AWAITING]", text)
-        self.assertIn("handle=h_003", text)
+        self.assertIn("step_002", text)
+        self.assertIn("step_003", text)
         self.assertIn("last_completed_action: click", text)
 
     async def test_render_history_emits_stall_directive(self) -> None:
@@ -280,7 +278,6 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
             plan_steps=[step],
             completed_step_ids=[],
             awaiting_step_id="step_005",
-            handle_index={},
             attempts_without_progress={"step_005": 2},
         )
         self.assertIn("STALL", text)

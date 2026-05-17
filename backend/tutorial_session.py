@@ -112,8 +112,6 @@ class TutorialSession:
     plan_emitted: bool = False
     screen_request_counter: int = 0
     step_counter: int = 0
-    handle_counter: int = 0
-    handle_index: dict[str, TutorialStep] = field(default_factory=dict)
     attempts_without_progress: dict[str, int] = field(default_factory=dict)
     prev_active_step_id: str | None = None
     last_action_kind: str | None = None
@@ -184,8 +182,6 @@ class TutorialSession:
         self.draft_plan = None
         self.uploaded_images = list(uploaded_images)
         self.step_counter = 0
-        self.handle_counter = 0
-        self.handle_index = {}
         self.attempts_without_progress = {}
         self.prev_active_step_id = None
         self.last_action_kind = None
@@ -523,7 +519,6 @@ class TutorialSession:
                 plan_steps=self.plan_steps,
                 completed_step_ids=self.completed_step_ids,
                 awaiting_step_id=self.awaiting_step_id,
-                handle_index=self.handle_index,
                 attempts_without_progress=self.attempts_without_progress,
                 last_action_kind=self.last_action_kind,
                 screen_is_stale=self.screen_is_stale,
@@ -612,20 +607,21 @@ class TutorialSession:
 
         candidates = candidates_from_arguments(arguments)
         frozen_prefix_ids = list(self.completed_step_ids)
+        awaiting_in_prefix: str | None = None
         if (
             self.awaiting_step_id is not None
             and self.awaiting_step_id not in self.completed_step_ids
         ):
             frozen_prefix_ids.append(self.awaiting_step_id)
+            awaiting_in_prefix = self.awaiting_step_id
 
         try:
             result: PlanMergeResult = merge_plan_tail(
                 current_plan_steps=self.plan_steps,
                 frozen_prefix_ids=frozen_prefix_ids,
-                prior_handle_index=self.handle_index,
+                awaiting_step_id=awaiting_in_prefix,
                 new_tail=candidates,
                 step_counter=self.step_counter,
-                handle_counter=self.handle_counter,
             )
         except (PlanMergeError, ValueError) as error:
             logger.warning(
@@ -641,9 +637,7 @@ class TutorialSession:
             return
 
         self.plan_steps = result.plan_steps
-        self.handle_index = result.handle_index
         self.step_counter = result.step_counter
-        self.handle_counter = result.handle_counter
 
         plan = plan_from_steps(self.goal or "", self.plan_steps)
         if not self.plan_emitted:
@@ -661,16 +655,17 @@ class TutorialSession:
                 ),
             )
         )
+        live_tail_start = len(self.completed_step_ids)
         tail_summary = ", ".join(
-            f"{handle}={step.action.type}"
-            for handle, step in result.handle_index.items()
+            f"{step.step_id}={step.action.type}"
+            for step in result.plan_steps[live_tail_start:]
         )
         self.history.append(
             HistoryEntry(
                 role="tool",
                 content=(
                     f"{call.name} ok — new tail: [{tail_summary}]. "
-                    "Frozen prefix preserved."
+                    "Completed prefix preserved."
                 ),
             )
         )
@@ -822,15 +817,12 @@ class TutorialSession:
                     HistoryEntry(role="user", content=replan_note)
                 )
                 # Truncate the plan to what was actually completed; keep
-                # step_counter and handle_counter monotonic so re-planned
-                # steps get fresh IDs that don't collide with rejected
-                # ones. The handle index also gets cleared because all
-                # tail handles pointed at the now-discarded steps.
+                # step_counter monotonic so re-planned steps get fresh
+                # IDs that don't collide with rejected ones.
                 completed = set(self.completed_step_ids)
                 self.plan_steps = [
                     s for s in self.plan_steps if s.step_id in completed
                 ]
-                self.handle_index = {}
                 self.prev_active_step_id = None
                 return True
 
@@ -867,16 +859,21 @@ class TutorialSession:
             self.awaiting_step_id = None
 
         if confirmed:
-            self.completed_step_ids.append(step.step_id)
-            self.last_action_kind = step.action.type
-            if step.action.type in SCREEN_CHANGING_ACTION_TYPES:
+            # Re-lookup by step_id: a mid-await refines_current merge may
+            # have replaced this step's payload while preserving its id.
+            current = next(
+                (s for s in self.plan_steps if s.step_id == step.step_id), step
+            )
+            self.completed_step_ids.append(current.step_id)
+            self.last_action_kind = current.action.type
+            if current.action.type in SCREEN_CHANGING_ACTION_TYPES:
                 self.screen_is_stale = True
             self.history.append(
                 HistoryEntry(
                     role="user",
                     content=(
-                        f"confirmed {step.step_id} ({step.action.type}): "
-                        f"{step.instruction}. The next attached screen is "
+                        f"confirmed {current.step_id} ({current.action.type}): "
+                        f"{current.instruction}. The next attached screen is "
                         "the post-action state — verify the action achieved "
                         "its goal before emitting another step, and do not "
                         "re-emit any action equivalent to this one."
@@ -956,7 +953,6 @@ def render_history(
     plan_steps: list[TutorialStep] | None = None,
     completed_step_ids: list[str] | None = None,
     awaiting_step_id: str | None = None,
-    handle_index: dict[str, TutorialStep] | None = None,
     attempts_without_progress: dict[str, int] | None = None,
     last_action_kind: str | None = None,
     screen_is_stale: bool = False,
@@ -1007,7 +1003,6 @@ def render_history(
             plan_steps=plan_steps,
             completed_step_ids=completed_step_ids or [],
             awaiting_step_id=awaiting_step_id,
-            handle_index=handle_index or {},
             attempts_without_progress=attempts_without_progress or {},
         )
     lines.append("Conversation so far:")
@@ -1025,15 +1020,16 @@ def _render_plan_block(
     plan_steps: list[TutorialStep],
     completed_step_ids: list[str],
     awaiting_step_id: str | None,
-    handle_index: dict[str, TutorialStep],
     attempts_without_progress: dict[str, int],
 ) -> None:
     completed = set(completed_step_ids)
-    handle_by_step_id = {step.step_id: h for h, step in handle_index.items()}
     lines.append(
-        "Plan state — your next tutorial_update_plan replaces the TAIL only. "
-        "Frozen entries are immutable; echo a step_handle to keep a tail item, "
-        "omit it to drop, or emit a new item without a handle to add:"
+        "Plan state — your next tutorial_update_plan replaces the TAIL. "
+        "Completed steps are immutable. The AWAITING step (if any) is the "
+        "step the user is currently on; set refines_current=true on the "
+        "first plan item to refine that step in place (same identity, new "
+        "payload), or leave refines_current=false to keep the awaiting "
+        "step as-is and have your plan describe what comes after it:"
     )
     frozen_split_index = 0
     for index, step in enumerate(plan_steps):
@@ -1042,25 +1038,34 @@ def _render_plan_block(
         else:
             break
 
-    lines.append("  FROZEN (immutable):")
-    if frozen_split_index == 0:
+    lines.append("  COMPLETED (immutable):")
+    completed_steps = [
+        s for s in plan_steps[:frozen_split_index] if s.step_id in completed
+    ]
+    if not completed_steps:
         lines.append("    <none>")
     else:
-        for step in plan_steps[:frozen_split_index]:
-            if step.step_id in completed:
-                status = "done"
-            elif step.step_id == awaiting_step_id:
-                attempts = attempts_without_progress.get(step.step_id, 0)
-                status = (
-                    f"AWAITING (attempts_without_progress={attempts})"
-                    if attempts
-                    else "AWAITING"
-                )
-            else:
-                status = "pending"
+        for step in completed_steps:
             lines.append(
-                f"    - {step.step_id} [{status}] {step.action.type}: "
+                f"    - {step.step_id} [done] {step.action.type}: "
                 f"{step.instruction}"
+            )
+
+    if awaiting_step_id is not None:
+        awaiting_step = next(
+            (s for s in plan_steps if s.step_id == awaiting_step_id), None
+        )
+        if awaiting_step is not None:
+            attempts = attempts_without_progress.get(awaiting_step_id, 0)
+            suffix = (
+                f" (attempts_without_progress={attempts})" if attempts else ""
+            )
+            lines.append("  AWAITING (user is on this step now):")
+            lines.append(
+                f"    - {awaiting_step.step_id}{suffix} "
+                f"[{awaiting_step.action.type}] "
+                f"conf={awaiting_step.confidence:.2f}: "
+                f"{awaiting_step.instruction}"
             )
 
     lines.append("  TAIL (rewrite freely):")
@@ -1069,11 +1074,9 @@ def _render_plan_block(
         lines.append("    <empty>")
     else:
         for step in tail:
-            handle = handle_by_step_id.get(step.step_id, "?")
             lines.append(
-                f"    - handle={handle} step_id={step.step_id} "
-                f"[{step.action.type}] conf={step.confidence:.2f}: "
-                f"{step.instruction}"
+                f"    - {step.step_id} [{step.action.type}] "
+                f"conf={step.confidence:.2f}: {step.instruction}"
             )
 
     if awaiting_step_id is not None:

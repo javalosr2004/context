@@ -88,15 +88,26 @@ that does not require an on-screen action.
 
 How the plan works:
 - The backend owns a cursor that moves forward as the user confirms
-  steps. The "Plan state" block in your input shows two regions:
-    * FROZEN — completed steps and the currently-awaiting step. These
-      are immutable. You may not rewrite them.
-    * TAIL  — everything after the cursor. This is your hypothesis.
-      Your next tutorial_update_plan REPLACES this region.
-- Each tail item carries a step_handle. To keep a tail item across a
-  rewrite (with or without refining its payload), echo its handle. To
-  drop it, omit it. To insert a new step, emit an item with no handle.
-- You MUST NOT echo a handle that belongs to the frozen prefix.
+  steps. The "Plan state" block in your input shows three regions:
+    * COMPLETED — steps the user already confirmed. Immutable.
+    * AWAITING  — the single step the user is currently on (if any).
+      You cannot rewrite it directly, but you can REFINE it: set
+      `refines_current=true` on the FIRST item of your new plan and
+      that item replaces the awaiting step's payload while keeping its
+      identity (and its stall counter).
+    * TAIL      — everything after the awaiting step. Your next
+      tutorial_update_plan REPLACES this region.
+- Set `refines_current=true` ONLY on the first plan item, and ONLY
+  when that item is a sharper version of the AWAITING step. With
+  `refines_current=true` the awaiting step's payload is replaced in
+  place while keeping its identity and its stall counter.
+- Leave `refines_current=false` when the AWAITING step is still the
+  right action and you just want to rewrite what comes after it. In
+  that case your tail describes the steps that follow the awaiting
+  step; the awaiting step itself is preserved unchanged.
+- `refines_current` MUST be false on every item after the first.
+- There is no handle vocabulary. Just emit your remaining plan each
+  turn; the merger uses `refines_current` to decide identity.
 
 When to call tutorial_update_plan:
 - The first time you see the screen and form a hypothesis about the

@@ -89,8 +89,8 @@ class TutorialGuideTests(unittest.TestCase):
         self.assertIn("agent loop", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertIn("tutorial_update_plan", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertIn("tutorial_request_screen", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("FROZEN", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("step_handle", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("COMPLETED", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("refines_current", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
 
     def test_stream_tutorial_maps_domain_request_to_llm_request(self) -> None:
         llm = FakeLLM()

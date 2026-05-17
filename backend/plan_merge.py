@@ -1,21 +1,22 @@
 """Pure merge logic for `tutorial_update_plan`.
 
 The session owns the plan as ``frozen_prefix + live_tail``. Each turn the
-model proposes a fresh full tail; this module computes the new plan,
-validates the model's contract, and assigns stable identifiers.
+model proposes a fresh full tail; this module computes the new plan and
+validates the model's contract.
 
-Contract enforced here (so the session loop stays simple):
+Identity for the currently-awaiting step is carried across turns via a
+single one-bit signal: if the first tail candidate has
+``refines_current=True``, the merged step inherits the awaiting step's
+``step_id`` (and therefore its ``attempts_without_progress`` counter and
+UI cursor identity). Otherwise the awaiting step is replaced by a brand
+new step with a fresh ``step_id``.
+
+Contract enforced here:
     - ``frozen_prefix_ids`` MUST be a contiguous prefix of the current plan.
-    - A tail candidate that echoes a ``step_handle`` MUST reference a step
-      that existed in the previous tail and is NOT in the frozen prefix.
-    - No handle may appear twice in one new tail.
+    - ``refines_current=True`` is only legal on ``new_tail[0]``.
+    - ``refines_current=True`` requires an awaiting step that is the last
+      entry in ``frozen_prefix_ids``.
     - Each materialized step MUST pass ``validate_step_semantics``.
-
-Handles are how the model says "this is the same logical step as last
-turn." The merge preserves the kept step's ``step_id`` and handle, but
-adopts the new payload from the candidate template — so a handle echo
-without payload changes is a no-op, and a handle echo with new payload is
-in-place refinement.
 """
 
 from __future__ import annotations
@@ -25,7 +26,6 @@ from dataclasses import dataclass
 from backend.tutorial_schema import TutorialStep, validate_step_semantics
 
 
-HANDLE_PREFIX = "h_"
 STEP_ID_PREFIX = "step_"
 
 
@@ -37,74 +37,50 @@ class PlanMergeError(ValueError):
 class TailCandidate:
     """A model-proposed tail item, pre-materialized except for ``step_id``.
 
-    ``step_template.step_id`` is ignored by the merger; the real id comes
-    from either the kept handle's prior step or a freshly minted counter.
+    ``step_template.step_id`` is ignored by the merger; the real id is
+    either inherited from the awaiting step (when ``refines_current`` is
+    true on tail[0]) or freshly minted from the counter.
     """
 
-    step_handle: str | None
+    refines_current: bool
     step_template: TutorialStep
 
 
 @dataclass(frozen=True)
 class PlanMergeResult:
     plan_steps: list[TutorialStep]
-    handle_index: dict[str, TutorialStep]
     step_counter: int
-    handle_counter: int
 
 
 def merge_plan_tail(
     current_plan_steps: list[TutorialStep],
     frozen_prefix_ids: list[str],
-    prior_handle_index: dict[str, TutorialStep],
+    awaiting_step_id: str | None,
     new_tail: list[TailCandidate],
     step_counter: int,
-    handle_counter: int,
 ) -> PlanMergeResult:
     _require_contiguous_prefix(current_plan_steps, frozen_prefix_ids)
-    _validate_handles(new_tail, prior_handle_index, frozen_prefix_ids)
+    _validate_refines(new_tail, awaiting_step_id, frozen_prefix_ids)
 
-    frozen_steps = list(current_plan_steps[: len(frozen_prefix_ids)])
-    new_steps: list[TutorialStep] = list(frozen_steps)
-    new_handle_index: dict[str, TutorialStep] = {}
+    refines = bool(new_tail and new_tail[0].refines_current)
+    # When refining, the awaiting step is dropped from the retained prefix
+    # because the merged tail[0] takes its slot (with the same step_id).
+    retained_count = len(frozen_prefix_ids) - 1 if refines else len(frozen_prefix_ids)
+    new_steps: list[TutorialStep] = list(current_plan_steps[:retained_count])
     next_step_counter = step_counter
-    next_handle_counter = handle_counter
 
-    for candidate in new_tail:
-        if candidate.step_handle is not None:
-            kept = prior_handle_index[candidate.step_handle]
-            step_id = kept.step_id
-            handle = candidate.step_handle
+    for index, candidate in enumerate(new_tail):
+        if index == 0 and refines:
+            assert awaiting_step_id is not None  # guaranteed by _validate_refines
+            step_id = awaiting_step_id
         else:
             next_step_counter += 1
             step_id = f"{STEP_ID_PREFIX}{next_step_counter:03d}"
-            next_handle_counter += 1
-            handle = f"{HANDLE_PREFIX}{next_handle_counter:03d}"
-
         merged = candidate.step_template.model_copy(update={"step_id": step_id})
         validate_step_semantics(merged)
         new_steps.append(merged)
-        new_handle_index[handle] = merged
 
-    return PlanMergeResult(
-        plan_steps=new_steps,
-        handle_index=new_handle_index,
-        step_counter=next_step_counter,
-        handle_counter=next_handle_counter,
-    )
-
-
-def assign_initial_handles(
-    plan_steps: list[TutorialStep],
-    handle_counter: int,
-) -> tuple[dict[str, TutorialStep], int]:
-    """Mint handles for steps that don't yet have one (used on first emit)."""
-    handle_index: dict[str, TutorialStep] = {}
-    counter = handle_counter
-    for step in plan_steps:
-        counter += 1
-        handle_index[f"{HANDLE_PREFIX}{counter:03d}"] = step
-    return handle_index, counter
+    return PlanMergeResult(plan_steps=new_steps, step_counter=next_step_counter)
 
 
 def _require_contiguous_prefix(
@@ -126,32 +102,26 @@ def _require_contiguous_prefix(
             )
 
 
-def _validate_handles(
+def _validate_refines(
     new_tail: list[TailCandidate],
-    prior_handle_index: dict[str, TutorialStep],
+    awaiting_step_id: str | None,
     frozen_prefix_ids: list[str],
 ) -> None:
-    frozen_set = set(frozen_prefix_ids)
-    seen: set[str] = set()
-    for candidate in new_tail:
-        handle = candidate.step_handle
-        if handle is None:
-            continue
-        if handle in seen:
-            raise PlanMergeError(
-                f"Duplicate step_handle {handle!r} in new tail; each handle "
-                "may appear at most once."
-            )
-        seen.add(handle)
-        if handle not in prior_handle_index:
-            raise PlanMergeError(
-                f"Unknown step_handle {handle!r}; only handles from the "
-                "previous turn's tail may be echoed."
-            )
-        kept_step_id = prior_handle_index[handle].step_id
-        if kept_step_id in frozen_set:
-            raise PlanMergeError(
-                f"step_handle {handle!r} references step {kept_step_id!r} "
-                "which is in the frozen prefix and cannot be modified. "
-                "Omit it; the prefix is preserved automatically."
-            )
+    refining = [i for i, c in enumerate(new_tail) if c.refines_current]
+    if not refining:
+        return
+    if refining != [0]:
+        raise PlanMergeError(
+            "refines_current=true is only allowed on the first tail item; "
+            f"found on indices {refining}."
+        )
+    if awaiting_step_id is None:
+        raise PlanMergeError(
+            "refines_current=true requires an awaiting step, but no step "
+            "is currently awaiting the user."
+        )
+    if not frozen_prefix_ids or frozen_prefix_ids[-1] != awaiting_step_id:
+        raise PlanMergeError(
+            "refines_current=true: the awaiting step must be the last "
+            "entry in the frozen prefix."
+        )

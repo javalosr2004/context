@@ -34,14 +34,14 @@ def click_item(
     human_text: str = "Click New.",
     description: str = "Green New button.",
     confidence: float = 0.9,
-    step_handle: str | None = None,
+    refines_current: bool = False,
 ) -> dict[str, Any]:
     return {
         "kind": "click",
         "human_text": human_text,
         "agent_description": description,
         "confidence": confidence,
-        "step_handle": step_handle,
+        "refines_current": refines_current,
     }
 
 
@@ -322,16 +322,11 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await wait_for_idle(session)
 
         self.assertEqual(len(llm.requests), 2)
-        # Handle index was cleared because all prior tail steps were discarded.
-        self.assertEqual(session.handle_index, {})
         self.assertEqual(session.plan_steps, [])
         # step_counter remains monotonic so the next plan gets fresh IDs.
         self.assertEqual(session.step_counter, 1)
 
-    async def test_handle_index_is_populated_after_plan_emission(self) -> None:
-        # The merge function tests cover handle echo + step_id preservation
-        # in detail. Here we just verify the session populates handle_index
-        # after a first emission so the next turn can reference handles.
+    async def test_plan_steps_minted_after_first_emission(self) -> None:
         events: list[Any] = []
         first_call = update_plan_call(
             click_item(human_text="Click A.", description="Button A."),
@@ -351,8 +346,7 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
 
-        self.assertEqual(len(session.handle_index), 2)
-        self.assertEqual(session.handle_counter, 2)
+        self.assertEqual(session.step_counter, 2)
         self.assertEqual([s.step_id for s in session.plan_steps], ["step_001", "step_002"])
 
     async def test_unknown_tool_call_is_logged_and_ignored(self) -> None:

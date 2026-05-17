@@ -58,7 +58,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
                         "human_text": "Click New.",
                         "agent_description": "Green New button.",
                         "confidence": 0.9,
-                        "step_handle": None,
+                        "refines_current": False,
                     }
                 ]
             ),
@@ -67,7 +67,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
         candidates = candidates_from_arguments(args)
         self.assertEqual(len(candidates), 1)
         candidate = candidates[0]
-        self.assertIsNone(candidate.step_handle)
+        self.assertFalse(candidate.refines_current)
         self.assertEqual(candidate.step_template.action.type, "click")
         self.assertEqual(
             candidate.step_template.action.target.description, "Green New button."
@@ -85,7 +85,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
                         "copiable_text": "context-demo",
                         "agent_description": "Repository name field.",
                         "confidence": 0.75,
-                        "step_handle": None,
+                        "refines_current": False,
                     }
                 ]
             ),
@@ -104,7 +104,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
                         "human_text": "Scroll down to billing.",
                         "expected_end_state": "The Billing section is visible.",
                         "confidence": 0.7,
-                        "step_handle": None,
+                        "refines_current": False,
                     }
                 ]
             ),
@@ -112,7 +112,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
         candidates = candidates_from_arguments(parse_update_plan_arguments(call))
         self.assertEqual(candidates[0].step_template.action.direction, "down")
 
-    def test_handle_passthrough(self) -> None:
+    def test_refines_current_passthrough(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
@@ -122,13 +122,13 @@ class UpdatePlanParsingTests(unittest.TestCase):
                         "human_text": "Press Enter.",
                         "key": "Enter",
                         "confidence": 0.95,
-                        "step_handle": "h_042",
+                        "refines_current": True,
                     }
                 ]
             ),
         )
         candidates = candidates_from_arguments(parse_update_plan_arguments(call))
-        self.assertEqual(candidates[0].step_handle, "h_042")
+        self.assertTrue(candidates[0].refines_current)
 
     def test_rejects_missing_required_field(self) -> None:
         call = TutorialToolCall(
@@ -140,7 +140,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
                         "human_text": "Type.",
                         # missing copiable_text + agent_description
                         "confidence": 0.8,
-                        "step_handle": None,
+                        "refines_current": False,
                     }
                 ]
             ),
@@ -159,7 +159,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
                         "human_text": "   ",
                         "agent_description": "x",
                         "confidence": 0.9,
-                        "step_handle": None,
+                        "refines_current": False,
                     }
                 ]
             ),
@@ -184,7 +184,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
                         "human_text": "Press Tab.",
                         "key": "Tab",
                         "confidence": 0.4,
-                        "step_handle": None,
+                        "refines_current": False,
                     }
                 ]
             ),

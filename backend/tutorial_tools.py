@@ -77,17 +77,22 @@ CONFIDENCE_DESCRIPTION = (
     "plan is the signal we want."
 )
 
-HANDLE_DESCRIPTION = (
-    "Echo back a step_handle from the previous turn's tail to indicate "
-    "'this is the same logical step.' Omit for brand-new steps. You may "
-    "refine a kept step's payload while echoing its handle. You MAY NOT "
-    "echo a handle that belongs to the frozen prefix (completed or "
-    "currently-awaiting steps)."
+REFINES_CURRENT_DESCRIPTION = (
+    "Set true ONLY on the first item of your plan, and ONLY when this item "
+    "is a sharper version of the step the user is currently on (the "
+    "AWAITING entry in the Plan state block). The merger will keep that "
+    "step's identity and stall counter, replacing only its payload. Leave "
+    "false when the awaiting step is still the right action and your plan "
+    "describes what comes after it (the awaiting step is preserved). Must "
+    "be false on every item after the first, and must be false when no "
+    "step is awaiting."
 )
 
 
 class _PlanItemBase(_StrictModel):
-    step_handle: str | None = Field(default=None, description=HANDLE_DESCRIPTION)
+    refines_current: bool = Field(
+        default=False, description=REFINES_CURRENT_DESCRIPTION
+    )
     human_text: str = Field(min_length=1, description="One concise on-screen instruction.")
     confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_DESCRIPTION)
 
@@ -310,7 +315,9 @@ def candidates_from_arguments(
 
 def _candidate_from_item(item: PlanTailItem) -> TailCandidate:
     template = _step_template_from_item(item)
-    return TailCandidate(step_handle=item.step_handle, step_template=template)
+    return TailCandidate(
+        refines_current=item.refines_current, step_template=template
+    )
 
 
 def _step_template_from_item(item: PlanTailItem) -> TutorialStep:

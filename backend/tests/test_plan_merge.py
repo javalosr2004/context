@@ -5,7 +5,6 @@ import unittest
 from backend.plan_merge import (
     PlanMergeError,
     TailCandidate,
-    assign_initial_handles,
     merge_plan_tail,
 )
 from backend.tutorial_schema import (
@@ -57,8 +56,8 @@ def make_step(
     )
 
 
-def candidate(handle: str | None, template: TutorialStep) -> TailCandidate:
-    return TailCandidate(step_handle=handle, step_template=template)
+def candidate(template: TutorialStep, *, refines_current: bool = False) -> TailCandidate:
+    return TailCandidate(refines_current=refines_current, step_template=template)
 
 
 class MergePlanTailTests(unittest.TestCase):
@@ -66,128 +65,118 @@ class MergePlanTailTests(unittest.TestCase):
         result = merge_plan_tail(
             current_plan_steps=[],
             frozen_prefix_ids=[],
-            prior_handle_index={},
+            awaiting_step_id=None,
             new_tail=[
-                candidate(None, make_step("ignored", action_type="click")),
-                candidate(None, make_step("ignored", action_type="type")),
+                candidate(make_step("ignored", action_type="click")),
+                candidate(make_step("ignored", action_type="type")),
             ],
             step_counter=0,
-            handle_counter=0,
         )
 
         self.assertEqual(
             [s.step_id for s in result.plan_steps],
             ["step_001", "step_002"],
         )
-        self.assertEqual(set(result.handle_index.keys()), {"h_001", "h_002"})
         self.assertEqual(result.step_counter, 2)
-        self.assertEqual(result.handle_counter, 2)
 
     def test_full_rewrite_after_one_completed_step(self) -> None:
         existing = [
             make_step("step_001", action_type="click"),
             make_step("step_002", action_type="type"),  # will be replaced
         ]
-        prior_handles = {"h_007": existing[1]}
 
         result = merge_plan_tail(
             current_plan_steps=existing,
             frozen_prefix_ids=["step_001"],
-            prior_handle_index=prior_handles,
+            awaiting_step_id=None,
             new_tail=[
-                candidate(None, make_step("ignored", action_type="scroll")),
-                candidate(None, make_step("ignored", action_type="confirm")),
+                candidate(make_step("ignored", action_type="scroll")),
+                candidate(make_step("ignored", action_type="confirm")),
             ],
             step_counter=2,
-            handle_counter=7,
         )
 
         self.assertEqual(
             [s.step_id for s in result.plan_steps],
             ["step_001", "step_003", "step_004"],
         )
-        self.assertEqual(set(result.handle_index.keys()), {"h_008", "h_009"})
 
-    def test_keep_handle_preserves_step_id_and_handle(self) -> None:
+    def test_refines_current_preserves_awaiting_step_id(self) -> None:
         existing = [
             make_step("step_001", action_type="click"),
-            make_step("step_002", action_type="type"),
+            make_step("step_002", action_type="type"),  # awaiting
+            make_step("step_003", action_type="scroll"),  # old tail
         ]
-        prior_handles = {"h_010": existing[1]}
 
         result = merge_plan_tail(
             current_plan_steps=existing,
-            frozen_prefix_ids=["step_001"],
-            prior_handle_index=prior_handles,
+            frozen_prefix_ids=["step_001", "step_002"],
+            awaiting_step_id="step_002",
             new_tail=[
                 candidate(
-                    "h_010",
                     make_step("ignored", action_type="type", confidence=0.4),
+                    refines_current=True,
                 ),
-                candidate(None, make_step("ignored", action_type="press_key")),
+                candidate(make_step("ignored", action_type="press_key")),
             ],
-            step_counter=2,
-            handle_counter=10,
+            step_counter=3,
         )
 
-        # Kept step keeps id step_002; new step mints step_003.
+        self.assertEqual(
+            [s.step_id for s in result.plan_steps],
+            ["step_001", "step_002", "step_004"],
+        )
+        # Refined step adopted new payload (confidence 0.4) under same id.
+        refined = result.plan_steps[1]
+        self.assertEqual(refined.step_id, "step_002")
+        self.assertAlmostEqual(refined.confidence, 0.4)
+        self.assertEqual(result.step_counter, 4)
+
+    def test_refines_current_false_preserves_awaiting_step(self) -> None:
+        existing = [
+            make_step("step_001"),
+            make_step("step_002"),
+        ]
+        result = merge_plan_tail(
+            current_plan_steps=existing,
+            frozen_prefix_ids=["step_001", "step_002"],
+            awaiting_step_id="step_002",
+            new_tail=[candidate(make_step("ignored", action_type="scroll"))],
+            step_counter=2,
+        )
+        # Awaiting step retained; new tail appended after it.
         self.assertEqual(
             [s.step_id for s in result.plan_steps],
             ["step_001", "step_002", "step_003"],
         )
-        # Kept handle reused; new handle minted from h_011.
-        self.assertIn("h_010", result.handle_index)
-        self.assertIn("h_011", result.handle_index)
-        # In-place refinement: confidence updated from template payload.
-        self.assertAlmostEqual(result.handle_index["h_010"].confidence, 0.4)
 
-    def test_modifying_frozen_step_via_handle_is_rejected(self) -> None:
-        existing = [make_step("step_001", action_type="click")]
-        prior_handles = {"h_001": existing[0]}
-
+    def test_refines_current_without_awaiting_is_rejected(self) -> None:
         with self.assertRaises(PlanMergeError) as cm:
             merge_plan_tail(
-                current_plan_steps=existing,
-                frozen_prefix_ids=["step_001"],
-                prior_handle_index=prior_handles,
-                new_tail=[candidate("h_001", make_step("ignored"))],
-                step_counter=1,
-                handle_counter=1,
-            )
-        self.assertIn("frozen prefix", str(cm.exception))
-
-    def test_duplicate_handle_is_rejected(self) -> None:
-        existing = [
-            make_step("step_001", action_type="click"),
-            make_step("step_002", action_type="type"),
-        ]
-        prior_handles = {"h_005": existing[1]}
-
-        with self.assertRaises(PlanMergeError) as cm:
-            merge_plan_tail(
-                current_plan_steps=existing,
-                frozen_prefix_ids=["step_001"],
-                prior_handle_index=prior_handles,
+                current_plan_steps=[],
+                frozen_prefix_ids=[],
+                awaiting_step_id=None,
                 new_tail=[
-                    candidate("h_005", make_step("ignored", action_type="type")),
-                    candidate("h_005", make_step("ignored", action_type="type")),
+                    candidate(make_step("ignored"), refines_current=True),
                 ],
-                step_counter=2,
-                handle_counter=5,
+                step_counter=0,
             )
-        self.assertIn("Duplicate", str(cm.exception))
+        self.assertIn("awaiting", str(cm.exception))
 
-    def test_unknown_handle_is_rejected(self) -> None:
+    def test_refines_current_on_non_first_item_is_rejected(self) -> None:
+        existing = [make_step("step_001")]
         with self.assertRaises(PlanMergeError) as cm:
             merge_plan_tail(
-                current_plan_steps=[make_step("step_001")],
+                current_plan_steps=existing,
                 frozen_prefix_ids=["step_001"],
-                prior_handle_index={},
-                new_tail=[candidate("h_999", make_step("ignored"))],
+                awaiting_step_id="step_001",
+                new_tail=[
+                    candidate(make_step("ignored")),
+                    candidate(make_step("ignored"), refines_current=True),
+                ],
                 step_counter=1,
-                handle_counter=0,
             )
-        self.assertIn("Unknown", str(cm.exception))
+        self.assertIn("first tail item", str(cm.exception))
 
     def test_non_contiguous_frozen_prefix_is_rejected(self) -> None:
         existing = [
@@ -199,10 +188,9 @@ class MergePlanTailTests(unittest.TestCase):
             merge_plan_tail(
                 current_plan_steps=existing,
                 frozen_prefix_ids=["step_001", "step_003"],  # skips step_002
-                prior_handle_index={},
-                new_tail=[candidate(None, make_step("ignored"))],
+                awaiting_step_id=None,
+                new_tail=[candidate(make_step("ignored"))],
                 step_counter=3,
-                handle_counter=0,
             )
 
     def test_step_counter_monotonic_across_rejection(self) -> None:
@@ -212,13 +200,12 @@ class MergePlanTailTests(unittest.TestCase):
         result = merge_plan_tail(
             current_plan_steps=existing,
             frozen_prefix_ids=["step_001"],
-            prior_handle_index={},
+            awaiting_step_id=None,
             new_tail=[
-                candidate(None, make_step("ignored")),
-                candidate(None, make_step("ignored")),
+                candidate(make_step("ignored")),
+                candidate(make_step("ignored")),
             ],
             step_counter=3,  # 3 IDs already minted
-            handle_counter=3,
         )
         self.assertEqual(
             [s.step_id for s in result.plan_steps],
@@ -237,51 +224,21 @@ class MergePlanTailTests(unittest.TestCase):
             merge_plan_tail(
                 current_plan_steps=[],
                 frozen_prefix_ids=[],
-                prior_handle_index={},
-                new_tail=[candidate(None, bad)],
+                awaiting_step_id=None,
+                new_tail=[candidate(bad)],
                 step_counter=0,
-                handle_counter=0,
             )
 
     def test_large_plan_round_trips(self) -> None:
-        tail = [candidate(None, make_step("ignored")) for _ in range(60)]
+        tail = [candidate(make_step("ignored")) for _ in range(60)]
         result = merge_plan_tail(
             current_plan_steps=[],
             frozen_prefix_ids=[],
-            prior_handle_index={},
+            awaiting_step_id=None,
             new_tail=tail,
             step_counter=0,
-            handle_counter=0,
         )
         self.assertEqual(len(result.plan_steps), 60)
-        self.assertEqual(len(result.handle_index), 60)
-
-    def test_awaiting_step_in_prefix_cannot_be_rewritten(self) -> None:
-        # awaiting step_002 is in the frozen prefix; model tries to rewrite it.
-        existing = [
-            make_step("step_001"),
-            make_step("step_002"),
-        ]
-        prior_handles = {"h_002": existing[1]}
-        with self.assertRaises(PlanMergeError):
-            merge_plan_tail(
-                current_plan_steps=existing,
-                frozen_prefix_ids=["step_001", "step_002"],
-                prior_handle_index=prior_handles,
-                new_tail=[candidate("h_002", make_step("ignored"))],
-                step_counter=2,
-                handle_counter=2,
-            )
-
-
-class AssignInitialHandlesTests(unittest.TestCase):
-    def test_mints_handles_in_order(self) -> None:
-        steps = [make_step("step_001"), make_step("step_002")]
-        index, counter = assign_initial_handles(steps, handle_counter=0)
-        self.assertEqual(counter, 2)
-        self.assertEqual(set(index.keys()), {"h_001", "h_002"})
-        self.assertIs(index["h_001"], steps[0])
-        self.assertIs(index["h_002"], steps[1])
 
 
 if __name__ == "__main__":

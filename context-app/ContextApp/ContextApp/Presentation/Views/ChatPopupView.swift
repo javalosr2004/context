@@ -35,6 +35,8 @@ private struct TutorialAnswerDisplay {
 }
 
 struct ChatPopupView: View {
+    private static let maximumChatResponseHeight: CGFloat = 500
+
     @ObservedObject var sessionController: TutorialSessionController
     let onTutorialStepSelected: (TutorialStep) async -> String
     let onInputInstruction: (InstructionInput) async -> String
@@ -155,11 +157,7 @@ struct ChatPopupView: View {
 
     private var handoffChrome: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 6) {
-                trafficLight(color: Color(red: 0.984, green: 0.376, blue: 0.345))
-                trafficLight(color: Color(red: 0.992, green: 0.745, blue: 0.251))
-                trafficLight(color: Color(red: 0.176, green: 0.788, blue: 0.251))
-            }
+            nativeWindowControlSpacer
 
             Spacer()
 
@@ -179,11 +177,10 @@ struct ChatPopupView: View {
         .frame(height: 36)
     }
 
-    private func trafficLight(color: Color) -> some View {
-        Circle()
-            .fill(color)
-            .frame(width: 12, height: 12)
-            .overlay(Circle().stroke(Color.black.opacity(0.20), lineWidth: 0.5))
+    private var nativeWindowControlSpacer: some View {
+        Color.clear
+            .frame(width: 70, height: 36)
+            .accessibilityHidden(true)
     }
 
     private var tutorialMeta: some View {
@@ -432,11 +429,15 @@ struct ChatPopupView: View {
                 .foregroundStyle(OverlayTheme.secondaryText)
                 .lineLimit(2)
 
-            MarkdownTextView(text: answer.answer)
-                .font(.system(size: 13.5))
-                .lineSpacing(3)
-                .foregroundStyle(OverlayTheme.primaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView {
+                MarkdownTextView(text: answer.answer)
+                    .font(.system(size: 13.5))
+                    .lineSpacing(3)
+                    .foregroundStyle(OverlayTheme.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: Self.maximumChatResponseHeight)
+            .scrollContentBackground(.hidden)
 
             if sessionController.status.isBusy {
                 typingDots
@@ -611,6 +612,7 @@ struct ChatPopupView: View {
                 scrollToBottom(proxy)
             }
         }
+        .frame(maxHeight: Self.maximumChatResponseHeight)
     }
 
     private var emptyState: some View {

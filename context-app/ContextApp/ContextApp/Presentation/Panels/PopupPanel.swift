@@ -4,7 +4,7 @@ final class PopupPanel: NSPanel {
     init(frame: NSRect) {
         super.init(
             contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -17,7 +17,9 @@ final class PopupPanel: NSPanel {
         hasShadow = true
         isMovableByWindowBackground = true
         isOpaque = false
+        isReleasedWhenClosed = false
         level = .screenSaver
+        minSize = PopupState.minimumSize
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
     }

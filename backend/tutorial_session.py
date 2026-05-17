@@ -543,6 +543,7 @@ class TutorialSession:
                 plan_steps=self.plan_steps,
                 completed_step_ids=self.completed_step_ids,
                 awaiting_step_id=self.awaiting_step_id,
+                awaiting_action_index=self.awaiting_action_index,
                 attempts_without_progress=self.attempts_without_progress,
                 last_action_kind=self.last_action_kind,
                 screen_is_stale=self.screen_is_stale,
@@ -1023,6 +1024,7 @@ def render_history(
     plan_steps: list[TutorialStep] | None = None,
     completed_step_ids: list[str] | None = None,
     awaiting_step_id: str | None = None,
+    awaiting_action_index: int | None = None,
     attempts_without_progress: dict[str, int] | None = None,
     last_action_kind: str | None = None,
     screen_is_stale: bool = False,
@@ -1073,6 +1075,7 @@ def render_history(
             plan_steps=plan_steps,
             completed_step_ids=completed_step_ids or [],
             awaiting_step_id=awaiting_step_id,
+            awaiting_action_index=awaiting_action_index,
             attempts_without_progress=attempts_without_progress or {},
         )
     lines.append("Conversation so far:")
@@ -1090,6 +1093,7 @@ def _render_plan_block(
     plan_steps: list[TutorialStep],
     completed_step_ids: list[str],
     awaiting_step_id: str | None,
+    awaiting_action_index: int | None,
     attempts_without_progress: dict[str, int],
 ) -> None:
     completed = set(completed_step_ids)
@@ -1130,11 +1134,11 @@ def _render_plan_block(
             suffix = (
                 f" (attempts_without_progress={attempts})" if attempts else ""
             )
+            action_pointer = _format_action_pointer(awaiting_step, awaiting_action_index)
             lines.append("  AWAITING (user is on this step now):")
             lines.append(
                 f"    - {awaiting_step.step_id}{suffix} "
-                f"[{_format_action_summary(awaiting_step)}] "
-                f"conf={awaiting_step.confidence:.2f}: "
+                f"{action_pointer} conf={awaiting_step.confidence:.2f}: "
                 f"{awaiting_step.instruction}"
             )
 
@@ -1171,6 +1175,18 @@ def _format_action_summary(step: TutorialStep) -> str:
     if len(kinds) == 1:
         return kinds[0]
     return f"{len(kinds)} actions: {','.join(kinds)}"
+
+
+def _format_action_pointer(step: TutorialStep, action_index: int | None) -> str:
+    kinds = [a.type for a in step.actions]
+    if len(kinds) == 1:
+        return f"[{kinds[0]}]"
+    if action_index is None or not (0 <= action_index < len(kinds)):
+        return f"[{len(kinds)} actions: {','.join(kinds)}]"
+    return (
+        f"action {action_index + 1}/{len(kinds)} [{kinds[action_index]}] "
+        f"(full list: {','.join(kinds)})"
+    )
 
 
 def first_request_screen_call(

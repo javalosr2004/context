@@ -267,6 +267,60 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("step_003", text)
         self.assertIn("last_completed_action: click", text)
 
+    async def test_render_history_awaiting_single_action_step(self) -> None:
+        step = TutorialStep(
+            step_id="step_001",
+            instruction="Click New.",
+            actions=[
+                TutorialAction(
+                    type="click",
+                    target=ActionTarget(kind="element", description="x"),
+                    requires_confirmation=True,
+                )
+            ],
+            confidence=0.9,
+        )
+        text = render_history(
+            goal="x",
+            history=[],
+            plan_steps=[step],
+            completed_step_ids=[],
+            awaiting_step_id="step_001",
+            awaiting_action_index=0,
+        )
+        self.assertIn("AWAITING", text)
+        self.assertIn("[click]", text)
+        self.assertNotIn("action 1/1", text)
+
+    async def test_render_history_awaiting_multi_action_step(self) -> None:
+        step = TutorialStep(
+            step_id="step_001",
+            instruction="Name and submit.",
+            actions=[
+                TutorialAction(
+                    type="type",
+                    target=ActionTarget(kind="element", description="name field"),
+                    text="demo",
+                    requires_confirmation=True,
+                ),
+                TutorialAction(
+                    type="press_key", key="Enter", requires_confirmation=False
+                ),
+            ],
+            confidence=0.9,
+        )
+        text = render_history(
+            goal="x",
+            history=[],
+            plan_steps=[step],
+            completed_step_ids=[],
+            awaiting_step_id="step_001",
+            awaiting_action_index=1,
+        )
+        self.assertIn("action 2/2", text)
+        self.assertIn("[press_key]", text)
+        self.assertIn("type,press_key", text)
+
     async def test_render_history_emits_stall_directive(self) -> None:
         step = TutorialStep(
             step_id="step_005",

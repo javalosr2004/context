@@ -73,7 +73,6 @@ class MergePlanTailTests(unittest.TestCase):
         result = merge_plan_tail(
             current_plan_steps=[],
             frozen_prefix_ids=[],
-            awaiting_step_id=None,
             new_tail=[
                 candidate(make_step("ignored", action_type="click")),
                 candidate(make_step("ignored", action_type="type")),
@@ -96,7 +95,6 @@ class MergePlanTailTests(unittest.TestCase):
         result = merge_plan_tail(
             current_plan_steps=existing,
             frozen_prefix_ids=["step_001"],
-            awaiting_step_id=None,
             new_tail=[
                 candidate(make_step("ignored", action_type="scroll")),
                 candidate(make_step("ignored", action_type="confirm")),
@@ -109,17 +107,16 @@ class MergePlanTailTests(unittest.TestCase):
             ["step_001", "step_003", "step_004"],
         )
 
-    def test_refines_current_preserves_awaiting_step_id(self) -> None:
+    def test_refines_current_preserves_last_frozen_step_id(self) -> None:
         existing = [
             make_step("step_001", action_type="click"),
-            make_step("step_002", action_type="type"),  # awaiting
+            make_step("step_002", action_type="type"),  # last frozen
             make_step("step_003", action_type="scroll"),  # old tail
         ]
 
         result = merge_plan_tail(
             current_plan_steps=existing,
             frozen_prefix_ids=["step_001", "step_002"],
-            awaiting_step_id="step_002",
             new_tail=[
                 candidate(
                     make_step("ignored", action_type="type", confidence=0.4),
@@ -140,7 +137,7 @@ class MergePlanTailTests(unittest.TestCase):
         self.assertAlmostEqual(refined.confidence, 0.4)
         self.assertEqual(result.step_counter, 4)
 
-    def test_refines_current_false_preserves_awaiting_step(self) -> None:
+    def test_refines_current_false_preserves_last_frozen_step(self) -> None:
         existing = [
             make_step("step_001"),
             make_step("step_002"),
@@ -148,28 +145,50 @@ class MergePlanTailTests(unittest.TestCase):
         result = merge_plan_tail(
             current_plan_steps=existing,
             frozen_prefix_ids=["step_001", "step_002"],
-            awaiting_step_id="step_002",
             new_tail=[candidate(make_step("ignored", action_type="scroll"))],
             step_counter=2,
         )
-        # Awaiting step retained; new tail appended after it.
+        # Last frozen step retained; new tail appended after it.
         self.assertEqual(
             [s.step_id for s in result.plan_steps],
             ["step_001", "step_002", "step_003"],
         )
 
-    def test_refines_current_without_awaiting_is_rejected(self) -> None:
+    def test_refines_current_refines_completed_step(self) -> None:
+        # Even with no awaiting step, refines_current rewrites the last
+        # frozen entry while keeping its step_id.
+        existing = [
+            make_step("step_001", action_type="click"),
+            make_step("step_002", action_type="type", confidence=0.9),
+        ]
+        result = merge_plan_tail(
+            current_plan_steps=existing,
+            frozen_prefix_ids=["step_001", "step_002"],
+            new_tail=[
+                candidate(
+                    make_step("ignored", action_type="type", confidence=0.3),
+                    refines_current=True,
+                ),
+            ],
+            step_counter=2,
+        )
+        self.assertEqual(
+            [s.step_id for s in result.plan_steps],
+            ["step_001", "step_002"],
+        )
+        self.assertAlmostEqual(result.plan_steps[1].confidence, 0.3)
+
+    def test_refines_current_with_empty_prefix_is_rejected(self) -> None:
         with self.assertRaises(PlanMergeError) as cm:
             merge_plan_tail(
                 current_plan_steps=[],
                 frozen_prefix_ids=[],
-                awaiting_step_id=None,
                 new_tail=[
                     candidate(make_step("ignored"), refines_current=True),
                 ],
                 step_counter=0,
             )
-        self.assertIn("awaiting", str(cm.exception))
+        self.assertIn("frozen prefix", str(cm.exception))
 
     def test_refines_current_on_non_first_item_is_rejected(self) -> None:
         existing = [make_step("step_001")]
@@ -177,7 +196,6 @@ class MergePlanTailTests(unittest.TestCase):
             merge_plan_tail(
                 current_plan_steps=existing,
                 frozen_prefix_ids=["step_001"],
-                awaiting_step_id="step_001",
                 new_tail=[
                     candidate(make_step("ignored")),
                     candidate(make_step("ignored"), refines_current=True),
@@ -196,7 +214,6 @@ class MergePlanTailTests(unittest.TestCase):
             merge_plan_tail(
                 current_plan_steps=existing,
                 frozen_prefix_ids=["step_001", "step_003"],  # skips step_002
-                awaiting_step_id=None,
                 new_tail=[candidate(make_step("ignored"))],
                 step_counter=3,
             )
@@ -208,7 +225,6 @@ class MergePlanTailTests(unittest.TestCase):
         result = merge_plan_tail(
             current_plan_steps=existing,
             frozen_prefix_ids=["step_001"],
-            awaiting_step_id=None,
             new_tail=[
                 candidate(make_step("ignored")),
                 candidate(make_step("ignored")),
@@ -232,7 +248,6 @@ class MergePlanTailTests(unittest.TestCase):
             merge_plan_tail(
                 current_plan_steps=[],
                 frozen_prefix_ids=[],
-                awaiting_step_id=None,
                 new_tail=[candidate(bad)],
                 step_counter=0,
             )
@@ -242,7 +257,6 @@ class MergePlanTailTests(unittest.TestCase):
         result = merge_plan_tail(
             current_plan_steps=[],
             frozen_prefix_ids=[],
-            awaiting_step_id=None,
             new_tail=tail,
             step_counter=0,
         )

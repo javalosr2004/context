@@ -22,6 +22,12 @@ private enum PeekStepKind {
     case next
 }
 
+private enum ActionChipKind {
+    case done
+    case current
+    case upcoming
+}
+
 private struct TutorialPeekSteps {
     let done: TutorialStepDisplayItem?
     let now: TutorialStepDisplayItem?
@@ -259,25 +265,33 @@ struct ChatPopupView: View {
         .animation(.easeInOut(duration: 0.18), value: sessionController.currentStepID)
     }
 
+
     private func peekStepRow(kind: PeekStepKind, title: String, step: TutorialStep) -> some View {
         Button {
             handlePeekStepTap(kind: kind, step: step)
         } label: {
-            HStack(alignment: .center, spacing: 12) {
-                stepMarker(kind: kind)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 12) {
+                    stepMarker(kind: kind)
 
-                Text(title)
-                    .font(.system(size: kind == .now ? 14 : 13, weight: kind == .now ? .semibold : .regular))
-                    .strikethrough(kind == .done, color: Color.white.opacity(0.34))
-                    .foregroundStyle(stepTextColor(kind))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(title)
+                        .font(.system(size: kind == .now ? 14 : 13, weight: kind == .now ? .semibold : .regular))
+                        .strikethrough(kind == .done, color: Color.white.opacity(0.34))
+                        .foregroundStyle(stepTextColor(kind))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                if kind == .now && activeStepID == step.stepId {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.72)
+                    if kind == .now && activeStepID == step.stepId {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.72)
+                    }
+                }
+
+                if kind == .now && step.actions.count > 1 {
+                    actionChipStrip(for: step)
+                        .padding(.leading, 30)
                 }
             }
             .padding(.horizontal, 10)
@@ -316,6 +330,97 @@ struct ChatPopupView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func actionChipStrip(for step: TutorialStep) -> some View {
+        let activeIndex = sessionController.awaitingActionIndex
+            ?? sessionController.currentActionIndex
+            ?? 0
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(step.actions.enumerated()), id: \.offset) { idx, action in
+                    actionChip(action: action, kind: chipKind(index: idx, active: activeIndex))
+                }
+            }
+        }
+    }
+
+    private func chipKind(index: Int, active: Int) -> ActionChipKind {
+        if index < active { return .done }
+        if index == active { return .current }
+        return .upcoming
+    }
+
+    private func actionChip(action: TutorialAction, kind: ActionChipKind) -> some View {
+        let weight: Font.Weight = kind == .current ? .semibold : .regular
+        let foreground: Color
+        let background: Color
+        let borderColor: Color
+        let borderStyle: StrokeStyle
+
+        switch kind {
+        case .done:
+            foreground = OverlayTheme.doneText
+            background = Color.clear
+            borderColor = OverlayTheme.hairline
+            borderStyle = StrokeStyle(lineWidth: 0.5)
+        case .current:
+            foreground = OverlayTheme.primaryText
+            background = Color.white.opacity(0.85)
+            borderColor = Color.clear
+            borderStyle = StrokeStyle(lineWidth: 0)
+        case .upcoming:
+            foreground = OverlayTheme.quaternaryText
+            background = Color.clear
+            borderColor = Color.white.opacity(0.34)
+            borderStyle = StrokeStyle(lineWidth: 1, dash: [3, 2])
+        }
+
+        return HStack(spacing: 5) {
+            Image(systemName: iconName(for: action))
+                .font(.system(size: 10, weight: .medium))
+            Text(actionChipLabel(for: action))
+                .font(.system(size: 11, weight: weight))
+                .lineLimit(1)
+                .strikethrough(kind == .done, color: foreground.opacity(0.5))
+        }
+        .foregroundStyle(kind == .current ? OverlayTheme.invertedAccent : foreground)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(background)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(borderColor, style: borderStyle))
+    }
+
+    private func actionChipLabel(for action: TutorialAction) -> String {
+        switch action {
+        case .click(let a): return shortTargetLabel(a.target)
+        case .doubleClick(let a): return "2× \(shortTargetLabel(a.target))"
+        case .rightClick(let a): return "↪ \(shortTargetLabel(a.target))"
+        case .hover(let a): return "hover \(shortTargetLabel(a.target))"
+        case .drag(let a): return "drag \(shortTargetLabel(a.target))"
+        case .type(let a):
+            let trimmed = a.text.replacingOccurrences(of: "\n", with: " ")
+            return "\"\(truncate(trimmed, max: 18))\""
+        case .pressKey(let a): return a.key
+        case .scroll(let a): return "scroll \(a.direction.rawValue)"
+        case .wait(let a): return "wait \(a.durationMs)ms"
+        case .confirm: return "confirm"
+        }
+    }
+
+    private func shortTargetLabel(_ target: ActionTarget) -> String {
+        let raw = target.label
+            ?? target.description
+            ?? target.role
+            ?? target.kind.rawValue
+        return truncate(raw, max: 18)
+    }
+
+    private func truncate(_ text: String, max: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= max { return trimmed }
+        return String(trimmed.prefix(max - 1)) + "…"
     }
 
     @ViewBuilder

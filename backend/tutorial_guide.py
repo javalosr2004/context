@@ -192,43 +192,50 @@ Writing human_text (user-facing):
 
 Writing agent_description (visual grounding hint, never shown to
 the user verbatim):
-- HARD RULE: agent_description MUST NOT contain the literal
-  on-screen label or any proper noun naming the target — no brand
-  names (Apple, Chrome, Slack), no app names, no menu names, no
-  button labels, no section titles. If the label appears in
-  human_text, it must NOT appear in agent_description. This is
-  not a style preference; the vision model text-matches labels
-  and skips real grounding when you hand it the answer. Treat any
-  occurrence of the label as a bug.
-- Describe the target by SHAPE, POSITION, REGION, and CONTAINER
-  instead, so grounding works even when the label is rendered as
-  an icon, truncated, localized, or styled unusually.
+- HARD RULE: identity alone is never enough. Every
+  agent_description must combine ALL THREE of:
+    1. IDENTITY — what the thing is (name, label, or concrete
+       visual: "the Apple logo", "the System Settings row", "a
+       gear icon"). Include this; do not strip it.
+    2. VISUAL — what it actually looks like in pixels (shape,
+       color, monochrome vs colored, leading glyph, relative
+       size, icon-only vs labeled).
+    3. SPATIAL — where it sits, anchored to a container the
+       model can find (which edge of the screen, which side of
+       which window, which region of which panel, position
+       within a list).
+  A description with only one of these is a bug. "The Apple
+  logo" is identity-only and lets the model text-match instead
+  of grounding. "Small monochrome glyph in the top-left" is
+  visual+spatial but identity-less, and matches dozens of menu
+  bar items. You need all three so the model has redundant
+  signal and can cross-check.
+- Mention the container before the item ("in the dropdown that
+  just opened, …", "in the left sidebar of the window, …") so
+  the model scopes before it searches.
+- One short phrase, not a sentence. No verbs directed at the
+  user — this describes where the target sits, not what to do
+  with it.
 - Worked example. Instruction: "Open the Apple menu."
-    BAD:  "small Apple icon at the far top-left of the menu bar"
-          (leaks the word "Apple")
     BAD:  "the Apple logo"
-          (still names it)
-    GOOD: "small monochrome glyph at the far-left edge of the
-           top system menu bar"
-    GOOD: "leftmost icon in the top system bar, no text label"
+          (identity only — invites text-match, no spatial anchor)
+    BAD:  "small monochrome glyph in the top-left of the screen"
+          (visual+spatial but no identity — matches many icons)
+    GOOD: "the Apple logo — a small monochrome apple-shaped
+           glyph, leftmost item in the system menu bar at the
+           very top edge of the screen, immediately left of the
+           bold app-name text"
   Another. Instruction: "Choose System Settings."
     BAD:  "System Settings row in the dropdown"
-    GOOD: "text row near the top of the dropdown that just
-           opened, second or third from the top, with a gear-like
-           leading glyph"
-- Prefer spatial anchors the model can verify against pixels:
-  which edge of the screen, which side of which window, which
-  region of which panel, relative position within a list ("near
-  the top of the dropdown that just opened", "row in the
-  left-hand vertical list", "mid-page in the right-hand scroll
-  area"). Mention the container before the item.
-- Mention distinguishing visual properties when they help: icon
-  vs text, monochrome vs colored, leading glyph, group separator
-  above/below, approximate vertical order ("second or third from
-  the top"). Skip properties that are not actually visible.
-- Keep it one short phrase, not a sentence. No instructions, no
-  verbs directed at the user — this is a description of where the
-  target sits, not what to do with it.
+          (identity only)
+    GOOD: "the 'System Settings…' menu item — a text row with a
+           small gear-like leading glyph, near the top of the
+           dropdown that just opened from the Apple menu, second
+           or third item below a thin separator"
+- If the exact target is not visible in the attached screen,
+  say so generically ("a row in the left sidebar of the window
+  that opens after the previous click") rather than inventing
+  a label.
 - If the exact target is not visible in the attached screen, say
   so generically ("a row in the left sidebar of the window that
   opens after the previous click") rather than inventing a label.

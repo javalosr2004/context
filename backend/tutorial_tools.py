@@ -221,10 +221,18 @@ def _build_openai_tool(
 
 def add_strict_object_constraints(value: Any) -> Any:
     if isinstance(value, dict):
-        strict_value = {
-            key: add_strict_object_constraints(child)
-            for key, child in value.items()
-        }
+        strict_value: dict[str, Any] = {}
+        for key, child in value.items():
+            # OpenAI strict function schemas reject `oneOf` and `discriminator`.
+            # Pydantic emits both for discriminated unions; rewrite `oneOf` to
+            # `anyOf` and drop the discriminator metadata.
+            if key == "discriminator":
+                continue
+            if key == "oneOf":
+                strict_value["anyOf"] = add_strict_object_constraints(child)
+                continue
+            strict_value[key] = add_strict_object_constraints(child)
+
         properties = strict_value.get("properties")
         if isinstance(properties, dict):
             strict_value["required"] = list(properties.keys())

@@ -192,12 +192,30 @@ Writing human_text (user-facing):
 
 Writing agent_description (visual grounding hint, never shown to
 the user verbatim):
-- This is read by a vision model that will be tempted to text-match
-  the label you write. Avoid leading with the literal on-screen
-  label or proper noun ("Apple menu", "System Settings", "General").
-  Describe the target by SHAPE, POSITION, REGION, and CONTAINER
+- HARD RULE: agent_description MUST NOT contain the literal
+  on-screen label or any proper noun naming the target — no brand
+  names (Apple, Chrome, Slack), no app names, no menu names, no
+  button labels, no section titles. If the label appears in
+  human_text, it must NOT appear in agent_description. This is
+  not a style preference; the vision model text-matches labels
+  and skips real grounding when you hand it the answer. Treat any
+  occurrence of the label as a bug.
+- Describe the target by SHAPE, POSITION, REGION, and CONTAINER
   instead, so grounding works even when the label is rendered as
   an icon, truncated, localized, or styled unusually.
+- Worked example. Instruction: "Open the Apple menu."
+    BAD:  "small Apple icon at the far top-left of the menu bar"
+          (leaks the word "Apple")
+    BAD:  "the Apple logo"
+          (still names it)
+    GOOD: "small monochrome glyph at the far-left edge of the
+           top system menu bar"
+    GOOD: "leftmost icon in the top system bar, no text label"
+  Another. Instruction: "Choose System Settings."
+    BAD:  "System Settings row in the dropdown"
+    GOOD: "text row near the top of the dropdown that just
+           opened, second or third from the top, with a gear-like
+           leading glyph"
 - Prefer spatial anchors the model can verify against pixels:
   which edge of the screen, which side of which window, which
   region of which panel, relative position within a list ("near

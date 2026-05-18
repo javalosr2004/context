@@ -34,6 +34,13 @@ private struct TutorialPeekSteps {
     let next: TutorialStepDisplayItem?
 }
 
+private struct StatusChip: Identifiable, Equatable {
+    let id: String
+    let icon: String?
+    let text: String
+    let showsDot: Bool
+}
+
 private struct TutorialAnswerDisplay {
     let id: UUID
     let question: String
@@ -117,12 +124,16 @@ struct ChatPopupView: View {
             if isTutorialFinished {
                 finishedTutorialView
             } else if latestPlan == nil {
+                statusChipRow
+
                 if let answer = latestTutorialAnswer {
                     answerCard(answer)
                 }
 
                 launcherView
             } else {
+                statusChipRow
+
                 tutorialMeta
 
                 if let answer = latestTutorialAnswer {
@@ -1059,6 +1070,105 @@ struct ChatPopupView: View {
                 }
             }
         }
+    }
+
+    private var statusChips: [StatusChip] {
+        var chips: [StatusChip] = []
+
+        if sessionController.status.isBusy {
+            chips.append(StatusChip(
+                id: "status",
+                icon: nil,
+                text: sessionController.status.label,
+                showsDot: true
+            ))
+        } else if case .awaitingConfirmation = sessionController.status {
+            chips.append(StatusChip(
+                id: "status",
+                icon: "questionmark.circle",
+                text: "Awaiting confirmation",
+                showsDot: false
+            ))
+        }
+
+        if !sessionController.webSources.isEmpty {
+            let count = sessionController.webSources.count
+            chips.append(StatusChip(
+                id: "sources",
+                icon: "link",
+                text: "\(count) source\(count == 1 ? "" : "s")",
+                showsDot: false
+            ))
+        }
+
+        if let turn = sessionController.agentTurn, turn.maxTurns > 0 {
+            chips.append(StatusChip(
+                id: "turn",
+                icon: "arrow.triangle.2.circlepath",
+                text: "Turn \(turn.turn)/\(turn.maxTurns)",
+                showsDot: false
+            ))
+        }
+
+        if let progress = sessionController.stepProgress, progress.totalSteps > 0 {
+            chips.append(StatusChip(
+                id: "step",
+                icon: "list.number",
+                text: "Step \(progress.stepIndex + 1)/\(progress.totalSteps)",
+                showsDot: false
+            ))
+        }
+
+        return chips
+    }
+
+    @ViewBuilder
+    private var statusChipRow: some View {
+        let chips = statusChips
+        if !chips.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(chips) { chip in
+                    statusChipView(chip)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+            .animation(.easeInOut(duration: 0.18), value: chips.map(\.id))
+        }
+    }
+
+    private func statusChipView(_ chip: StatusChip) -> some View {
+        HStack(spacing: 5) {
+            if chip.showsDot {
+                Circle()
+                    .fill(OverlayTheme.secondaryText)
+                    .frame(width: 5, height: 5)
+                    .opacity(nowPulse ? 1.0 : 0.35)
+                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: nowPulse)
+                    .onAppear { nowPulse = true }
+            } else if let icon = chip.icon {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(OverlayTheme.tertiaryText)
+            }
+
+            Text(chip.text)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(OverlayTheme.quietFill)
+        .clipShape(Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
     }
 
     private var statusText: String {

@@ -169,6 +169,19 @@ def web_ground_producer_from_environment(
     environment: Mapping[str, str] | None = None,
 ) -> WebGroundProducer:
     env = environment if environment is not None else os.environ
+
+    enrichment_url = env.get("ENRICHMENT_LAYER_URL", "").strip()
+    if enrichment_url:
+        from backend.enrichment_client import EnrichmentSnippetsProducer
+
+        try:
+            num_sources = int(env.get("ENRICHMENT_NUM_SOURCES", "5"))
+        except ValueError:
+            num_sources = 5
+        return EnrichmentSnippetsProducer(
+            base_url=enrichment_url, num_sources=num_sources,
+        )
+
     api_key = env.get("TAVILY_API_KEY", "").strip()
     if not api_key:
         return NullWebGroundProducer()

@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from enrichment.pipeline import run_enrichment, run_quick_guide
+from enrichment.snippets import DEFAULT_NUM_SOURCES, Snippet, run_snippet_pipeline
 from enrichment.storage import (
     create_job, get_aggregate_plan, get_aggregate_plans, get_job,
     get_quick_guide, init_db, reap_orphan_jobs, update_job,
@@ -47,6 +48,41 @@ async def query(body: QueryRequest) -> JobAck:
     job_id = create_job(body.request)
     asyncio.create_task(_run_job(job_id, body.request))
     return JobAck(job_id=job_id, status="pending")
+
+
+class SnippetsRequest(BaseModel):
+    query: str
+    application: str | None = None
+    goal: str | None = None
+    num_sources: int = DEFAULT_NUM_SOURCES
+
+
+class SnippetsResponse(BaseModel):
+    snippets: list[Snippet]
+    source_count: int
+    elapsed_ms: float
+
+
+@app.post("/snippets", response_model=SnippetsResponse)
+async def snippets(body: SnippetsRequest) -> SnippetsResponse:
+    query = body.query.strip()
+    if not query:
+        raise HTTPException(422, "query must be non-empty")
+    try:
+        result = await run_snippet_pipeline(
+            query=query,
+            application=body.application,
+            goal=body.goal,
+            num_sources=body.num_sources,
+        )
+    except Exception as exc:
+        logger.exception("snippets pipeline failed")
+        raise HTTPException(503, f"snippets pipeline failed: {type(exc).__name__}") from exc
+    return SnippetsResponse(
+        snippets=result.snippets,
+        source_count=result.source_count,
+        elapsed_ms=result.elapsed_ms,
+    )
 
 
 @app.post("/quick_guide", response_model=JobAck, status_code=202)

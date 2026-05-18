@@ -67,6 +67,28 @@ class FactoryTests(unittest.TestCase):
         producer = web_ground_producer_from_environment({"TAVILY_API_KEY": "secret"})
         self.assertNotIsInstance(producer, NullWebGroundProducer)
 
+    def test_enrichment_url_wins_over_tavily(self):
+        from backend.enrichment_client import EnrichmentSnippetsProducer
+
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "TAVILY_API_KEY": "secret",
+            }
+        )
+        self.assertIsInstance(producer, EnrichmentSnippetsProducer)
+
+    def test_enrichment_num_sources_invalid_falls_back_to_default(self):
+        from backend.enrichment_client import EnrichmentSnippetsProducer
+
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "ENRICHMENT_NUM_SOURCES": "not-a-number",
+            }
+        )
+        self.assertIsInstance(producer, EnrichmentSnippetsProducer)
+
 
 if __name__ == "__main__":
     unittest.main()

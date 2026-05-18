@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from backend.images import UploadedImage
+from backend.instruction_verifier import VerifierVerdict, classify_screen
 from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
@@ -42,6 +43,8 @@ from backend.tutorial_session_events import (
     AgentTurnEvent,
     AwaitingConfirmationEvent,
     DraftPlanReadyEvent,
+    InstructionVerificationStartedEvent,
+    InstructionVerifiedEvent,
     PlanDiffEvent,
     PlanReadyEvent,
     PlanUpdatedEvent,
@@ -149,6 +152,12 @@ class TutorialSession:
     confirmed_with_fresh_screen_step_ids: set[str] = field(default_factory=set)
     draft_plan: DraftPlan | None = None
     draft_plan_task: asyncio.Task[None] | None = None
+    # Per-instruction screen verification: at most one in flight per session.
+    # A "no" verdict sets pending_verification_replan and pokes step_event,
+    # which the _await_action wait loop checks before each sleep.
+    verifying_step_id: str | None = None
+    verification_task: asyncio.Task[None] | None = None
+    pending_verification_replan: str | None = None
     web_ground: WebGroundProducer = field(default_factory=NullWebGroundProducer)
     status: str = "created"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -239,6 +248,10 @@ class TutorialSession:
         # exact-slot signal unblocks the current wait.
         self.pending_step_starts.add((step_id, action_index))
         self.step_event.set()
+        # User acted — drop any in-flight instruction verification. Its
+        # screen snapshot is now stale. An already-set replan note is
+        # preserved (a "no" verdict still warrants replan).
+        await self._cancel_verification()
 
     async def handle_user_confirmation(
         self,
@@ -281,6 +294,7 @@ class TutorialSession:
             (note or "").strip(),
         )
         self.step_event.set()
+        await self._cancel_verification()
 
     def _is_awaiting_slot(self, step_id: str, action_index: int) -> bool:
         if step_id in self.completed_step_ids:
@@ -299,6 +313,7 @@ class TutorialSession:
     async def shutdown(self) -> None:
         await self._cancel_current_task()
         await self._cancel_draft_task()
+        await self._cancel_verification()
 
     # -------- Top-level session coroutine --------
 
@@ -664,6 +679,84 @@ class TutorialSession:
         )
         return snippets
 
+    # -------- Instruction-entry screen verification --------
+
+    def _start_verification(self, step: TutorialStep) -> None:
+        """Spawn a per-instruction verification job.
+
+        Uses ``latest_screen`` as captured at instruction entry — the
+        main agent loop has already refreshed it. Running a parallel
+        ``_request_screen`` would clobber the shared ``pending_screen``
+        slot, so we deliberately reuse the latest frame.
+        """
+        if self.latest_screen is None:
+            return
+        # Supersede any in-flight verification (e.g. previous instruction
+        # entered and finished before its verdict landed).
+        if self.verification_task is not None and not self.verification_task.done():
+            self.verification_task.cancel()
+        self.verifying_step_id = step.step_id
+        screen = self.latest_screen
+        instruction = step.instruction
+        self.verification_task = asyncio.create_task(
+            self._run_verification(step.step_id, instruction, screen)
+        )
+
+    async def _run_verification(
+        self,
+        step_id: str,
+        instruction: str,
+        screen: UploadedImage,
+    ) -> None:
+        verifier_llm = self.fast_llm or self.llm
+        await self.emit(InstructionVerificationStartedEvent(step_id=step_id))
+        try:
+            verdict: VerifierVerdict = await asyncio.to_thread(
+                classify_screen, verifier_llm, instruction, screen
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Instruction verification crashed",
+                extra={"session_id": self.session_id, "step_id": step_id},
+            )
+            return
+        # If the user moved on (or the instruction was replaced) while we
+        # were waiting on the LLM, the verdict is stale — drop silently.
+        if self.awaiting_step_id != step_id:
+            return
+        await self.emit(
+            InstructionVerifiedEvent(
+                step_id=step_id, ok=verdict.ok, reason=verdict.reason
+            )
+        )
+        if verdict.ok:
+            return
+        # "no" verdict: stash a replan note and wake the action wait loop.
+        # Do not overwrite an existing note (a user rejection is more
+        # specific than a verifier hunch).
+        if self.pending_verification_replan is None:
+            self.pending_verification_replan = (
+                f"Screen verification failed for {step_id}: {verdict.reason}. "
+                "Re-plan from the current screen."
+            )
+        self.step_event.set()
+
+    async def _cancel_verification(self) -> None:
+        task = self.verification_task
+        self.verifying_step_id = None
+        if task is None or task.done():
+            self.verification_task = None
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        finally:
+            self.verification_task = None
+
     async def _cancel_draft_task(self) -> None:
         task = self.draft_plan_task
         if task is None or task.done():
@@ -951,6 +1044,11 @@ class TutorialSession:
     async def _await_step(self, step: TutorialStep) -> str | None:
         self.awaiting_step_id = step.step_id
         step_index = self._plan_index(step.step_id)
+        # Instruction-level guardrail: kick off a parallel verification
+        # that the current screen plausibly matches this instruction.
+        # A "no" verdict surfaces via pending_verification_replan and is
+        # consumed in _await_action's wait loops.
+        self._start_verification(step)
         try:
             # Re-resolve the live step each iteration; a mid-await
             # refines_current merge may have replaced the actions list while
@@ -1045,6 +1143,9 @@ class TutorialSession:
         )
 
         while slot not in self.pending_step_starts:
+            replan = self._consume_verification_replan()
+            if replan is not None:
+                return _ActionOutcome(replan_note=replan)
             if self._has_later_event(step_index):
                 self.completed_step_ids.append(step_id)
                 return _ActionOutcome(advanced_past_step=True)
@@ -1063,6 +1164,9 @@ class TutorialSession:
         )
 
         while slot not in self.pending_step_confirmations:
+            replan = self._consume_verification_replan()
+            if replan is not None:
+                return _ActionOutcome(replan_note=replan)
             if self._has_later_event(step_index):
                 self.completed_step_ids.append(step_id)
                 return _ActionOutcome(advanced_past_step=True)
@@ -1094,6 +1198,13 @@ class TutorialSession:
                 return True
         return False
 
+    def _consume_verification_replan(self) -> str | None:
+        note = self.pending_verification_replan
+        if note is None:
+            return None
+        self.pending_verification_replan = None
+        return note
+
     async def _wait_for_step_event(self) -> None:
         # Wait first, then clear: producers mutate state before set(), so any
         # set that races with our re-check will wake us up and we'll re-loop.
@@ -1123,6 +1234,8 @@ class TutorialSession:
             self.step_event.clear()
             self.awaiting_step_id = None
             self.awaiting_action_index = None
+            self.pending_verification_replan = None
+        await self._cancel_verification()
 
     def _next_screen_request_id(self) -> str:
         self.screen_request_counter += 1

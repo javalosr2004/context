@@ -56,6 +56,10 @@ class UserConfirmationEvent(TutorialSessionEventModel):
     action_index: int = Field(ge=0)
     confirmed: bool
     note: str | None = None
+    # Stable post-action screen the client captured after waiting for the
+    # screen to settle. When present, the backend treats it as latest_screen
+    # and skips the request_screen round-trip before replanning.
+    screen: ScreenSnapshot | None = None
 
 
 class UserScreenEvent(TutorialSessionEventModel):
@@ -195,6 +199,20 @@ class SessionCompletedEvent(TutorialSessionEventModel):
     type: Literal["session_completed"] = "session_completed"
 
 
+class InstructionVerificationStartedEvent(TutorialSessionEventModel):
+    type: Literal["instruction_verification_started"] = (
+        "instruction_verification_started"
+    )
+    step_id: str
+
+
+class InstructionVerifiedEvent(TutorialSessionEventModel):
+    type: Literal["instruction_verified"] = "instruction_verified"
+    step_id: str
+    ok: bool
+    reason: str | None = None
+
+
 class ErrorEvent(TutorialSessionEventModel):
     type: Literal["error"] = "error"
     code: str
@@ -222,5 +240,7 @@ ServerSessionEvent = (
     | PlanDiffEvent
     | StepProgressEvent
     | SessionCompletedEvent
+    | InstructionVerificationStartedEvent
+    | InstructionVerifiedEvent
     | ErrorEvent
 )

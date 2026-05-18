@@ -10,6 +10,7 @@ from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEve
 from backend.tutorial_session import TutorialSession
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
+    InstructionVerifiedEvent,
     PlanReadyEvent,
     PlanUpdatedEvent,
     ScreenRequestedEvent,
@@ -368,6 +369,116 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.plan_steps, [])
         plan_ready = [e for e in events if isinstance(e, PlanReadyEvent)]
         self.assertEqual(plan_ready, [])
+
+
+class InstructionVerificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_no_verdict_triggers_replan_and_truncates_plan(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
+                # After verifier-driven replan, agent finishes with text.
+                [LLMTextDelta(text="Replanning.")],
+            ]
+        )
+        fast_llm = _FixedTextLLM(
+            '{"verdict":"no","reason":"wrong app in foreground"}'
+        )
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+        )
+
+        await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
+        # After plan emission, _await_step kicks off verification.
+        # The "no" verdict should drop the plan tail without any user input.
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
+        self.assertTrue(verified)
+        self.assertFalse(verified[0].ok)
+        # Plan tail dropped because verification rejected it before user acted.
+        self.assertEqual(session.plan_steps, [])
+        # Replan note made it into the history.
+        self.assertTrue(
+            any(
+                "Screen verification failed" in entry.content
+                for entry in session.history
+                if entry.role == "user"
+            )
+        )
+
+    async def test_yes_verdict_does_not_disturb_walk(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
+                [LLMTextDelta(text="Done.")],
+            ]
+        )
+        fast_llm = _FixedTextLLM('{"verdict":"yes","reason":"matches"}')
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+        )
+
+        await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
+        self.assertTrue(verified and verified[0].ok)
+        self.assertEqual(session.completed_step_ids, ["step_001"])
+
+    async def test_user_input_cancels_in_flight_verifier(self) -> None:
+        # Direct unit test of _cancel_verification on a pending asyncio task.
+        # Avoids spinning up the full session to keep the test process from
+        # stranding a blocked executor thread.
+        async def never() -> None:
+            await asyncio.sleep(60)
+
+        session = TutorialSession(
+            session_id="s1",
+            llm=ScriptedLLM([]),
+            emit=await collect_events([]),
+        )
+        session.verifying_step_id = "step_001"
+        session.verification_task = asyncio.create_task(never())
+
+        await session.handle_step_started("step_001", action_index=0)
+
+        self.assertIsNone(session.verifying_step_id)
+        self.assertIsNone(session.verification_task)
+
+
+class _FixedTextLLM:
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+
+    def complete_text(self, request: LLMRequest) -> str:
+        return self.raw
+
+    def stream_text(self, request: LLMRequest):  # pragma: no cover
+        raise NotImplementedError
+
+    def stream_tutorial_tool_calls(self, request: LLMRequest):  # pragma: no cover
+        raise NotImplementedError
+
+    def stream_tutorial_events(self, request: LLMRequest):  # pragma: no cover
+        raise NotImplementedError
 
 
 async def wait_for_idle(session: TutorialSession) -> None:

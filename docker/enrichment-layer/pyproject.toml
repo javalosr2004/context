@@ -1,0 +1,30 @@
+[project]
+name = "enrichment-layer"
+version = "0.1.0"
+description = "Web tutorial enrichment: query → fan-out search → fetch → extract → persist."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "httpx>=0.27.0",
+    "openai>=1.50.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.4.0",
+    "sqlalchemy>=2.0.30",
+    "trafilatura>=1.12.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]

@@ -199,6 +199,31 @@ class UpdatePlanParsingTests(unittest.TestCase):
             parse_update_plan_arguments(call)
         self.assertEqual(error.exception.code, INVALID_TOOL_CALL)
 
+    def test_normalizes_action_alias_to_kind(self) -> None:
+        # Some providers (Holo via structured_outputs) emit the discriminator
+        # under "action" or "type" instead of "kind". The parser normalizes.
+        raw = json.dumps(
+            {
+                "plan_reasoning": "alias normalization",
+                "plan": [
+                    {
+                        "human_text": "Open the Apple menu.",
+                        "confidence": 0.9,
+                        "actions": [
+                            {
+                                "action": "click",
+                                "agent_description": "the Apple logo in the menu bar",
+                                "requires_confirmation": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        call = TutorialToolCall(name=UPDATE_PLAN_TOOL_NAME, arguments=raw)
+        args = parse_update_plan_arguments(call)
+        self.assertEqual(args.plan[0].actions[0].kind, "click")
+
     def test_confirm_action_always_requires_confirmation(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,

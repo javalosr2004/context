@@ -9,16 +9,17 @@ struct EdgeTabView: View {
     @State private var isPressed = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
+        RoundedRectangle(cornerRadius: EdgeTabMetrics.cornerRadius, style: .continuous)
             .fill(.ultraThinMaterial)
             .overlay(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: EdgeTabMetrics.cornerRadius, style: .continuous)
                     .stroke(OverlayTheme.hairline, lineWidth: 0.5)
             )
-            .overlay(glyph.opacity(isHovering ? 1 : 0.7))
-            .scaleEffect(x: isHovering ? 1.4 : 1.0, y: 1.0, anchor: .trailing)
+            .overlay(glyph)
+            .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+            .scaleEffect(x: isHovering ? 1.12 : 1.0, y: isHovering ? 1.04 : 1.0, anchor: .trailing)
             .animation(.easeOut(duration: 0.12), value: isHovering)
-            .opacity(isPressed ? 0.7 : 1.0)
+            .opacity(isPressed ? 0.75 : 1.0)
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .gesture(
@@ -42,12 +43,13 @@ struct EdgeTabView: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 6, height: 6)
+                    .frame(width: EdgeTabMetrics.glyphSize, height: EdgeTabMetrics.glyphSize)
             } else {
-                Circle()
-                    .fill(OverlayTheme.secondaryText)
-                    .frame(width: 4, height: 4)
+                Image(systemName: "cursorarrow")
+                    .font(.system(size: EdgeTabMetrics.glyphSize, weight: .semibold))
+                    .foregroundStyle(OverlayTheme.primaryText)
             }
         }
+        .opacity(isHovering ? 1.0 : 0.85)
     }
 }

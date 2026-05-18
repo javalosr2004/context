@@ -9,7 +9,8 @@ enum EdgeTabAnchor {
 }
 
 enum EdgeTabMetrics {
-    static let size = CGSize(width: 8, height: 56)
-    static let inset = CGSize(width: 8, height: 12)
-    static let hoverSize = CGSize(width: 12, height: 64)
+    static let size = CGSize(width: 28, height: 72)
+    static let inset = CGSize(width: 6, height: 16)
+    static let cornerRadius: CGFloat = 10
+    static let glyphSize: CGFloat = 18
 }

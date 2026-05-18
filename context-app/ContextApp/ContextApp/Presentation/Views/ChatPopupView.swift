@@ -437,7 +437,7 @@ struct ChatPopupView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(kind == .done || !canToggleStep(step))
+        .allowsHitTesting(kind != .done && canToggleStep(step))
         .contextMenu {
             Button {
                 showStepJSONPreview(for: step)

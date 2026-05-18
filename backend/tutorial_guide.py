@@ -238,12 +238,20 @@ the user verbatim):
            dropdown that just opened from the Apple menu, second
            or third item below a thin separator"
 - If the exact target is not visible in the attached screen,
-  say so generically ("a row in the left sidebar of the window
-  that opens after the previous click") rather than inventing
-  a label.
-- If the exact target is not visible in the attached screen, say
-  so generically ("a row in the left sidebar of the window that
-  opens after the previous click") rather than inventing a label.
+  still write a SPECIFIC three-part description using the
+  canonical macOS label you know or that web grounding provides.
+  Off-screen targets in well-known flows (System Settings panes,
+  Finder sidebar entries, standard menu items) have stable
+  names — use them. "the 'Storage' row — labeled text row with
+  a gray gear-like leading icon, in the right pane of System
+  Settings after opening General, partway down the list" is
+  correct even before the pane is visible.
+- Pure hedges like "likely within a broader settings category
+  list" or "a row that probably leads to storage" are forbidden.
+  If you cannot name the canonical target at all (no web
+  grounding, no prior knowledge), call tutorial_request_screen
+  instead of emitting a vague step. Vague descriptions are a
+  worse failure than a missing tail item.
 
 Do not narrate your reasoning. Do not announce what you are about to
 do. Do not refer to yourself as a planner, generator, tutorial, or
@@ -428,12 +436,30 @@ def generate_draft_plan(
 
     grounding_block = ""
     producer = web_ground if web_ground is not None else NullWebGroundProducer()
+    grounding_started_at = time.perf_counter()
     snippets = producer.ground(goal)
+    grounding_elapsed_ms = round((time.perf_counter() - grounding_started_at) * 1000, 2)
     if snippets:
         grounding_block = format_snippets_for_prompt(snippets) + "\n\n"
         logger.info(
             "Draft plan grounded via web search",
-            extra={"snippet_count": len(snippets)},
+            extra={
+                "query": goal,
+                "snippet_count": len(snippets),
+                "elapsed_ms": grounding_elapsed_ms,
+                "sources": [
+                    {"title": s.title, "url": s.url} for s in snippets
+                ],
+            },
+        )
+    else:
+        logger.info(
+            "Draft plan grounding returned no snippets",
+            extra={
+                "query": goal,
+                "elapsed_ms": grounding_elapsed_ms,
+                "producer": type(producer).__name__,
+            },
         )
 
     started_at = time.perf_counter()

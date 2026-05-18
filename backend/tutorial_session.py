@@ -516,14 +516,6 @@ class TutorialSession:
                     raise event
                 if isinstance(event, LLMTextDelta):
                     text_parts.append(event.text)
-                    logger.info(
-                        "LLM text delta",
-                        extra={
-                            "session_id": self.session_id,
-                            "delta": repr(event.text),
-                            "delta_chars": len(event.text),
-                        },
-                    )
                     await self.emit(TutorialTextDeltaEvent(text=event.text))
                 elif isinstance(event, LLMToolCallEvent):
                     tool_calls.append(event.tool_call)

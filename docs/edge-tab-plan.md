@@ -7,14 +7,16 @@ close/miniaturize buttons that currently lead to an unrecoverable state.
 
 ## Problem
 
-`PopupPanel` is a `.titled, .closable, .miniaturizable` `NSPanel`. If the
-user hits the macOS close (X) or miniaturize button on the panel chrome,
-the panel disappears and nothing on screen brings it back. The status-bar
-menu helps, but is hidden in fullscreen apps and not a primary surface.
+`PopupPanel` is a `.titled, .closable, .miniaturizable` `NSPanel`. The
+yellow miniaturize button sends the panel to a Dock tile that doesn't
+exist for an `LSUIElement` agent app — the panel just vanishes with no
+way back. The red close button hides the panel with no recovery either.
+The status-bar menu helps, but is hidden in fullscreen apps and not a
+primary surface.
 
 The existing `IconPanel` (the floating circle) is only visible when the
 user explicitly minifies *from inside the popup* — it does not catch the
-close-button case, and its free-floating position is easy to lose.
+traffic-light buttons, and its free-floating position is easy to lose.
 
 ## Goals
 
@@ -41,6 +43,14 @@ close-button case, and its free-floating position is easy to lose.
   the popup.
 - **Hideability:** none. The tab is always visible. To remove it the
   user quits the app.
+- **Popup traffic lights:** keep the native chrome but intercept each
+  button.
+  - *Red (close)* → `NSApplication.shared.terminate(nil)`. Quits the
+    app. Tab disappears with it.
+  - *Yellow (miniaturize)* → `popupController.collapse()`. Hides the
+    popup; tab restores it.
+  - *Green (zoom)* → disabled (`isEnabled = false`) with a `TODO`
+    comment marking it for a future chat-window expansion mode.
 
 ## Behaviour
 
@@ -93,10 +103,13 @@ New files, each with a single responsibility:
 
 Changes to existing files:
 
-- `Presentation/Panels/PopupPanel.swift` — drop `.closable` and
-  `.miniaturizable` from `styleMask`. No more orphaning. (Keep `.titled`
-  for drag-by-titlebar, or switch to `.borderless` +
-  `isMovableByWindowBackground` if cleaner.)
+- `Presentation/Panels/PopupPanel.swift` — keep `.titled, .closable,
+  .miniaturizable` so the traffic lights render natively. Override
+  `miniaturize(_:)` to route to `popupController.collapse()`. Set an
+  `NSWindowDelegate` whose `windowShouldClose(_:)` calls
+  `NSApplication.shared.terminate(nil)` and returns `false`. Disable
+  the zoom button (`standardWindowButton(.zoomButton)?.isEnabled = false`)
+  with a `TODO` comment: *future chat-window expansion mode*.
 - `Application/PopupController.swift` — collapse the icon-panel branch.
   `minify()`/`restore()` keep their names but stop toggling the icon
   panel; they only toggle the popup itself. State becomes
@@ -170,11 +183,13 @@ Everything else is thin glue.
   bottom-right of `visibleFrame`.
 - Click toggles `PopupPanel` via `PopupController.toggle()`; popup
   restores to its last user-chosen frame.
-- `PopupPanel` style mask updated to drop `.closable, .miniaturizable`.
+- `PopupPanel` traffic lights wired: red → `terminate`, yellow →
+  `collapse`, green disabled with `TODO` (future chat window).
 - Re-anchor on `didChangeScreenParameters`.
 - Acceptance: launching the app shows the tab in the bottom-right;
-  clicking it expands and collapses the popup without moving the
-  popup's user-set position; there is no X button on the popup;
+  clicking the tab expands and collapses the popup without moving its
+  user-set position; yellow button hides the popup and the tab
+  restores it; red button quits the app; green button is greyed out;
   hiding/showing the Dock re-anchors the tab above the Dock.
 
 **M2 — Polish + retire icon panel.**
@@ -202,5 +217,5 @@ milestone): launch, toggle, Dock show/hide, monitor disconnect.
 
 ## Open questions
 
-1. Keep or drop the in-popup "minify" button now that the tab does the
-   same job? Keep for M1 (familiar surface), revisit in M2.
+1. Drop the custom in-popup "minify" button — the yellow traffic light
+   does the same job. Plan removes it as part of M1.

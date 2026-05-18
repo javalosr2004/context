@@ -34,6 +34,7 @@ from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEve
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
     generate_draft_plan,
+    refine_search_query,
 )
 from backend.tutorial_schema import DraftPlan, TutorialAction, TutorialPlan, TutorialStep
 from backend.web_ground import NullWebGroundProducer, WebGroundProducer, WebGroundSnippet
@@ -132,6 +133,11 @@ class TutorialSession:
     last_action_kind: str | None = None
     screen_is_stale: bool = False
     screen_captured_at: datetime | None = None
+    # Step IDs whose post-action stable screen the client already shipped
+    # alongside the confirmation. Used to suppress the post-step
+    # `screen_is_stale = True` flip that would otherwise force a
+    # redundant request_screen round-trip.
+    confirmed_with_fresh_screen_step_ids: set[str] = field(default_factory=set)
     draft_plan: DraftPlan | None = None
     draft_plan_task: asyncio.Task[None] | None = None
     web_ground: WebGroundProducer = field(default_factory=NullWebGroundProducer)
@@ -231,6 +237,7 @@ class TutorialSession:
         action_index: int,
         confirmed: bool,
         note: str | None,
+        screen: ScreenSnapshot | None = None,
     ) -> None:
         # Record every confirmation. Out-of-slot confirmations either
         # advance the walk loop via `_has_later_event` (when the slot is
@@ -247,6 +254,19 @@ class TutorialSession:
                     "expected_action_index": self.awaiting_action_index,
                 },
             )
+        if screen is not None:
+            # The client waited for the post-action screen to settle before
+            # sending this confirmation. Adopt it as latest_screen so the
+            # next planner pass runs on a stable frame without a separate
+            # request_screen round-trip.
+            image = uploaded_image_from_snapshot(screen)
+            self.latest_screen = image
+            self.screen_is_stale = False
+            self.screen_captured_at = datetime.now(UTC)
+            self.confirmed_with_fresh_screen_step_ids.add(step_id)
+            future = self.pending_screen
+            if future is not None and not future.done():
+                future.set_result(image)
         self.pending_step_confirmations[(step_id, action_index)] = (
             confirmed,
             (note or "").strip(),
@@ -572,8 +592,8 @@ class TutorialSession:
         image: UploadedImage | None,
         images: list[UploadedImage],
     ) -> None:
-        snippets = await self._ground_with_events(goal)
         draft_llm = self.fast_llm or self.llm
+        snippets = await self._ground_with_events(goal, image, draft_llm)
         try:
             plan = await asyncio.to_thread(
                 generate_draft_plan,
@@ -599,23 +619,33 @@ class TutorialSession:
         self.draft_plan = plan
         await self.emit(DraftPlanReadyEvent(plan=plan))
 
-    async def _ground_with_events(self, goal: str) -> list[WebGroundSnippet]:
+    async def _ground_with_events(
+        self,
+        goal: str,
+        image: UploadedImage | None,
+        refiner_llm: MultimodalLLM,
+    ) -> list[WebGroundSnippet]:
         if isinstance(self.web_ground, NullWebGroundProducer):
             return []
-        await self.emit(WebSearchStartedEvent(query=goal))
+        query = await asyncio.to_thread(
+            refine_search_query, refiner_llm, goal, image
+        )
+        if not query:
+            query = goal
+        await self.emit(WebSearchStartedEvent(query=query))
         started_at = time.perf_counter()
         try:
-            snippets = await asyncio.to_thread(self.web_ground.ground, goal)
+            snippets = await asyncio.to_thread(self.web_ground.ground, query)
         except Exception:
             logger.exception(
                 "Web grounding failed",
-                extra={"session_id": self.session_id, "query_chars": len(goal)},
+                extra={"session_id": self.session_id, "query_chars": len(query)},
             )
             snippets = []
         elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
         await self.emit(
             WebSearchCompletedEvent(
-                query=goal,
+                query=query,
                 source_count=len(snippets),
                 sources=[
                     WebSearchSource(title=s.title, url=s.url) for s in snippets
@@ -955,8 +985,13 @@ class TutorialSession:
         last_action = current.actions[-1]
         self.last_action_kind = last_action.type
         had_user_confirmation = any(a.requires_confirmation for a in current.actions)
-        if had_user_confirmation or any(
-            a.type in SCREEN_CHANGING_ACTION_TYPES for a in current.actions
+        client_shipped_fresh_screen = (
+            current.step_id in self.confirmed_with_fresh_screen_step_ids
+        )
+        self.confirmed_with_fresh_screen_step_ids.discard(current.step_id)
+        if not client_shipped_fresh_screen and (
+            had_user_confirmation
+            or any(a.type in SCREEN_CHANGING_ACTION_TYPES for a in current.actions)
         ):
             self.screen_is_stale = True
         action_summary = ", ".join(a.type for a in current.actions)

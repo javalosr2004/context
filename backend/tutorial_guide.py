@@ -20,8 +20,10 @@ from backend.tutorial_schema import (
     UserMessageIntentKind,
     draft_plan_response_schema,
     parse_draft_plan,
+    parse_search_query_refinement,
     parse_tutorial_plan,
     parse_user_message_intent,
+    search_query_refinement_response_schema,
     tutorial_plan_response_schema,
     user_message_intent_response_schema,
 )
@@ -290,6 +292,27 @@ message clearly describes a different task. Return only the JSON object
 matching the provided schema; no prose, no reasoning.
 """.strip()
 
+SEARCH_QUERY_REFINER_SYSTEM_PROMPT = """
+You turn a vague user goal into one precise web search query, using the
+attached screenshot for grounding.
+
+Look at the screenshot first. Identify the OS and version (e.g. macOS
+Sequoia), the active app, and any specific UI region visible. Combine
+that context with the user's goal to produce a single search query that
+would surface step-by-step instructions for the user's task on this
+exact platform.
+
+Rules:
+- One query, roughly 5-12 words.
+- Always name the OS or app when visible. Prefer specific labels over
+  generic ones.
+- No question marks, no quotes, no boilerplate ("how to", "tutorial on").
+- If the screenshot is ambiguous or absent, still emit a query — fall
+  back to the most likely platform implied by the goal.
+
+Return only the JSON object matching the provided schema.
+""".strip()
+
 DRAFT_PLAN_SYSTEM_PROMPT = """
 You are sketching a coarse hypothesis plan for a macOS overlay tutorial.
 
@@ -400,6 +423,61 @@ def generate_tutorial_plan(
         extra={"step_count": len(plan.steps)},
     )
     return plan
+
+
+def refine_search_query(
+    llm: MultimodalLLM,
+    goal: str,
+    image: UploadedImage | None,
+) -> str:
+    """Turn the raw user goal + screenshot into a grounded web search query.
+
+    Uses a small multimodal call (intended for a fast model like nano) so
+    the downstream web search runs against a query that names the visible
+    OS/app rather than the user's ambiguous phrasing. Falls back to the
+    original goal on any failure — refinement is a soft enhancement.
+    """
+    stripped = goal.strip()
+    if not stripped:
+        return ""
+    request_images = [image] if image is not None else []
+    started_at = time.perf_counter()
+    try:
+        raw = llm.complete_text(
+            LLMRequest(
+                system_prompt=SEARCH_QUERY_REFINER_SYSTEM_PROMPT,
+                user_text=(
+                    f"User goal: {stripped}\n\n"
+                    "Return one grounded search query as JSON matching "
+                    "the provided schema."
+                ),
+                images=request_images,
+                enable_search_grounding=False,
+                response_mime_type="application/json",
+                response_schema=search_query_refinement_response_schema(),
+                temperature=0,
+            )
+        )
+        refined = parse_search_query_refinement(raw).query.strip()
+    except Exception:
+        logger.exception(
+            "Search query refinement failed; falling back to raw goal",
+            extra={"goal_chars": len(stripped)},
+        )
+        return stripped
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    if not refined:
+        return stripped
+    logger.info(
+        "Search query refined",
+        extra={
+            "original": stripped,
+            "refined": refined,
+            "elapsed_ms": elapsed_ms,
+            "had_image": image is not None,
+        },
+    )
+    return refined
 
 
 def generate_draft_plan(

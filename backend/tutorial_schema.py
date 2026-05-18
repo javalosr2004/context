@@ -169,6 +169,35 @@ class UserMessageIntent(TutorialSchemaModel):
     )
 
 
+class SearchQueryRefinement(TutorialSchemaModel):
+    """One concise web search query grounded in the user's screen."""
+
+    query: str = Field(
+        min_length=1,
+        max_length=200,
+        description=(
+            "A single web search query (roughly 5-12 words) that names the "
+            "specific OS, app, and version visible on screen alongside the "
+            "user's goal. Avoid generic phrasings."
+        ),
+    )
+
+
+def parse_search_query_refinement(raw_json: str) -> SearchQueryRefinement:
+    try:
+        return SearchQueryRefinement.model_validate_json(raw_json)
+    except ValidationError as error:
+        raise TutorialPlanValidationError(
+            "LLM returned an invalid search query refinement."
+        ) from error
+
+
+def search_query_refinement_response_schema() -> dict[str, Any]:
+    return remove_gemini_unsupported_schema_keys(
+        SearchQueryRefinement.model_json_schema()
+    )
+
+
 def parse_user_message_intent(raw_json: str) -> UserMessageIntent:
     try:
         return UserMessageIntent.model_validate_json(raw_json)

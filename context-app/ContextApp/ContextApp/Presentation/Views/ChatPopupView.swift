@@ -651,6 +651,7 @@ struct ChatPopupView: View {
         case .scroll(let a): return "Scroll \(a.direction.rawValue)"
         case .wait(let a): return "Wait \(a.durationMs)ms"
         case .confirm: return "Confirm"
+        case .userChoice(let a): return truncate(a.prompt, max: 48)
         }
     }
 
@@ -1726,6 +1727,7 @@ struct ChatPopupView: View {
         case .type(let a): return a.target?.description
         case .scroll(let a): return a.target?.description
         case .pressKey(let a): return "Key: \(a.key)"
+        case .userChoice(let a): return a.prompt
         case .wait, .confirm: return nil
         }
     }
@@ -1777,6 +1779,8 @@ struct ChatPopupView: View {
             return "clock"
         case .confirm:
             return "checkmark.circle"
+        case .userChoice:
+            return "hand.tap"
         }
     }
 

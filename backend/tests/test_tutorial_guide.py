@@ -12,8 +12,8 @@ from backend.tutorial_guide import (
     TutorialGuide,
     TutorialPlanRequest,
     TutorialStreamRequest,
-    plan_generation_prompt,
 )
+from backend.tutorial_schema import TutorialPlanValidationError
 
 VALID_PLAN_JSON = """
 {
@@ -137,35 +137,21 @@ class TutorialGuideTests(unittest.TestCase):
         self.assertIsNotNone(llm.requests[0].response_schema)
         self.assertEqual(llm.requests[0].temperature, 0)
 
-    def test_create_plan_retries_with_validation_error_context(self) -> None:
-        llm = FakeLLM(complete_responses=["not-json", VALID_PLAN_JSON])
+    def test_create_plan_raises_on_invalid_json_without_retrying(self) -> None:
+        llm = FakeLLM(complete_responses=["not-json"])
         guide = TutorialGuide(llm)
 
-        with self.assertLogs("backend.tutorial_guide", level="WARNING"):
-            plan = guide.create_plan(
-                TutorialPlanRequest(
-                    conversation_id="conversation-1",
-                    text="Show me how to create a repo.",
-                    images=[],
+        with self.assertLogs("backend.tutorial_guide", level="ERROR"):
+            with self.assertRaises(TutorialPlanValidationError):
+                guide.create_plan(
+                    TutorialPlanRequest(
+                        conversation_id="conversation-1",
+                        text="Show me how to create a repo.",
+                        images=[],
+                    )
                 )
-            )
 
-        self.assertEqual(plan.schema_version, "tutorial_plan.v1")
-        self.assertEqual(len(llm.requests), 2)
-        self.assertIn("Fix the previous JSON", llm.requests[1].user_text)
-        self.assertIn("not-json", llm.requests[1].user_text)
-        self.assertIsNotNone(llm.requests[1].response_schema)
-
-    def test_plan_generation_prompt_does_not_duplicate_json_schema(self) -> None:
-        prompt = plan_generation_prompt(
-            prompt="Create a tutorial plan.",
-            attempt=0,
-            error_text="",
-            last_text="",
-        )
-
-        self.assertEqual(prompt, "Create a tutorial plan.")
-        self.assertNotIn("schema_version", TUTORIAL_PLAN_SYSTEM_PROMPT)
+        self.assertEqual(len(llm.requests), 1)
 
 
 if __name__ == "__main__":

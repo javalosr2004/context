@@ -271,6 +271,13 @@ def get_multimodal_llm() -> MultimodalLLM:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
+def get_fast_multimodal_llm() -> MultimodalLLM:
+    try:
+        return LLMProvider.from_environment().create_fast_llm()
+    except LLMProviderConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 def get_tutorial_guide(
     llm: MultimodalLLM = Depends(get_multimodal_llm),
 ) -> TutorialGuide:
@@ -280,11 +287,13 @@ def get_tutorial_guide(
 def get_tutorial_session_store(
     connection: HTTPConnection,
     llm: MultimodalLLM = Depends(get_multimodal_llm),
+    fast_llm: MultimodalLLM = Depends(get_fast_multimodal_llm),
 ) -> TutorialSessionStore:
     store = getattr(connection.app.state, "tutorial_session_store", None)
     if store is None:
         store = TutorialSessionStore(
             llm,
+            fast_llm=fast_llm,
             web_ground=web_ground_producer_from_environment(),
         )
         connection.app.state.tutorial_session_store = store

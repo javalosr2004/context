@@ -311,9 +311,6 @@ include reasoning, preambles, or commentary — only the structured plan.
 """.strip()
 
 
-MAX_TUTORIAL_PLAN_RETRIES = 2
-
-
 @dataclass(frozen=True)
 class TutorialStreamRequest:
     conversation_id: str
@@ -357,83 +354,52 @@ def generate_tutorial_plan(
     llm: MultimodalLLM,
     prompt: str,
     images: list[UploadedImage] | None = None,
-    max_retries: int = MAX_TUTORIAL_PLAN_RETRIES,
 ) -> TutorialPlan:
-    last_text = ""
-    error_text = ""
-    last_error: TutorialPlanValidationError | None = None
-    request_images = images or []
+    """Single-shot tutorial plan generation.
 
+    The OpenAI client wires the response schema as a strict json_schema
+    format (see ``backend.openai_client.build_text_format``), so the model
+    cannot return shape-invalid JSON. Gemini's structured-output mode
+    behaves the same way. A retry loop would only mask semantic bugs
+    (bad enum values, missing required fields) that strict schema already
+    catches at decode time — surface those instead of paying 2-3x latency.
+    """
+    request_images = images or []
+    started_at = time.perf_counter()
+    raw_plan = llm.complete_text(
+        LLMRequest(
+            system_prompt=TUTORIAL_PLAN_SYSTEM_PROMPT,
+            user_text=prompt,
+            images=request_images,
+            enable_search_grounding=False,
+            response_mime_type="application/json",
+            response_schema=tutorial_plan_response_schema(),
+            temperature=0,
+        )
+    )
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
     logger.info(
-        "Generating tutorial plan",
-        extra={"image_count": len(request_images),
-               "max_attempts": max_retries + 1},
+        "Tutorial plan LLM call completed",
+        extra={"elapsed_ms": elapsed_ms, "raw_chars": len(raw_plan)},
     )
 
-    for attempt in range(max_retries + 1):
-        attempt_number = attempt + 1
-        started_at = time.perf_counter()
-        raw_plan = llm.complete_text(
-            LLMRequest(
-                system_prompt=TUTORIAL_PLAN_SYSTEM_PROMPT,
-                user_text=plan_generation_prompt(
-                    prompt=prompt,
-                    attempt=attempt,
-                    error_text=error_text,
-                    last_text=last_text,
-                ),
-                images=request_images,
-                enable_search_grounding=False,
-                response_mime_type="application/json",
-                response_schema=tutorial_plan_response_schema(),
-                temperature=0,
-            )
-        )
-        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        last_text = raw_plan
-        logger.info(
-            "Tutorial plan LLM call completed",
+    try:
+        plan = parse_tutorial_plan(raw_plan)
+    except TutorialPlanValidationError as error:
+        logger.error(
+            "Tutorial plan validation failed",
             extra={
-                "attempt": attempt_number,
-                "elapsed_ms": elapsed_ms,
-                "raw_chars": len(raw_plan),
+                "error": format_validation_error(error),
+                "raw_output": truncate(raw_plan, RAW_OUTPUT_LOG_LIMIT),
             },
         )
+        raise
 
-        try:
-            plan = parse_tutorial_plan(raw_plan)
-            logger.info(
-                "Tutorial plan validated",
-                extra={"attempt": attempt_number,
-                       "step_count": len(plan.steps)},
-            )
-            return plan
-        except TutorialPlanValidationError as error:
-            last_error = error
-            error_text = format_validation_error(error)
-            logger.warning(
-                "Tutorial plan validation failed",
-                extra={
-                    "attempt": attempt_number,
-                    "max_attempts": max_retries + 1,
-                    "error": error_text,
-                    "raw_output": truncate(raw_plan, RAW_OUTPUT_LOG_LIMIT),
-                },
-            )
-
-    logger.error(
-        "Tutorial plan exhausted retries",
-        extra={
-            "max_attempts": max_retries + 1,
-            "last_error": format_validation_error(last_error) if last_error else None,
-            "last_raw_output": truncate(last_text, RAW_OUTPUT_LOG_LIMIT),
-        },
+    logger.info(
+        "Tutorial plan validated",
+        extra={"step_count": len(plan.steps)},
     )
-    raise TutorialPlanValidationError(
-        f"Could not generate valid TutorialPlan after {max_retries + 1} attempts. "
-        f"Last error: {format_validation_error(last_error) if last_error else 'unknown'}. "
-        f"Last output: {truncate(last_text, 500)}"
-    ) from last_error
+    return plan
 
 
 def generate_draft_plan(
@@ -566,23 +532,6 @@ def truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"... [+{len(text) - limit} chars]"
-
-
-def plan_generation_prompt(
-    prompt: str,
-    attempt: int,
-    error_text: str,
-    last_text: str,
-) -> str:
-    if attempt == 0:
-        return prompt
-
-    return (
-        "Fix the previous JSON so it validates against the provided response "
-        "schema and tutorial action semantics.\n\n"
-        f"Validation failed because:\n{error_text}\n\n"
-        f"Previous output:\n{last_text}"
-    )
 
 
 def build_tutorial_plan_user_prompt(user_request: str) -> str:

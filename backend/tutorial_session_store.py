@@ -37,8 +37,10 @@ class TutorialSessionStore:
         llm: MultimodalLLM,
         session_id_factory: Callable[[], str] | None = None,
         web_ground: WebGroundProducer | None = None,
+        fast_llm: MultimodalLLM | None = None,
     ) -> None:
         self._llm = llm
+        self._fast_llm = fast_llm or llm
         self._session_id_factory = session_id_factory or (lambda: str(uuid4()))
         self._web_ground = web_ground or NullWebGroundProducer()
         self._reserved: set[str] = set()
@@ -70,6 +72,7 @@ class TutorialSessionStore:
         session = TutorialSession(
             session_id=session_id,
             llm=self._llm,
+            fast_llm=self._fast_llm,
             emit=emit,
             web_ground=self._web_ground,
         )

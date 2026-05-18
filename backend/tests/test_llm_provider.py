@@ -91,8 +91,8 @@ class LLMProviderTests(unittest.TestCase):
         openai_client.assert_called_once_with(
             api_key="openai-key",
             model=DEFAULT_OPENAI_MODEL,
-            reasoning_effort="medium",
-            verbosity="medium",
+            reasoning_effort="low",
+            verbosity="low",
         )
 
     def test_creates_holo_client_from_environment(self) -> None:

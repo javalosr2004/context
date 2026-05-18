@@ -30,10 +30,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from backend.images import UploadedImage
-from backend.llm import LLMRequest, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
+from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
-    classify_user_message_intent,
     generate_draft_plan,
 )
 from backend.tutorial_schema import DraftPlan, TutorialAction, TutorialPlan, TutorialStep
@@ -108,6 +107,7 @@ class TutorialSession:
     session_id: str
     llm: MultimodalLLM
     emit: EventSink
+    fast_llm: MultimodalLLM | None = None
     goal: str | None = None
     history: list[HistoryEntry] = field(default_factory=list)
     plan_steps: list[TutorialStep] = field(default_factory=list)
@@ -152,38 +152,16 @@ class TutorialSession:
         await self._cancel_current_task()
 
         message_images = uploaded_images_from_snapshots(uploaded_images or [])
-        intent = await self._classify_message_intent(text)
-        if intent == "new_goal":
+        if self.goal is None:
             await self._reset_for_new_goal(text, message_images)
         else:
+            # Once a goal is active, every subsequent message is treated as
+            # a follow-up. Switching goals mid-session is a UI-driven action
+            # (explicit reset), not something we infer from message content.
             self.uploaded_images.extend(message_images)
             self.history.append(HistoryEntry(role="user", content=text))
 
         await self._start_task(self._run_session(refresh_screen=True))
-
-    async def _classify_message_intent(self, text: str) -> str:
-        """Decide whether `text` is a new goal or a follow-up.
-
-        First message of the session is always a new goal — no classifier
-        call. Otherwise route through the LLM; fall back to 'follow_up' on
-        any failure so we never accidentally wipe accumulated context.
-        """
-        if self.goal is None:
-            return "new_goal"
-        try:
-            return await asyncio.to_thread(
-                classify_user_message_intent,
-                self.llm,
-                self.goal,
-                self.draft_plan,
-                text,
-            )
-        except Exception:
-            logger.exception(
-                "User message intent classification failed; defaulting to follow_up",
-                extra={"session_id": self.session_id},
-            )
-            return "follow_up"
 
     async def _reset_for_new_goal(
         self,
@@ -595,10 +573,11 @@ class TutorialSession:
         images: list[UploadedImage],
     ) -> None:
         snippets = await self._ground_with_events(goal)
+        draft_llm = self.fast_llm or self.llm
         try:
             plan = await asyncio.to_thread(
                 generate_draft_plan,
-                self.llm,
+                draft_llm,
                 goal,
                 image,
                 images,

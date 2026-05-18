@@ -12,11 +12,15 @@ from backend.openai_client import OpenAIClient
 
 DEFAULT_LLM_PROVIDER = "gemini"
 DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+DEFAULT_GEMINI_FAST_MODEL = "gemini-3-flash-preview"
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+DEFAULT_OPENAI_FAST_MODEL = "gpt-5-nano"
 DEFAULT_HOLO_BASE_URL = "https://api.hcompany.ai/v1/"
 DEFAULT_HOLO_MODEL = "holo3-35b-a3b"
-DEFAULT_OPENAI_REASONING_EFFORT = "medium"
-DEFAULT_OPENAI_VERBOSITY = "medium"
+DEFAULT_OPENAI_REASONING_EFFORT = "low"
+DEFAULT_OPENAI_VERBOSITY = "low"
+DEFAULT_OPENAI_FAST_REASONING_EFFORT = "minimal"
+DEFAULT_OPENAI_FAST_VERBOSITY = "low"
 
 
 class LLMProviderConfigurationError(RuntimeError):
@@ -41,6 +45,21 @@ class LLMProvider:
             return self._create_holo_client()
 
         raise LLMProviderConfigurationError(f"Unsupported LLM_PROVIDER: {provider}")
+
+    def create_fast_llm(self) -> MultimodalLLM:
+        """A cheaper/faster client for routing and draft-grade calls.
+
+        Used for the draft plan (no reasoning needed — JSON schema does the
+        shape work) and any classifier-style call where minimal latency
+        matters more than depth. Falls back to the primary client for
+        providers without a distinct fast tier.
+        """
+        provider = self._provider_name()
+        if provider == "openai":
+            return self._create_openai_fast_client()
+        if provider == "gemini":
+            return self._create_gemini_fast_client()
+        return self.create_multimodal_llm()
 
     def _provider_name(self) -> str:
         return (self.environment.get("LLM_PROVIDER") or DEFAULT_LLM_PROVIDER).lower()
@@ -71,6 +90,31 @@ class LLMProvider:
                 "OPENAI_VERBOSITY", DEFAULT_OPENAI_VERBOSITY
             ),
         )
+
+    def _create_openai_fast_client(self) -> OpenAIClient:
+        api_key = self._required("OPENAI_API_KEY")
+        model = (
+            self.environment.get("OPENAI_FAST_MODEL")
+            or DEFAULT_OPENAI_FAST_MODEL
+        )
+        return OpenAIClient(
+            api_key=api_key,
+            model=model,
+            reasoning_effort=self.environment.get(
+                "OPENAI_FAST_REASONING_EFFORT", DEFAULT_OPENAI_FAST_REASONING_EFFORT
+            ),
+            verbosity=self.environment.get(
+                "OPENAI_FAST_VERBOSITY", DEFAULT_OPENAI_FAST_VERBOSITY
+            ),
+        )
+
+    def _create_gemini_fast_client(self) -> GeminiClient:
+        api_key = self._required("GEMINI_API_KEY")
+        model = (
+            self.environment.get("GEMINI_FAST_MODEL")
+            or DEFAULT_GEMINI_FAST_MODEL
+        )
+        return GeminiClient(api_key=api_key, model=model)
 
     def _create_holo_client(self) -> HoloChatClient:
         api_key = self._required("HAI_API_KEY")

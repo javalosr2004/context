@@ -337,10 +337,7 @@ struct ChatPopupView: View {
                 Spacer()
 
                 if !metaRightText.isEmpty {
-                    Text(metaRightText)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(OverlayTheme.tertiaryText)
-                        .lineLimit(1)
+                    stepProgressPill(text: metaRightText)
                 }
             }
             .padding(.horizontal, 16)
@@ -1198,13 +1195,6 @@ struct ChatPopupView: View {
                 text: flash.text,
                 showsDot: false
             ))
-        } else if let progress = sessionController.stepProgress, progress.totalSteps > 0 {
-            chips.append(StatusChip(
-                id: "step",
-                icon: "list.number",
-                text: "Step \(progress.stepIndex + 1)/\(progress.totalSteps)",
-                showsDot: false
-            ))
         }
 
         return chips
@@ -1291,6 +1281,29 @@ struct ChatPopupView: View {
                 stepChipFlash = nil
             }
         }
+    }
+
+    private func stepProgressPill(text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "list.number")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(OverlayTheme.tertiaryText)
+            Text(text)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.32, dampingFraction: 0.9), value: text)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(OverlayTheme.quietFill)
+        .clipShape(Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
     }
 
     private func statusChipView(_ chip: StatusChip) -> some View {

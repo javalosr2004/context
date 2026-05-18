@@ -82,6 +82,17 @@ def classify_screen(
     try:
         raw = llm.complete_text(build_request(instruction, screen))
     except Exception:
-        logger.exception("Instruction verifier LLM call failed")
+        logger.exception("[verifier] llm call failed")
         return VerifierVerdict(ok=True, reason="verifier_error")
-    return parse_verdict(raw)
+    verdict = parse_verdict(raw)
+    logger.info(
+        "[verifier] raw_response",
+        extra={
+            "instruction": instruction[:120],
+            "raw_chars": len(raw),
+            "raw_preview": raw.strip()[:200],
+            "parsed_ok": verdict.ok,
+            "parsed_reason": verdict.reason,
+        },
+    )
+    return verdict

@@ -173,6 +173,14 @@ class TutorialSession:
         text = text.strip()
         if not text:
             return
+        logger.info(
+            "[session] user_message",
+            extra={
+                "session_id": self.session_id,
+                "text_chars": len(text),
+                "image_count": len(uploaded_images or []),
+            },
+        )
         await self._cancel_current_task()
 
         message_images = uploaded_images_from_snapshots(uploaded_images or [])
@@ -219,11 +227,21 @@ class TutorialSession:
         self.latest_screen = image
         self.screen_is_stale = False
         self.screen_captured_at = datetime.now(UTC)
+        logger.info(
+            "[session] user_screen",
+            extra={
+                "session_id": self.session_id,
+                "request_id": request_id,
+                "expected_request_id": self.pending_screen_request_id,
+                "bytes": len(image.data),
+                "awaiting_step_id": self.awaiting_step_id,
+            },
+        )
 
         future = self.pending_screen
         if future is None:
             logger.debug(
-                "user_screen arrived with no pending future; stored as latest_screen",
+                "[session] user_screen no pending future; stored as latest_screen",
                 extra={
                     "session_id": self.session_id,
                     "request_id": request_id,
@@ -232,7 +250,7 @@ class TutorialSession:
             return
         if self.pending_screen_request_id != request_id:
             logger.debug(
-                "user_screen request_id mismatch; resolving pending future anyway",
+                "[session] user_screen request_id mismatch; resolving anyway",
                 extra={
                     "session_id": self.session_id,
                     "request_id": request_id,
@@ -246,6 +264,16 @@ class TutorialSession:
         # Record every step_started; the walk loop's `_has_later_event`
         # uses out-of-slot signals to advance past stale steps, and an
         # exact-slot signal unblocks the current wait.
+        logger.info(
+            "[session] step_started",
+            extra={
+                "session_id": self.session_id,
+                "step_id": step_id,
+                "action_index": action_index,
+                "awaiting_step_id": self.awaiting_step_id,
+                "awaiting_action_index": self.awaiting_action_index,
+            },
+        )
         self.pending_step_starts.add((step_id, action_index))
         self.step_event.set()
         # User acted — drop any in-flight instruction verification. Its
@@ -265,9 +293,22 @@ class TutorialSession:
         # advance the walk loop via `_has_later_event` (when the slot is
         # past the current step) or sit harmlessly until garbage-collected
         # on session reset. Dropping them silently stalls the walk loop.
+        logger.info(
+            "[session] user_confirmation",
+            extra={
+                "session_id": self.session_id,
+                "step_id": step_id,
+                "action_index": action_index,
+                "confirmed": confirmed,
+                "has_screen": screen is not None,
+                "note_chars": len((note or "").strip()),
+                "awaiting_step_id": self.awaiting_step_id,
+                "awaiting_action_index": self.awaiting_action_index,
+            },
+        )
         if not self._is_awaiting_slot(step_id, action_index):
             logger.debug(
-                "user_confirmation arrived for non-awaiting slot; recording anyway",
+                "[session] user_confirmation non-awaiting slot",
                 extra={
                     "session_id": self.session_id,
                     "step_id": step_id,
@@ -350,7 +391,7 @@ class TutorialSession:
             raise
         except Exception:
             logger.exception(
-                "Tutorial session crashed",
+                "[session] crashed",
                 extra={"session_id": self.session_id},
             )
             raise
@@ -374,6 +415,20 @@ class TutorialSession:
     async def _run_agent_loop(self) -> None:
         self.status = "planning"
         await self.emit(StatusChangedEvent(status="planning", label="Thinking"))
+        logger.info(
+            "[session] agent_loop start",
+            extra={
+                "session_id": self.session_id,
+                "awaiting_step_id": self.awaiting_step_id,
+                "plan_step_count": len(self.plan_steps),
+                "completed_count": len(self.completed_step_ids),
+                "screen_captured_at": (
+                    self.screen_captured_at.isoformat()
+                    if self.screen_captured_at else None
+                ),
+                "screen_is_stale": self.screen_is_stale,
+            },
+        )
 
         consecutive_screen_requests = 0
         last_screen_reason = ""
@@ -382,7 +437,7 @@ class TutorialSession:
             await self.emit(AgentTurnEvent(turn=turn + 1, max_turns=MAX_AGENT_TURNS))
             tool_calls, text = await self._stream_llm_once()
             logger.info(
-                "Agent loop turn",
+                "[session] agent_loop turn",
                 extra={
                     "session_id": self.session_id,
                     "turn": turn + 1,
@@ -396,7 +451,7 @@ class TutorialSession:
             if not tool_calls:
                 if self.screen_is_stale:
                     logger.info(
-                        "Forcing tutorial_request_screen on text-only turn with stale screen",
+                        "[session] forcing request_screen on stale text-only turn",
                         extra={
                             "session_id": self.session_id,
                             "last_action_kind": self.last_action_kind,
@@ -494,7 +549,7 @@ class TutorialSession:
             return
 
         logger.warning(
-            "Agent loop hit MAX_AGENT_TURNS",
+            "[session] agent_loop hit MAX_AGENT_TURNS",
             extra={"session_id": self.session_id},
         )
 
@@ -508,7 +563,7 @@ class TutorialSession:
                 "Please switch to the relevant app or window."
             )
         logger.warning(
-            "Agent loop stalled on repeated tutorial_request_screen",
+            "[session] agent_loop stalled on repeated request_screen",
             extra={
                 "session_id": self.session_id,
                 "reason": reason,
@@ -555,7 +610,7 @@ class TutorialSession:
         text = "".join(text_parts)
         if text_parts:
             logger.info(
-                "LLM text concatenated",
+                "[session] llm text concatenated",
                 extra={
                     "session_id": self.session_id,
                     "text": repr(text),
@@ -632,7 +687,7 @@ class TutorialSession:
             raise
         except Exception:
             logger.exception(
-                "Draft plan generation failed",
+                "[draft_plan] generation failed",
                 extra={"session_id": self.session_id},
             )
             return
@@ -662,7 +717,7 @@ class TutorialSession:
             snippets = await asyncio.to_thread(self.web_ground.ground, query)
         except Exception:
             logger.exception(
-                "Web grounding failed",
+                "[web_ground] failed",
                 extra={"session_id": self.session_id, "query_chars": len(query)},
             )
             snippets = []
@@ -710,21 +765,57 @@ class TutorialSession:
     ) -> None:
         verifier_llm = self.fast_llm or self.llm
         await self.emit(InstructionVerificationStartedEvent(step_id=step_id))
+        started_at = time.perf_counter()
+        logger.info(
+            "[verifier] start",
+            extra={
+                "session_id": self.session_id,
+                "step_id": step_id,
+                "instruction": instruction[:120],
+                "screen_bytes": len(screen.data),
+                "screen_captured_at": (
+                    self.screen_captured_at.isoformat()
+                    if self.screen_captured_at else None
+                ),
+                "llm": "fast" if self.fast_llm is not None else "main",
+            },
+        )
         try:
             verdict: VerifierVerdict = await asyncio.to_thread(
                 classify_screen, verifier_llm, instruction, screen
             )
         except asyncio.CancelledError:
+            logger.info(
+                "[verifier] cancelled",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": step_id,
+                    "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                },
+            )
             raise
         except Exception:
             logger.exception(
-                "Instruction verification crashed",
+                "[verifier] crashed",
                 extra={"session_id": self.session_id, "step_id": step_id},
             )
             return
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        superseded = self.awaiting_step_id != step_id
+        logger.info(
+            "[verifier] verdict",
+            extra={
+                "session_id": self.session_id,
+                "step_id": step_id,
+                "ok": verdict.ok,
+                "reason": verdict.reason,
+                "elapsed_ms": elapsed_ms,
+                "superseded": superseded,
+            },
+        )
         # If the user moved on (or the instruction was replaced) while we
         # were waiting on the LLM, the verdict is stale — drop silently.
-        if self.awaiting_step_id != step_id:
+        if superseded:
             return
         await self.emit(
             InstructionVerifiedEvent(
@@ -775,7 +866,7 @@ class TutorialSession:
             arguments = parse_update_plan_arguments(call)
         except TutorialToolCallError as error:
             logger.warning(
-                "Rejected tutorial_update_plan args",
+                "[session] rejected update_plan args",
                 extra={"session_id": self.session_id, "error": error.message},
             )
             self.history.append(
@@ -807,7 +898,7 @@ class TutorialSession:
             )
         except (PlanMergeError, ValueError) as error:
             logger.warning(
-                "Rejected plan merge",
+                "[session] rejected plan merge",
                 extra={"session_id": self.session_id, "error": str(error)},
             )
             self.history.append(
@@ -917,7 +1008,7 @@ class TutorialSession:
             reason = parse_request_screen_reason(call)
         except TutorialToolCallError as error:
             logger.warning(
-                "Invalid request_screen call",
+                "[session] invalid request_screen call",
                 extra={"session_id": self.session_id, "error": error.message},
             )
             self.history.append(
@@ -936,12 +1027,31 @@ class TutorialSession:
 
         await self.emit(StatusChangedEvent(status="needs_screen", label="Need a fresh screen"))
         await self.emit(ScreenRequestedEvent(request_id=request_id, reason=reason))
+        request_started = time.perf_counter()
+        logger.info(
+            "[session] screen_request start",
+            extra={
+                "session_id": self.session_id,
+                "request_id": request_id,
+                "reason": reason[:160],
+            },
+        )
 
         try:
             await self.pending_screen
         finally:
             self.pending_screen = None
             self.pending_screen_request_id = None
+            logger.info(
+                "[session] screen_request end",
+                extra={
+                    "session_id": self.session_id,
+                    "request_id": request_id,
+                    "elapsed_ms": round(
+                        (time.perf_counter() - request_started) * 1000, 2
+                    ),
+                },
+            )
 
         self._record_screen_progress()
         captured_at = datetime.now(UTC).isoformat(timespec="seconds")

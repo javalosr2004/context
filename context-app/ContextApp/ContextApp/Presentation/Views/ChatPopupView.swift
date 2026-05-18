@@ -53,6 +53,37 @@ private struct TutorialAnswerDisplay {
     let answer: String
 }
 
+private struct SkeletonShimmer: View {
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .overlay(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.00),
+                            Color.white.opacity(0.22),
+                            Color.white.opacity(0.00)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: width * 0.6)
+                    .offset(x: phase * width)
+                )
+                .clipped()
+                .onAppear {
+                    withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                        phase = 1.4
+                    }
+                }
+        }
+    }
+}
+
 private struct PopupBlurBackground: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
@@ -134,11 +165,17 @@ struct ChatPopupView: View {
             } else if latestPlan == nil {
                 statusChipRow
 
+                if sessionController.status.isBusy {
+                    tutorialMeta
+                }
+
                 if let answer = latestTutorialAnswer {
                     answerCard(answer)
                 }
 
-                launcherView
+                if !sessionController.status.isBusy {
+                    launcherView
+                }
             } else {
                 statusChipRow
 
@@ -248,19 +285,27 @@ struct ChatPopupView: View {
     private var tutorialMeta: some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-            Text(tutorialName)
-                .font(.system(size: 11, weight: .medium))
-                .tracking(0.44)
-                .textCase(.uppercase)
-                .foregroundStyle(OverlayTheme.tertiaryText)
-                .lineLimit(1)
+                if latestPlan == nil {
+                    SkeletonShimmer()
+                        .frame(width: 140, height: 11)
+                        .clipShape(Capsule())
+                } else {
+                    Text(tutorialName)
+                        .font(.system(size: 11, weight: .medium))
+                        .tracking(0.44)
+                        .textCase(.uppercase)
+                        .foregroundStyle(OverlayTheme.tertiaryText)
+                        .lineLimit(1)
+                }
 
                 Spacer()
 
-                Text(metaRightText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(OverlayTheme.tertiaryText)
-                    .lineLimit(1)
+                if !metaRightText.isEmpty {
+                    Text(metaRightText)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(OverlayTheme.tertiaryText)
+                        .lineLimit(1)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 2)
@@ -1268,11 +1313,8 @@ struct ChatPopupView: View {
     }
 
     private var metaRightText: String {
-        if isTutorialPaused {
-            return "paused"
-        }
         guard let plan = latestPlan, !plan.steps.isEmpty, let currentStepIndex else {
-            return sessionController.status.label.lowercased()
+            return ""
         }
         return "\(currentStepIndex + 1) of \(plan.steps.count)"
     }

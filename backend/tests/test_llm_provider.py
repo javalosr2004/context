@@ -95,10 +95,10 @@ class LLMProviderTests(unittest.TestCase):
             verbosity="medium",
         )
 
-    def test_creates_holo_client_from_openai_compatible_environment(self) -> None:
-        with patch("backend.llm_provider.OpenAIClient") as openai_client:
+    def test_creates_holo_client_from_environment(self) -> None:
+        with patch("backend.llm_provider.HoloChatClient") as holo_client:
             client = object()
-            openai_client.return_value = client
+            holo_client.return_value = client
 
             llm = LLMProvider(
                 {
@@ -106,22 +106,18 @@ class LLMProviderTests(unittest.TestCase):
                     "HAI_API_KEY": "hai-key",
                     "HAI_BASE_URL": "https://holo.example/v1/",
                     "HOLO_MODEL": "holo-test-model",
-                    "OPENAI_REASONING_EFFORT": "low",
-                    "OPENAI_VERBOSITY": "high",
                 }
             ).create_multimodal_llm()
 
         self.assertIs(llm, client)
-        openai_client.assert_called_once_with(
+        holo_client.assert_called_once_with(
             api_key="hai-key",
             model="holo-test-model",
             base_url="https://holo.example/v1/",
-            reasoning_effort="low",
-            verbosity="high",
         )
 
     def test_defaults_to_holo_model_and_base_url(self) -> None:
-        with patch("backend.llm_provider.OpenAIClient") as openai_client:
+        with patch("backend.llm_provider.HoloChatClient") as holo_client:
             LLMProvider(
                 {
                     "LLM_PROVIDER": "holo",
@@ -129,12 +125,10 @@ class LLMProviderTests(unittest.TestCase):
                 }
             ).create_multimodal_llm()
 
-        openai_client.assert_called_once_with(
+        holo_client.assert_called_once_with(
             api_key="hai-key",
             model=DEFAULT_HOLO_MODEL,
             base_url=DEFAULT_HOLO_BASE_URL,
-            reasoning_effort="medium",
-            verbosity="medium",
         )
 
     def test_rejects_unsupported_provider(self) -> None:

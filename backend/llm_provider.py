@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from backend.gemini_client import GeminiClient
+from backend.holo_chat_client import HoloChatClient
 from backend.llm import MultimodalLLM
 from backend.openai_client import OpenAIClient
 
@@ -71,23 +72,17 @@ class LLMProvider:
             ),
         )
 
-    def _create_holo_client(self) -> OpenAIClient:
+    def _create_holo_client(self) -> HoloChatClient:
         api_key = self._required("HAI_API_KEY")
         model = (
             self.environment.get("HOLO_MODEL")
             or self.environment.get("LLM_MODEL")
             or DEFAULT_HOLO_MODEL
         )
-        return OpenAIClient(
+        return HoloChatClient(
             api_key=api_key,
             model=model,
             base_url=self.environment.get("HAI_BASE_URL") or DEFAULT_HOLO_BASE_URL,
-            reasoning_effort=self.environment.get(
-                "OPENAI_REASONING_EFFORT", DEFAULT_OPENAI_REASONING_EFFORT
-            ),
-            verbosity=self.environment.get(
-                "OPENAI_VERBOSITY", DEFAULT_OPENAI_VERBOSITY
-            ),
         )
 
     def _required(self, name: str) -> str:

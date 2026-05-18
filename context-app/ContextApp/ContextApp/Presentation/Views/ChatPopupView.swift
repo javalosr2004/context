@@ -41,6 +41,12 @@ private struct StatusChip: Identifiable, Equatable {
     let showsDot: Bool
 }
 
+private struct StepChipFlash: Equatable {
+    let id: UUID
+    let text: String
+    let icon: String
+}
+
 private struct TutorialAnswerDisplay {
     let id: UUID
     let question: String
@@ -88,6 +94,8 @@ struct ChatPopupView: View {
     @State private var referenceImageName: String?
     @State private var dismissedAnswerID: UUID?
     @State private var nowPulse: Bool = false
+    @State private var stepChipFlash: StepChipFlash?
+    @State private var lastSeenTotalSteps: Int?
     @FocusState private var isMessageFieldFocused: Bool
 
     private static let launcherSuggestions: [String] = [
@@ -1101,16 +1109,14 @@ struct ChatPopupView: View {
             ))
         }
 
-        if let turn = sessionController.agentTurn, turn.maxTurns > 0 {
+        if let flash = stepChipFlash {
             chips.append(StatusChip(
-                id: "turn",
-                icon: "arrow.triangle.2.circlepath",
-                text: "Turn \(turn.turn)/\(turn.maxTurns)",
+                id: "step",
+                icon: flash.icon,
+                text: flash.text,
                 showsDot: false
             ))
-        }
-
-        if let progress = sessionController.stepProgress, progress.totalSteps > 0 {
+        } else if let progress = sessionController.stepProgress, progress.totalSteps > 0 {
             chips.append(StatusChip(
                 id: "step",
                 icon: "list.number",
@@ -1125,18 +1131,64 @@ struct ChatPopupView: View {
     @ViewBuilder
     private var statusChipRow: some View {
         let chips = statusChips
-        if !chips.isEmpty {
-            HStack(spacing: 6) {
-                ForEach(chips) { chip in
-                    statusChipView(chip)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+        Group {
+            if !chips.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(chips) { chip in
+                        statusChipView(chip)
+                            .id("\(chip.id):\(chip.text)")
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 4)
-            .padding(.bottom, 2)
-            .animation(.easeInOut(duration: 0.18), value: chips.map(\.id))
+        }
+        .animation(.easeInOut(duration: 0.22), value: chips.map { "\($0.id):\($0.text)" })
+        .onChange(of: planDiffSignature) { _ in handlePlanDiffChange() }
+        .onChange(of: sessionController.stepProgress?.totalSteps ?? 0) { newTotal in
+            if newTotal > 0 { lastSeenTotalSteps = newTotal }
+        }
+    }
+
+    private var planDiffSignature: String {
+        guard let diff = sessionController.lastPlanDiff else { return "" }
+        return "\(diff.frozenPrefixLen)|\(diff.newTailLen)|\(diff.refinedCurrent)|\(diff.totalSteps)"
+    }
+
+    private func handlePlanDiffChange() {
+        guard let diff = sessionController.lastPlanDiff else { return }
+        let prior = lastSeenTotalSteps ?? diff.totalSteps
+        let delta = diff.totalSteps - prior
+        lastSeenTotalSteps = diff.totalSteps
+
+        let flash: StepChipFlash
+        if delta > 0 {
+            flash = StepChipFlash(
+                id: UUID(),
+                text: "+\(delta) step\(delta == 1 ? "" : "s")",
+                icon: "plus.circle"
+            )
+        } else if delta < 0 {
+            flash = StepChipFlash(
+                id: UUID(),
+                text: "\(delta) step\(delta == -1 ? "" : "s")",
+                icon: "minus.circle"
+            )
+        } else if diff.refinedCurrent {
+            flash = StepChipFlash(id: UUID(), text: "Refined", icon: "wand.and.stars")
+        } else {
+            return
+        }
+
+        stepChipFlash = flash
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            if stepChipFlash?.id == flash.id {
+                stepChipFlash = nil
+            }
         }
     }
 

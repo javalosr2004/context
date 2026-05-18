@@ -116,12 +116,16 @@ final class OverlayCoordinator {
         sessionControllerRef = tutorialSessionController
         errorStatusCancellable = tutorialSessionController.$status
             .receive(on: DispatchQueue.main)
-            .sink { [weak errorIndicator] status in
-                guard let errorIndicator else { return }
-                if case .failed(let message) = status {
-                    errorIndicator.show(message: message)
-                } else {
-                    errorIndicator.hide()
+            .sink { [weak errorIndicator, weak debugController] status in
+                if let errorIndicator {
+                    if case .failed(let message) = status {
+                        errorIndicator.show(message: message)
+                    } else {
+                        errorIndicator.hide()
+                    }
+                }
+                if status.isBusy {
+                    debugController?.hide()
                 }
             }
         let tutorialActionConsumer = TutorialActionConsumer(

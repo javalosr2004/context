@@ -134,6 +134,11 @@ enum TutorialSessionClientEvent: Codable, Equatable {
     }
 }
 
+struct TutorialSessionWebSource: Codable, Equatable {
+    let title: String
+    let url: String
+}
+
 enum TutorialSessionServerEvent: Codable, Equatable {
     case sessionReady(sessionID: String)
     case statusChanged(status: String, label: String)
@@ -147,6 +152,11 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case stepReady(stepID: String, actionIndex: Int)
     case awaitingConfirmation(stepID: String, actionIndex: Int)
     case screenRequested(requestID: String, reason: String)
+    case webSearchStarted(query: String)
+    case webSearchCompleted(query: String, sourceCount: Int, sources: [TutorialSessionWebSource], elapsedMs: Double)
+    case agentTurn(turn: Int, maxTurns: Int)
+    case planDiff(frozenPrefixLen: Int, newTailLen: Int, refinedCurrent: Bool, totalSteps: Int)
+    case stepProgress(stepID: String, stepIndex: Int, totalSteps: Int, actionIndex: Int, totalActions: Int)
     case sessionCompleted
     case error(code: String, message: String)
 
@@ -164,6 +174,18 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case reason
         case code
         case message
+        case query
+        case sourceCount = "source_count"
+        case sources
+        case elapsedMs = "elapsed_ms"
+        case turn
+        case maxTurns = "max_turns"
+        case frozenPrefixLen = "frozen_prefix_len"
+        case newTailLen = "new_tail_len"
+        case refinedCurrent = "refined_current"
+        case totalSteps = "total_steps"
+        case stepIndex = "step_index"
+        case totalActions = "total_actions"
     }
 
     init(from decoder: Decoder) throws {
@@ -204,6 +226,35 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .screenRequested(
                 requestID: try container.decode(String.self, forKey: .requestID),
                 reason: try container.decode(String.self, forKey: .reason)
+            )
+        case "web_search_started":
+            self = .webSearchStarted(query: try container.decode(String.self, forKey: .query))
+        case "web_search_completed":
+            self = .webSearchCompleted(
+                query: try container.decode(String.self, forKey: .query),
+                sourceCount: try container.decode(Int.self, forKey: .sourceCount),
+                sources: try container.decodeIfPresent([TutorialSessionWebSource].self, forKey: .sources) ?? [],
+                elapsedMs: try container.decode(Double.self, forKey: .elapsedMs)
+            )
+        case "agent_turn":
+            self = .agentTurn(
+                turn: try container.decode(Int.self, forKey: .turn),
+                maxTurns: try container.decode(Int.self, forKey: .maxTurns)
+            )
+        case "plan_diff":
+            self = .planDiff(
+                frozenPrefixLen: try container.decode(Int.self, forKey: .frozenPrefixLen),
+                newTailLen: try container.decode(Int.self, forKey: .newTailLen),
+                refinedCurrent: try container.decode(Bool.self, forKey: .refinedCurrent),
+                totalSteps: try container.decode(Int.self, forKey: .totalSteps)
+            )
+        case "step_progress":
+            self = .stepProgress(
+                stepID: try container.decode(String.self, forKey: .stepID),
+                stepIndex: try container.decode(Int.self, forKey: .stepIndex),
+                totalSteps: try container.decode(Int.self, forKey: .totalSteps),
+                actionIndex: try container.decode(Int.self, forKey: .actionIndex),
+                totalActions: try container.decode(Int.self, forKey: .totalActions)
             )
         case "session_completed":
             self = .sessionCompleted
@@ -260,6 +311,32 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             try container.encode("screen_requested", forKey: .type)
             try container.encode(requestID, forKey: .requestID)
             try container.encode(reason, forKey: .reason)
+        case .webSearchStarted(let query):
+            try container.encode("web_search_started", forKey: .type)
+            try container.encode(query, forKey: .query)
+        case .webSearchCompleted(let query, let sourceCount, let sources, let elapsedMs):
+            try container.encode("web_search_completed", forKey: .type)
+            try container.encode(query, forKey: .query)
+            try container.encode(sourceCount, forKey: .sourceCount)
+            try container.encode(sources, forKey: .sources)
+            try container.encode(elapsedMs, forKey: .elapsedMs)
+        case .agentTurn(let turn, let maxTurns):
+            try container.encode("agent_turn", forKey: .type)
+            try container.encode(turn, forKey: .turn)
+            try container.encode(maxTurns, forKey: .maxTurns)
+        case .planDiff(let frozenPrefixLen, let newTailLen, let refinedCurrent, let totalSteps):
+            try container.encode("plan_diff", forKey: .type)
+            try container.encode(frozenPrefixLen, forKey: .frozenPrefixLen)
+            try container.encode(newTailLen, forKey: .newTailLen)
+            try container.encode(refinedCurrent, forKey: .refinedCurrent)
+            try container.encode(totalSteps, forKey: .totalSteps)
+        case .stepProgress(let stepID, let stepIndex, let totalSteps, let actionIndex, let totalActions):
+            try container.encode("step_progress", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+            try container.encode(stepIndex, forKey: .stepIndex)
+            try container.encode(totalSteps, forKey: .totalSteps)
+            try container.encode(actionIndex, forKey: .actionIndex)
+            try container.encode(totalActions, forKey: .totalActions)
         case .sessionCompleted:
             try container.encode("session_completed", forKey: .type)
         case .error(let code, let message):

@@ -925,8 +925,13 @@ struct ChatPopupView: View {
 
     private var loadingText: String {
         switch sessionController.status {
-        case .preparingScreen, .sending, .planning:
+        case .preparingScreen, .sending:
             return sessionController.status.label
+        case .planning(let label):
+            if !sessionController.webSources.isEmpty {
+                return "\(label) · \(sessionController.webSources.count) source\(sessionController.webSources.count == 1 ? "" : "s")"
+            }
+            return label
         case .ready, .awaitingConfirmation, .completed, .failed:
             return Self.loadingWords[loadingWordIndex]
         }
@@ -1059,6 +1064,16 @@ struct ChatPopupView: View {
     private var statusText: String {
         if isSendingInstruction {
             return "Reading screen"
+        }
+
+        if let progress = sessionController.stepProgress, progress.totalSteps > 0 {
+            let stepFraction = "Step \(progress.stepIndex + 1)/\(progress.totalSteps)"
+            switch sessionController.status {
+            case .ready, .awaitingConfirmation:
+                return stepFraction
+            default:
+                return "\(sessionController.status.label) · \(stepFraction)"
+            }
         }
 
         return sessionController.status.label

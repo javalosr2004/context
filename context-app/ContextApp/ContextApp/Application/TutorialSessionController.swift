@@ -52,6 +52,10 @@ final class TutorialSessionController: ObservableObject {
     @Published private(set) var messages: [ChatMessage]
     @Published private(set) var pendingContinuePromptStepID: String?
     @Published private(set) var status: TutorialSessionUIStatus = .ready
+    @Published private(set) var agentTurn: (turn: Int, maxTurns: Int)?
+    @Published private(set) var webSources: [TutorialSessionWebSource] = []
+    @Published private(set) var stepProgress: (stepIndex: Int, totalSteps: Int, actionIndex: Int, totalActions: Int)?
+    @Published private(set) var lastPlanDiff: (frozenPrefixLen: Int, newTailLen: Int, refinedCurrent: Bool, totalSteps: Int)?
 
     private let capture: ScreenFrameCapture
     private let client: TutorialSessionAPIClient
@@ -209,6 +213,10 @@ final class TutorialSessionController: ObservableObject {
         pendingContinuePromptStepID = nil
         draftPlan = nil
         optimisticallyGroundedSlot = nil
+        agentTurn = nil
+        webSources = []
+        stepProgress = nil
+        lastPlanDiff = nil
         status = .ready
         messageStore.removeAll()
         messages = messageStore.messages
@@ -373,6 +381,21 @@ final class TutorialSessionController: ObservableObject {
             status = .awaitingConfirmation
         case .screenRequested(let requestID, let reason):
             handleScreenRequest(requestID: requestID, reason: reason)
+        case .webSearchStarted:
+            webSources = []
+            status = .planning("Searching the web…")
+        case .webSearchCompleted(_, let sourceCount, let sources, _):
+            webSources = sources
+            if sourceCount > 0 {
+                status = .planning("Found \(sourceCount) source\(sourceCount == 1 ? "" : "s")")
+            }
+        case .agentTurn(let turn, let maxTurns):
+            agentTurn = (turn, maxTurns)
+            status = .planning("Thinking (pass \(turn)/\(maxTurns))")
+        case .planDiff(let frozenPrefixLen, let newTailLen, let refinedCurrent, let totalSteps):
+            lastPlanDiff = (frozenPrefixLen, newTailLen, refinedCurrent, totalSteps)
+        case .stepProgress(_, let stepIndex, let totalSteps, let actionIndex, let totalActions):
+            stepProgress = (stepIndex, totalSteps, actionIndex, totalActions)
         case .sessionCompleted:
             currentStepID = nil
             currentActionIndex = nil
@@ -455,7 +478,6 @@ final class TutorialSessionController: ObservableObject {
 
     private func applyFailure(_ message: String) {
         logger.error("\(message, privacy: .public)")
-        appendTutorialText(message)
         status = .failed(message)
     }
 

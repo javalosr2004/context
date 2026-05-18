@@ -23,6 +23,8 @@ final class OverlayCoordinator {
     private var tutorialSessionController: TutorialSessionController?
     private let stabilityWatcher = ScreenStabilityWatcher()
     private var stabilityIndicator: StabilityIndicatorController?
+    private var errorIndicator: ErrorIndicatorController?
+    private var errorStatusCancellable: AnyCancellable?
 
     init(screenProvider: @escaping () -> NSScreen?) {
         self.screenProvider = screenProvider
@@ -36,6 +38,8 @@ final class OverlayCoordinator {
         let bboxPanel = DebugBboxPanel(frame: CGRect(origin: .zero, size: DebugBoundingBox.size))
         let stabilityIndicator = StabilityIndicatorController(screenProvider: screenProvider)
         self.stabilityIndicator = stabilityIndicator
+        let errorIndicator = ErrorIndicatorController(screenProvider: screenProvider)
+        self.errorIndicator = errorIndicator
 
         var sessionControllerRef: TutorialSessionController?
         let focusMaskController = FocusMaskController(
@@ -110,6 +114,16 @@ final class OverlayCoordinator {
             screenProvider: screenProvider
         )
         sessionControllerRef = tutorialSessionController
+        errorStatusCancellable = tutorialSessionController.$status
+            .receive(on: DispatchQueue.main)
+            .sink { [weak errorIndicator] status in
+                guard let errorIndicator else { return }
+                if case .failed(let message) = status {
+                    errorIndicator.show(message: message)
+                } else {
+                    errorIndicator.hide()
+                }
+            }
         let tutorialActionConsumer = TutorialActionConsumer(
             groundInstruction: { [weak self, weak popupPanel, weak iconPanel, screenProvider] instruction in
                 if let self, let screen = screenProvider() {
@@ -195,6 +209,9 @@ final class OverlayCoordinator {
         screenGroundingController = nil
         statusBarController = nil
         popupResizeCancellable = nil
+        errorStatusCancellable = nil
+        errorIndicator?.hide()
+        errorIndicator = nil
         tutorialActionConsumer = nil
         tutorialPlanController = nil
         tutorialSessionController = nil

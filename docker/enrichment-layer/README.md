@@ -37,11 +37,17 @@ in-flight jobs are marked `failed` with "server restarted before completion".
 
 ```
 data/
-  index.db                  SQLite index (runs, searches, pages, parsed)
-  runs/{run_id}/meta.json   per-run metadata + plan
-  pages/{hash}.html         raw HTML
-  parsed/{hash}.json        extracted text + features
+  index.db                                SQLite index (runs, searches, pages, parsed, plans, aggregate_plans, jobs)
+  runs/{run_id}/meta.json                 per-run metadata + query plan
+  runs/{run_id}/aggregate_plan.json       ONE consensus plan stitched from N candidate plans (with sources)
+  pages/{hash}.html                       raw HTML
+  parsed/{hash}.json                      extracted text + features
+  plans/{hash}.json                       per-page LLM-parsed DraftPlan (with provenance)
 ```
+
+After a job completes, the thing you actually want to feed downstream is at
+`GET /runs/{run_id}/aggregate_plan` — one merged plan with per-step source
+attribution back to the originating URLs.
 
 ## Tests
 

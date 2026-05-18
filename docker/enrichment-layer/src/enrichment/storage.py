@@ -11,6 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from enrichment.aggregate import AggregatePlan
 from enrichment.config import settings
 from enrichment.fetch import FetchResult
 from enrichment.models import ExtractedPage, QueryPlan, SearchHit
@@ -73,6 +74,18 @@ class Plan(Base):
     content_hash = Column(String, ForeignKey("pages.content_hash"), nullable=False)
     goal = Column(String, nullable=False)
     step_count = Column(Integer, nullable=False, default=0)
+    model_name = Column(String, nullable=False)
+    plan_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class AggregatePlanRow(Base):
+    __tablename__ = "aggregate_plans"
+    run_id = Column(String, ForeignKey("runs.run_id"), primary_key=True)
+    application = Column(String, nullable=False)
+    goal = Column(String, nullable=False)
+    step_count = Column(Integer, nullable=False)
+    source_count = Column(Integer, nullable=False)
     model_name = Column(String, nullable=False)
     plan_json = Column(JSON, nullable=False)
     created_at = Column(DateTime, nullable=False)
@@ -172,6 +185,12 @@ def get_job(job_id: str) -> dict | None:
         }
 
 
+def get_aggregate_plan(run_id: str) -> dict | None:
+    with _get_session() as session:
+        row = session.get(AggregatePlanRow, run_id)
+        return row.plan_json if row else None
+
+
 def reap_orphan_jobs() -> int:
     """Mark any pending/running jobs as failed; called on startup."""
     init_db()
@@ -227,6 +246,7 @@ def save_run(
     fetches: list[FetchResult],
     extractions: list[ExtractedPage],
     drafts: list[EnrichedDraft],
+    aggregate: AggregatePlan | None,
 ) -> str:
     init_db()
     run_id = str(uuid4())
@@ -255,6 +275,11 @@ def save_run(
         _write_blob(f"parsed/{e.content_hash}.json", e.model_dump_json(indent=2))
     for d in drafts:
         _write_blob(f"plans/{d.source_content_hash}.json", d.model_dump_json(indent=2))
+    if aggregate is not None:
+        _write_blob(
+            f"runs/{run_id}/aggregate_plan.json",
+            aggregate.model_dump_json(indent=2),
+        )
 
     with _get_session() as session:
         session.add(Run(
@@ -310,6 +335,19 @@ def save_run(
                 goal_term_present=int(e.goal_term_present),
                 features=e.model_dump(),
                 parsed_at=now,
+            ))
+
+        # aggregate plan
+        if aggregate is not None:
+            session.add(AggregatePlanRow(
+                run_id=run_id,
+                application=aggregate.application,
+                goal=aggregate.goal,
+                step_count=len(aggregate.steps),
+                source_count=aggregate.source_count,
+                model_name=aggregate.model_name,
+                plan_json=aggregate.model_dump(),
+                created_at=now,
             ))
 
         # draft plans

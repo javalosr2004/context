@@ -37,3 +37,4 @@ class RunResult(BaseModel):
     hit_count: int
     page_count: int
     parsed_plan_count: int = 0
+    aggregate_step_count: int = 0

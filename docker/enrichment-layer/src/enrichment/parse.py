@@ -21,19 +21,27 @@ class EnrichedDraft(BaseModel):
 
 PARSE_PROMPT = """You convert a single web tutorial page into a coarse step-by-step plan.
 
-The plan will be fed into a downstream tutorial agent that aligns each step to
-the live screen. Do not invent UI targets, coordinates, or roles. Write each
-instruction as a short imperative sentence a user could follow on screen.
+The plan will be fed into a downstream tutorial agent that aligns each step
+to the live screen. Do not invent UI targets, coordinates, or roles. Write
+each instruction as a short imperative sentence a user could follow.
 
-Output:
-- is_tutorial: false if the page is not actually a step-by-step tutorial for
-  the requested application and goal (e.g. forum posts, marketing copy,
-  changelogs, listicles, irrelevant content). In that case return steps as
-  a single placeholder.
+Set is_tutorial = false (and return a single placeholder step) if ANY apply:
+- The page is not a step-by-step tutorial (forum thread, marketing, changelog,
+  listicle, blog roundup).
+- The page is a tutorial but for a DIFFERENT application than the requested
+  one. Example: requested "GitHub" but page teaches the Eclipse Git plugin,
+  GitKraken, or VS Code — that is not a GitHub tutorial.
+- The page is a tutorial for the requested application but for a DIFFERENT
+  goal than the requested one. Example: requested goal "export PNG" but page
+  teaches importing, sharing, or exporting SVG.
+- The match is only partial (e.g. the goal is one paragraph inside a broader
+  guide). Borderline cases: prefer false.
+
+When is_tutorial = true:
 - plan.goal: the goal the page teaches, phrased as an imperative.
-- plan.steps: ordered DraftSteps. Merge sub-bullets into a single step when
-  they describe one user-visible action. Drop pure prose intros, outros,
-  and unrelated tips.
+- plan.steps: ordered DraftSteps. Merge sub-bullets into one step when they
+  describe a single user-visible action. Drop prose intros, outros, tips,
+  and prerequisites that are not actions.
 
 For each step pick the best kind hint:
 - click, type, press_key, scroll, wait, navigate, verify, other
@@ -132,4 +140,8 @@ def parse_to_draft(
 
 def is_parse_candidate(page: ExtractedPage) -> bool:
     """Cheap structural gate before spending an LLM call on a page."""
-    return page.ordered_list_items >= 3 and page.application_term_present
+    return (
+        page.ordered_list_items >= 3
+        and page.application_term_present
+        and page.goal_term_present
+    )

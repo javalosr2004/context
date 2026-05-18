@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from enrichment.pipeline import run_enrichment
 from enrichment.storage import (
-    create_job, get_job, init_db, reap_orphan_jobs, update_job,
+    create_job, get_aggregate_plan, get_job, init_db, reap_orphan_jobs, update_job,
 )
 
 logger = logging.getLogger("enrichment")
@@ -54,6 +54,14 @@ def job_status(job_id: str) -> dict:
     if job is None:
         raise HTTPException(404, "job not found")
     return job
+
+
+@app.get("/runs/{run_id}/aggregate_plan")
+def aggregate_plan(run_id: str) -> dict:
+    plan = get_aggregate_plan(run_id)
+    if plan is None:
+        raise HTTPException(404, "no aggregate plan for this run")
+    return plan
 
 
 async def _run_job(job_id: str, raw_request: str) -> None:

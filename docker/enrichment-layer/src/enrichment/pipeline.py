@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 
+from enrichment.aggregate import aggregate_drafts
 from enrichment.config import settings
 from enrichment.extract import extract
 from enrichment.fetch import fan_out_fetch
@@ -37,8 +38,13 @@ async def run_enrichment(raw_request: str) -> RunResult:
 
     drafts = await _parse_candidates(candidates, plan.application, plan.goal)
 
+    aggregate = await asyncio.to_thread(
+        aggregate_drafts, drafts, plan.application, plan.goal,
+    )
+
     run_id = await asyncio.to_thread(
-        save_run, raw_request, plan, dict(hits_by_query), fetches, extractions, drafts,
+        save_run,
+        raw_request, plan, dict(hits_by_query), fetches, extractions, drafts, aggregate,
     )
 
     return RunResult(
@@ -47,6 +53,7 @@ async def run_enrichment(raw_request: str) -> RunResult:
         hit_count=len(hits),
         page_count=len(extractions),
         parsed_plan_count=len(drafts),
+        aggregate_step_count=len(aggregate.steps) if aggregate else 0,
     )
 
 

@@ -398,7 +398,7 @@ final class TutorialSessionController: ObservableObject {
             }
         case .agentTurn(let turn, let maxTurns):
             agentTurn = (turn, maxTurns)
-            status = .planning("Thinking (pass \(turn)/\(maxTurns))")
+            status = .planning("Thinking")
         case .planDiff(let frozenPrefixLen, let newTailLen, let refinedCurrent, let totalSteps):
             lastPlanDiff = (frozenPrefixLen, newTailLen, refinedCurrent, totalSteps)
         case .stepProgress(_, let stepIndex, let totalSteps, let actionIndex, let totalActions):

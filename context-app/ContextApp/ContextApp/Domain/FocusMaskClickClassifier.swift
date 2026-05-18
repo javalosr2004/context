@@ -13,8 +13,10 @@ struct FocusMaskClickClassifier {
         isIgnoredControl: Bool
     ) -> FocusMaskClickTarget? {
         guard !cutout.isNull, !cutout.isEmpty else { return nil }
-        guard !isIgnoredControl else { return .ignoredControl }
 
-        return cutout.contains(point) ? .insideCutout : .outsideCutout
+        if cutout.contains(point) {
+            return .insideCutout
+        }
+        return isIgnoredControl ? .ignoredControl : .outsideCutout
     }
 }

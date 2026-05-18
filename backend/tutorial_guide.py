@@ -7,6 +7,11 @@ from dataclasses import dataclass
 
 from backend.images import UploadedImage
 from backend.llm import LLMRequest, MultimodalLLM
+from backend.web_ground import (
+    NullWebGroundProducer,
+    WebGroundProducer,
+    format_snippets_for_prompt,
+)
 from backend.tutorial_schema import (
     DraftPlan,
     TutorialPlan,
@@ -414,17 +419,30 @@ def generate_draft_plan(
     goal: str,
     image: UploadedImage | None = None,
     images: list[UploadedImage] | None = None,
+    web_ground: WebGroundProducer | None = None,
 ) -> DraftPlan:
     """One-shot coarse plan generation. Images are optional visual context."""
     request_images = images if images is not None else []
     if image is not None:
         request_images = [image, *request_images]
+
+    grounding_block = ""
+    producer = web_ground if web_ground is not None else NullWebGroundProducer()
+    snippets = producer.ground(goal)
+    if snippets:
+        grounding_block = format_snippets_for_prompt(snippets) + "\n\n"
+        logger.info(
+            "Draft plan grounded via web search",
+            extra={"snippet_count": len(snippets)},
+        )
+
     started_at = time.perf_counter()
     raw = llm.complete_text(
         LLMRequest(
             system_prompt=DRAFT_PLAN_SYSTEM_PROMPT,
             user_text=(
                 f"User goal: {goal}\n\n"
+                f"{grounding_block}"
                 "Return a draft plan as JSON matching the provided schema."
             ),
             images=request_images,

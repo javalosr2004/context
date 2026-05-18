@@ -18,6 +18,7 @@ from backend.conversations import ConversationRepository, InMemoryConversationRe
 from backend.images import read_uploaded_images
 from backend.llm import MultimodalLLM
 from backend.llm_provider import LLMProvider, LLMProviderConfigurationError
+from backend.web_ground import web_ground_producer_from_environment
 from backend.tutorial_guide import (
     TutorialGuide,
     TutorialPlanRequest,
@@ -282,7 +283,10 @@ def get_tutorial_session_store(
 ) -> TutorialSessionStore:
     store = getattr(connection.app.state, "tutorial_session_store", None)
     if store is None:
-        store = TutorialSessionStore(llm)
+        store = TutorialSessionStore(
+            llm,
+            web_ground=web_ground_producer_from_environment(),
+        )
         connection.app.state.tutorial_session_store = store
     return store
 

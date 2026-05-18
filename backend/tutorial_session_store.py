@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from backend.llm import MultimodalLLM
 from backend.tutorial_session import EventSink, TutorialSession
+from backend.web_ground import NullWebGroundProducer, WebGroundProducer
 from backend.tutorial_session_events import (
     CreateTutorialSessionResponse,
     TutorialSessionResponse,
@@ -35,9 +36,11 @@ class TutorialSessionStore:
         self,
         llm: MultimodalLLM,
         session_id_factory: Callable[[], str] | None = None,
+        web_ground: WebGroundProducer | None = None,
     ) -> None:
         self._llm = llm
         self._session_id_factory = session_id_factory or (lambda: str(uuid4()))
+        self._web_ground = web_ground or NullWebGroundProducer()
         self._reserved: set[str] = set()
         self._live: dict[str, TutorialSession] = {}
 
@@ -64,7 +67,12 @@ class TutorialSessionStore:
                 f"Tutorial session does not exist: {session_id}",
             )
         self._reserved.discard(session_id)
-        session = TutorialSession(session_id=session_id, llm=self._llm, emit=emit)
+        session = TutorialSession(
+            session_id=session_id,
+            llm=self._llm,
+            emit=emit,
+            web_ground=self._web_ground,
+        )
         self._live[session_id] = session
         return session
 

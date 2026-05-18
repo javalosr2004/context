@@ -36,6 +36,7 @@ from backend.tutorial_guide import (
     generate_draft_plan,
 )
 from backend.tutorial_schema import DraftPlan, TutorialAction, TutorialPlan, TutorialStep
+from backend.web_ground import NullWebGroundProducer, WebGroundProducer
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
     DraftPlanReadyEvent,
@@ -126,6 +127,7 @@ class TutorialSession:
     screen_captured_at: datetime | None = None
     draft_plan: DraftPlan | None = None
     draft_plan_task: asyncio.Task[None] | None = None
+    web_ground: WebGroundProducer = field(default_factory=NullWebGroundProducer)
     status: str = "created"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -594,7 +596,12 @@ class TutorialSession:
     ) -> None:
         try:
             plan = await asyncio.to_thread(
-                generate_draft_plan, self.llm, goal, image, images
+                generate_draft_plan,
+                self.llm,
+                goal,
+                image,
+                images,
+                self.web_ground,
             )
         except asyncio.CancelledError:
             raise

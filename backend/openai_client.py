@@ -105,6 +105,9 @@ def build_image_content(image: UploadedImage) -> dict[str, Any]:
     return {
         "type": "input_image",
         "image_url": f"data:{image.mime_type};base64,{encoded}",
+        # Force full-resolution vision tokens. Default "auto" downsamples
+        # large screenshots, which costs us UI-label legibility.
+        "detail": "high",
     }
 
 

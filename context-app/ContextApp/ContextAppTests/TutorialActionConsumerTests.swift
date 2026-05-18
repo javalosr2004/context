@@ -87,6 +87,44 @@ final class TutorialActionConsumerTests: XCTestCase {
         XCTAssertFalse(TutorialActionConsumer.skipsGrounding(action: action))
     }
 
+    func testSkipsGroundingForUserChoice() {
+        let action: TutorialAction = .userChoice(UserChoiceAction(
+            prompt: "Type the username you want to use.",
+            requiresConfirmation: true
+        ))
+        XCTAssertTrue(TutorialActionConsumer.skipsGrounding(action: action))
+    }
+
+    func testConsumeDoesNotInvokeGrounderForUserChoice() async {
+        let step = TutorialStep(
+            stepId: "step-uc",
+            instruction: "Pick a repo.",
+            actions: [.userChoice(UserChoiceAction(
+                prompt: "Click any repo in the list.",
+                requiresConfirmation: true
+            ))],
+            confidence: 0.8
+        )
+        var grounderCalled = false
+        var nonSpatialCalled = false
+        let consumer = TutorialActionConsumer(
+            groundInstruction: { _ in
+                grounderCalled = true
+                return "grounded"
+            },
+            presentNonSpatial: { _, _ in
+                nonSpatialCalled = true
+                return "non-spatial"
+            }
+        )
+
+        let result = await consumer.consume(step: step, actionIndex: 0)
+
+        XCTAssertEqual(result, "non-spatial")
+        XCTAssertFalse(grounderCalled)
+        XCTAssertTrue(nonSpatialCalled)
+    }
+
     func testConsumeDispatchesGroundingInstruction() async {
         let step = TutorialStep(
             stepId: "step-3",

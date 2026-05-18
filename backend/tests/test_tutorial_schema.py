@@ -169,6 +169,66 @@ class TutorialSchemaTests(unittest.TestCase):
                 )
             )
 
+    def test_accepts_user_choice_action(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Pick a repo.",
+  "actions": [{
+    "type": "user_choice",
+    "prompt": "Click on the repo you want to open.",
+    "requires_confirmation": true
+  }],
+  "confidence": 0.8
+}
+""".strip()
+            )
+        )
+        action = plan.steps[0].actions[0]
+        self.assertEqual(action.type, "user_choice")
+        self.assertEqual(action.prompt, "Click on the repo you want to open.")
+        self.assertIsNone(action.target)
+
+    def test_rejects_user_choice_without_prompt(self) -> None:
+        with self.assertRaises(TutorialPlanValidationError):
+            parse_tutorial_plan(
+                build_plan_json(
+                    """
+{
+  "step_id": "step_001",
+  "instruction": "Pick something.",
+  "actions": [{
+    "type": "user_choice",
+    "requires_confirmation": true
+  }],
+  "confidence": 0.8
+}
+""".strip()
+                )
+            )
+
+    def test_rejects_user_choice_with_target(self) -> None:
+        with self.assertRaises(TutorialPlanValidationError):
+            parse_tutorial_plan(
+                build_plan_json(
+                    """
+{
+  "step_id": "step_001",
+  "instruction": "Pick a repo.",
+  "actions": [{
+    "type": "user_choice",
+    "prompt": "Pick a repo.",
+    "target": {"kind": "element", "description": "the repo you want"},
+    "requires_confirmation": true
+  }],
+  "confidence": 0.8
+}
+""".strip()
+                )
+            )
+
     def test_response_schema_exposes_action_enum(self) -> None:
         schema = tutorial_plan_response_schema()
         action_schema = schema["$defs"]["TutorialAction"]
@@ -176,6 +236,7 @@ class TutorialSchemaTests(unittest.TestCase):
         self.assertIn("description", action_schema["properties"]["type"])
         self.assertIn("click", action_schema["properties"]["type"]["enum"])
         self.assertIn("press_key", action_schema["properties"]["type"]["enum"])
+        self.assertIn("user_choice", action_schema["properties"]["type"]["enum"])
 
     def test_response_schema_removes_gemini_unsupported_keywords(self) -> None:
         schema_text = str(tutorial_plan_response_schema())

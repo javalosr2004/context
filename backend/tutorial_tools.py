@@ -142,6 +142,23 @@ class WaitAction(_ActionPayloadBase):
     )
 
 
+class UserChoiceAction(_ActionPayloadBase):
+    kind: Literal["user_choice"]
+    prompt: str = Field(
+        min_length=1,
+        description=(
+            "Short instruction shown to the user when the next move is a "
+            "free choice they make themselves — picking which item to open, "
+            "typing their own username, entering a search query they care "
+            "about, etc. There is no deterministic target or string; the "
+            "overlay renders this prompt and waits for the user to act."
+        ),
+    )
+    requires_confirmation: bool = Field(
+        default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
 ActionPayload = Annotated[
     Union[
         ClickAction,
@@ -149,6 +166,7 @@ ActionPayload = Annotated[
         ScrollAction,
         PressKeyAction,
         WaitAction,
+        UserChoiceAction,
     ],
     Field(discriminator="kind"),
 ]
@@ -167,7 +185,7 @@ class PlanItem(_StrictModel):
             "user-perceived intent. Each action is a JSON object whose "
             "discriminator field is named exactly \"kind\" (NOT \"action\" or "
             "\"type\"), with value one of: \"click\", \"type\", \"scroll\", "
-            "\"press_key\", \"wait\". The remaining fields depend on kind "
+            "\"press_key\", \"wait\", \"user_choice\". The remaining fields depend on kind "
             "(see the per-variant schemas). One step per user intent; "
             "decompose into atomic actions inside. Set "
             "requires_confirmation=true on the action whose result the user "
@@ -418,6 +436,12 @@ def _action_from_payload(payload: ActionPayload, human_text: str) -> TutorialAct
         return TutorialAction(
             type="wait",
             duration_ms=payload.duration_ms,
+            requires_confirmation=payload.requires_confirmation,
+        )
+    if isinstance(payload, UserChoiceAction):
+        return TutorialAction(
+            type="user_choice",
+            prompt=payload.prompt,
             requires_confirmation=payload.requires_confirmation,
         )
     raise TutorialToolCallError(  # pragma: no cover — discriminated union is exhaustive

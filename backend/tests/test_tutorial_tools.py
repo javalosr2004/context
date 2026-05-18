@@ -199,6 +199,46 @@ class UpdatePlanParsingTests(unittest.TestCase):
             parse_update_plan_arguments(call)
         self.assertEqual(error.exception.code, INVALID_TOOL_CALL)
 
+    def test_parse_user_choice_item(self) -> None:
+        call = TutorialToolCall(
+            name=UPDATE_PLAN_TOOL_NAME,
+            arguments=_update_plan_args(
+                [
+                    _plan_item(
+                        {
+                            "kind": "user_choice",
+                            "prompt": "Type the username you want to use.",
+                        },
+                        human_text="Pick a username.",
+                        confidence=0.8,
+                    )
+                ]
+            ),
+        )
+        candidates = candidates_from_arguments(parse_update_plan_arguments(call))
+        action = candidates[0].step_template.actions[0]
+        self.assertEqual(action.type, "user_choice")
+        self.assertEqual(action.prompt, "Type the username you want to use.")
+        self.assertIsNone(action.target)
+        self.assertTrue(action.requires_confirmation)
+
+    def test_user_choice_without_prompt_is_rejected(self) -> None:
+        call = TutorialToolCall(
+            name=UPDATE_PLAN_TOOL_NAME,
+            arguments=_update_plan_args(
+                [
+                    _plan_item(
+                        {"kind": "user_choice"},
+                        human_text="Pick something.",
+                        confidence=0.7,
+                    )
+                ]
+            ),
+        )
+        with self.assertRaises(TutorialToolCallError) as error:
+            parse_update_plan_arguments(call)
+        self.assertEqual(error.exception.code, INVALID_TOOL_ARGUMENTS)
+
     def test_confirm_action_kind_is_rejected(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,

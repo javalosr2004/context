@@ -38,7 +38,7 @@ final class TutorialActionConsumer {
 
     static func skipsGrounding(action: TutorialAction) -> Bool {
         switch action {
-        case .scroll, .pressKey, .wait, .confirm:
+        case .scroll, .pressKey, .wait, .confirm, .userChoice:
             return true
         case .type(let action):
             return action.target == nil
@@ -94,7 +94,7 @@ final class TutorialActionConsumer {
             return action.target?.description
         case .drag(let action):
             return action.target.description
-        case .pressKey, .wait, .confirm:
+        case .pressKey, .wait, .confirm, .userChoice:
             return nil
         }
     }

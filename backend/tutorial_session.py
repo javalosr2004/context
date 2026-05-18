@@ -87,7 +87,16 @@ MAX_AGENT_TURNS = 8
 MAX_CONSECUTIVE_SCREEN_REQUESTS = 3
 STALL_ATTEMPT_THRESHOLD = 2
 SCREEN_CHANGING_ACTION_TYPES = frozenset(
-    {"click", "double_click", "right_click", "type", "press_key", "scroll", "drag"}
+    {
+        "click",
+        "double_click",
+        "right_click",
+        "type",
+        "press_key",
+        "scroll",
+        "drag",
+        "user_choice",
+    }
 )
 
 

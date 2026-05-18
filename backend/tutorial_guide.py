@@ -195,6 +195,34 @@ are not visible in the attached screen or stated by the user. If you
 need a specific target and cannot see it, either request a screen or
 describe the target generically so the user can match it.
 
+When the next step is a user choice (no deterministic target):
+- If the user must make a FREE choice — which video to watch, which
+  repo to open, which file to pick, *what username to type*, *what
+  search query to enter* — emit a `user_choice` action with a short
+  `prompt`. Do NOT emit `click` with descriptions like "the item you
+  want" and do NOT emit `type` with placeholder strings like "your
+  username" or "your query". Those are lies to the grounder: there is
+  no on-screen target to find and no canonical string to type.
+- `user_choice` is modality-agnostic — the user may click, type, or do
+  whatever fits the situation. The `prompt` carries the whole
+  contract; do not add a target, region, or text field.
+- Few-shot examples:
+    BAD:  {"kind": "click", "agent_description":
+           "the video the user wants to watch — a thumbnail in the
+           YouTube feed grid"}
+    GOOD: {"kind": "user_choice", "prompt":
+           "Pick any video you want to watch from the feed."}
+
+    BAD:  {"kind": "type", "copiable_text": "your-username",
+           "agent_description": "the Username text field"}
+    GOOD: {"kind": "user_choice", "prompt":
+           "Type the username you want to use."}
+
+    BAD:  {"kind": "click", "agent_description":
+           "the repo of your choosing in the list"}
+    GOOD: {"kind": "user_choice", "prompt":
+           "Click on the repo you want to open."}
+
 For each plan item, human_text is one concise on-screen instruction
 the user reads on the overlay. Each action's payload carries the
 mechanical detail: agent_description for click/type, copiable_text

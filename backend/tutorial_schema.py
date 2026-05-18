@@ -53,6 +53,7 @@ class TutorialAction(TutorialSchemaModel):
         "scroll",
         "drag",
         "wait",
+        "user_choice",
     ] = Field(description="Action type supported by the overlay tutorial player.")
     target: ActionTarget | None = Field(
         default=None,
@@ -75,6 +76,14 @@ class TutorialAction(TutorialSchemaModel):
         ge=0,
         le=10000,
         description="Wait duration in milliseconds. Only used when type is 'wait'.",
+    )
+    prompt: str | None = Field(
+        default=None,
+        description=(
+            "Free-text prompt for the user when type is 'user_choice'. "
+            "The user is expected to take whatever action best fits "
+            "(click, type, etc.); there is no deterministic target."
+        ),
     )
     requires_confirmation: bool = Field(
         description=(
@@ -285,6 +294,12 @@ def validate_action_semantics(action: TutorialAction) -> None:
 
     if action.type == "wait" and action.duration_ms is None:
         raise ValueError("wait action requires duration_ms")
+
+    if action.type == "user_choice":
+        if not has_text(action.prompt):
+            raise ValueError("user_choice action requires prompt")
+        if action.target is not None:
+            raise ValueError("user_choice action must not carry a target")
 
 
 def require_target(action: TutorialAction) -> None:

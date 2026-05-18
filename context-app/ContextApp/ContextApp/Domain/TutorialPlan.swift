@@ -133,6 +133,7 @@ enum TutorialAction: Codable, Equatable {
     case drag(DragAction)
     case wait(WaitAction)
     case confirm(ConfirmAction)
+    case userChoice(UserChoiceAction)
 
     var type: String {
         switch self {
@@ -156,6 +157,8 @@ enum TutorialAction: Codable, Equatable {
             return "wait"
         case .confirm:
             return "confirm"
+        case .userChoice:
+            return "user_choice"
         }
     }
 
@@ -171,6 +174,7 @@ enum TutorialAction: Codable, Equatable {
         case .drag(let a): return a.requiresConfirmation
         case .wait(let a): return a.requiresConfirmation
         case .confirm: return true
+        case .userChoice(let a): return a.requiresConfirmation
         }
     }
 
@@ -181,6 +185,7 @@ enum TutorialAction: Codable, Equatable {
         case key
         case direction
         case durationMs = "duration_ms"
+        case prompt
         case requiresConfirmation = "requires_confirmation"
     }
 
@@ -209,6 +214,8 @@ enum TutorialAction: Codable, Equatable {
             self = .wait(try WaitAction(from: decoder))
         case "confirm":
             self = .confirm(try ConfirmAction(from: decoder))
+        case "user_choice":
+            self = .userChoice(try UserChoiceAction(from: decoder))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -247,6 +254,8 @@ enum TutorialAction: Codable, Equatable {
             try container.encode(action.durationMs, forKey: .durationMs)
         case .confirm:
             break
+        case .userChoice(let action):
+            try container.encode(action.prompt, forKey: .prompt)
         }
     }
 }
@@ -460,6 +469,24 @@ struct WaitAction: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.durationMs = try container.decode(Int.self, forKey: .durationMs)
         self.requiresConfirmation = try _decodeRequiresConfirmation(from: decoder)
+    }
+}
+
+struct UserChoiceAction: Codable, Equatable {
+    let prompt: String
+    let requiresConfirmation: Bool
+
+    private enum CodingKeys: String, CodingKey { case prompt }
+
+    init(prompt: String, requiresConfirmation: Bool = true) {
+        self.prompt = prompt
+        self.requiresConfirmation = requiresConfirmation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.prompt = try container.decode(String.self, forKey: .prompt)
+        self.requiresConfirmation = (try? _decodeRequiresConfirmation(from: decoder)) ?? true
     }
 }
 

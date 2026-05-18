@@ -11,8 +11,8 @@ final class OverlayCoordinator {
 
     private var applicationMenuController: ApplicationMenuController?
     private var debugBboxController: DebugBboxController?
+    private var edgeTabController: EdgeTabController?
     private var focusMaskController: FocusMaskController?
-    private var iconMenuController: IconMenuController?
     private var popupController: PopupController?
     private var screenGroundingController: ScreenGroundingController?
     private var screenObserver: NSObjectProtocol?
@@ -34,24 +34,32 @@ final class OverlayCoordinator {
         guard let screen = screenProvider() else { return }
 
         let popupPanel = PopupPanel(frame: initialPopupFrame(on: screen.frame))
-        let iconPanel = IconPanel(frame: initialIconFrame(on: screen.frame))
         let bboxPanel = DebugBboxPanel(frame: CGRect(origin: .zero, size: DebugBoundingBox.size))
         let stabilityIndicator = StabilityIndicatorController(screenProvider: screenProvider)
         self.stabilityIndicator = stabilityIndicator
         let errorIndicator = ErrorIndicatorController(screenProvider: screenProvider)
         self.errorIndicator = errorIndicator
 
+        let popupController = PopupController(
+            popupPanel: popupPanel,
+            initialFrame: popupPanel.frame
+        )
+        let edgeTabController = EdgeTabController(
+            screenProvider: screenProvider,
+            onToggle: { popupController.toggle() }
+        )
+
         var sessionControllerRef: TutorialSessionController?
         let focusMaskController = FocusMaskController(
             screenProvider: screenProvider,
             interactiveWindowsProvider: {
-                [popupPanel, iconPanel]
+                [popupPanel, edgeTabController.window]
             },
             onExit: { [weak bboxPanel, weak self] in
                 bboxPanel?.orderOut(nil)
                 self?.stabilityWatcher.cancel()
             },
-            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak iconPanel, screenProvider] in
+            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, screenProvider] in
                 bboxPanel?.orderOut(nil)
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID,
@@ -59,7 +67,7 @@ final class OverlayCoordinator {
                 Task { @MainActor in
                     if let screen = screenProvider(), let self {
                         self.stabilityIndicator?.show()
-                        let excluded: [NSWindow] = [popupPanel, iconPanel, self.stabilityIndicator?.window]
+                        let excluded: [NSWindow] = [popupPanel, edgeTabController.window, self.stabilityIndicator?.window]
                             .compactMap { $0 }
                         await self.stabilityWatcher.waitUntilStable(
                             on: screen,
@@ -70,9 +78,6 @@ final class OverlayCoordinator {
                         )
                         self.stabilityIndicator?.hide()
                     }
-                    // Capture the stable post-action screen and ship it with the
-                    // confirmation so the backend planner runs on a fresh frame
-                    // without a separate request_screen round-trip.
                     let stableScreen = await sessionController.currentScreenSnapshot()
                     await sessionController.confirmStep(
                         stepID: stepID,
@@ -97,20 +102,14 @@ final class OverlayCoordinator {
             bboxController: debugController,
             endpointStore: endpointStore,
             ignoredWindowProvider: {
-                [popupPanel, iconPanel, bboxPanel]
+                [popupPanel, edgeTabController.window, bboxPanel]
             },
             screenProvider: screenProvider
-        )
-        let menuController = IconMenuController(debugBboxController: debugController)
-        let popupController = PopupController(
-            popupPanel: popupPanel,
-            iconPanel: iconPanel,
-            initialFrame: popupPanel.frame
         )
         let tutorialPlanController = TutorialPlanController(
             endpointStore: tutorialEndpointStore,
             ignoredWindowProvider: {
-                [popupPanel, iconPanel, bboxPanel]
+                [popupPanel, edgeTabController.window, bboxPanel]
             },
             screenProvider: screenProvider
         )
@@ -119,7 +118,7 @@ final class OverlayCoordinator {
             endpointStore: tutorialEndpointStore,
             fallbackPlanController: tutorialPlanController,
             ignoredWindowProvider: {
-                [popupPanel, iconPanel, bboxPanel]
+                [popupPanel, edgeTabController.window, bboxPanel]
             },
             screenProvider: screenProvider
         )
@@ -135,9 +134,9 @@ final class OverlayCoordinator {
                 }
             }
         let tutorialActionConsumer = TutorialActionConsumer(
-            groundInstruction: { [weak self, weak popupPanel, weak iconPanel, screenProvider] instruction in
+            groundInstruction: { [weak self, weak popupPanel, screenProvider] instruction in
                 if let self, let screen = screenProvider() {
-                    let excluded: [NSWindow] = [popupPanel, iconPanel, self.stabilityIndicator?.window]
+                    let excluded: [NSWindow] = [popupPanel, edgeTabController.window, self.stabilityIndicator?.window]
                         .compactMap { $0 }
                     self.stabilityWatcher.prewarm(on: screen, excludingWindows: excluded)
                 }
@@ -167,7 +166,7 @@ final class OverlayCoordinator {
                 ))
             },
             onMinify: {
-                popupController.minify()
+                popupController.collapse()
             }
         ))
         popupResizeCancellable = tutorialSessionController.objectWillChange.sink { [weak self] _ in
@@ -175,24 +174,19 @@ final class OverlayCoordinator {
                 self?.fitPopupToContent()
             }
         }
-        iconPanel.contentView = NSHostingView(rootView: IconView(
-            onRestore: { popupController.restore() },
-            onContextMenu: { menuController.handleTestBbox() },
-            onDrag: { delta in popupController.moveIcon(by: delta) }
-        ))
 
         self.debugBboxController = debugController
         self.applicationMenuController = ApplicationMenuController(
             onConfigureBoundingBoxes: { debugController.showReplacementBbox() }
         )
+        self.edgeTabController = edgeTabController
         self.focusMaskController = focusMaskController
-        self.iconMenuController = menuController
         self.popupController = popupController
         self.screenGroundingController = screenGroundingController
         self.statusBarController = StatusBarController(
             endpointStore: endpointStore,
             tutorialEndpointStore: tutorialEndpointStore,
-            onShowOverlay: { popupController.showPopup() },
+            onShowOverlay: { popupController.restore() },
             onTestBbox: { debugController.showReplacementBbox() }
         )
         self.tutorialActionConsumer = tutorialActionConsumer
@@ -200,6 +194,7 @@ final class OverlayCoordinator {
         self.tutorialSessionController = tutorialSessionController
 
         popupController.showPopup()
+        edgeTabController.start()
         fitPopupToContent()
         observeScreenChanges()
     }
@@ -212,10 +207,11 @@ final class OverlayCoordinator {
         debugBboxController?.hide()
         focusMaskController?.hide()
         tutorialSessionController?.stop()
+        edgeTabController?.stop()
         popupController = nil
         applicationMenuController = nil
-        iconMenuController = nil
         debugBboxController = nil
+        edgeTabController = nil
         focusMaskController = nil
         screenGroundingController = nil
         statusBarController = nil
@@ -230,10 +226,6 @@ final class OverlayCoordinator {
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {
         CGRect(x: screen.midX - 170, y: screen.midY - 180, width: 340, height: 360)
-    }
-
-    private func initialIconFrame(on screen: CGRect) -> CGRect {
-        CGRect(x: screen.midX - 28, y: screen.midY - 28, width: 56, height: 56)
     }
 
     private func observeScreenChanges() {
@@ -251,6 +243,7 @@ final class OverlayCoordinator {
     private func reclampPanels() {
         guard let screen = screenProvider() else { return }
         popupController?.reclamp(to: screen.frame)
+        edgeTabController?.reanchor()
         fitPopupToContent()
     }
 

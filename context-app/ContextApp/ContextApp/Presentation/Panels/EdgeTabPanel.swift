@@ -1,6 +1,6 @@
 import AppKit
 
-final class IconPanel: NSPanel {
+final class EdgeTabPanel: NSPanel {
     init(frame: NSRect) {
         super.init(
             contentRect: frame,
@@ -15,15 +15,15 @@ final class IconPanel: NSPanel {
         backgroundColor = .clear
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         hasShadow = true
-        isMovableByWindowBackground = true
+        isMovable = false
+        isMovableByWindowBackground = false
         isOpaque = false
+        isReleasedWhenClosed = false
         level = .screenSaver
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
     }
 
-    override var canBecomeKey: Bool {
-        true
-    }
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 }
-

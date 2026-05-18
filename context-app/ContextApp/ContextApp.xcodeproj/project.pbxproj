@@ -16,15 +16,11 @@
 		A20000000000000000000007 /* ChatMessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000037 /* ChatMessageStore.swift */; };
 		A20000000000000000000008 /* OverlayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000038 /* OverlayCoordinator.swift */; };
 		A20000000000000000000009 /* PopupController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000039 /* PopupController.swift */; };
-		A2000000000000000000000A /* IconMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003A /* IconMenuController.swift */; };
 		A2000000000000000000000B /* DebugBboxController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003B /* DebugBboxController.swift */; };
 		A2000000000000000000000C /* PopupPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003C /* PopupPanel.swift */; };
-		A2000000000000000000000D /* IconPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003D /* IconPanel.swift */; };
 		A2000000000000000000000E /* DebugBboxPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003E /* DebugBboxPanel.swift */; };
 		A2000000000000000000000F /* ChatPopupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003F /* ChatPopupView.swift */; };
-		A20000000000000000000010 /* IconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* IconView.swift */; };
 		A20000000000000000000011 /* DebugBboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* DebugBboxView.swift */; };
-		A20000000000000000000012 /* IconContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* IconContextMenu.swift */; };
 		A20000000000000000000013 /* PopupStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* PopupStateTests.swift */; };
 		A20000000000000000000014 /* ScreenBoundsKeeperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* ScreenBoundsKeeperTests.swift */; };
 		A20000000000000000000015 /* BboxPositionGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* BboxPositionGeneratorTests.swift */; };
@@ -74,6 +70,11 @@
 		AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ApplicationMenuController.swift */; };
 		AB0000000000000000000001 /* MarkdownTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000011 /* MarkdownTextView.swift */; };
 		AB0000000000000000000002 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000000000000000000013 /* Markdown */; };
+		AD0000000000000000000001 /* EdgeTabAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000011 /* EdgeTabAnchor.swift */; };
+		AD0000000000000000000002 /* EdgeTabPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000012 /* EdgeTabPanel.swift */; };
+		AD0000000000000000000003 /* EdgeTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000013 /* EdgeTabView.swift */; };
+		AD0000000000000000000004 /* EdgeTabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000014 /* EdgeTabController.swift */; };
+		AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000015 /* EdgeTabAnchorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,15 +101,11 @@
 		A20000000000000000000037 /* ChatMessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000038 /* OverlayCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayCoordinator.swift; sourceTree = "<group>"; };
 		A20000000000000000000039 /* PopupController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupController.swift; sourceTree = "<group>"; };
-		A2000000000000000000003A /* IconMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconMenuController.swift; sourceTree = "<group>"; };
 		A2000000000000000000003B /* DebugBboxController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxController.swift; sourceTree = "<group>"; };
 		A2000000000000000000003C /* PopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupPanel.swift; sourceTree = "<group>"; };
-		A2000000000000000000003D /* IconPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPanel.swift; sourceTree = "<group>"; };
 		A2000000000000000000003E /* DebugBboxPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxPanel.swift; sourceTree = "<group>"; };
 		A2000000000000000000003F /* ChatPopupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPopupView.swift; sourceTree = "<group>"; };
-		A20000000000000000000040 /* IconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconView.swift; sourceTree = "<group>"; };
 		A20000000000000000000041 /* DebugBboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxView.swift; sourceTree = "<group>"; };
-		A20000000000000000000042 /* IconContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconContextMenu.swift; sourceTree = "<group>"; };
 		A20000000000000000000043 /* PopupStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupStateTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000044 /* ScreenBoundsKeeperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenBoundsKeeperTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000045 /* BboxPositionGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BboxPositionGeneratorTests.swift; sourceTree = "<group>"; };
@@ -157,6 +154,11 @@
 		A90000000000000000000011 /* TutorialTooltipController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialTooltipController.swift; sourceTree = "<group>"; };
 		AA0000000000000000000011 /* ApplicationMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationMenuController.swift; sourceTree = "<group>"; };
 		AB0000000000000000000011 /* MarkdownTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextView.swift; sourceTree = "<group>"; };
+		AD0000000000000000000011 /* EdgeTabAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchor.swift; sourceTree = "<group>"; };
+		AD0000000000000000000012 /* EdgeTabPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabPanel.swift; sourceTree = "<group>"; };
+		AD0000000000000000000013 /* EdgeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabView.swift; sourceTree = "<group>"; };
+		AD0000000000000000000014 /* EdgeTabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabController.swift; sourceTree = "<group>"; };
+		AD0000000000000000000015 /* EdgeTabAnchorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -219,6 +221,7 @@
 				A70000000000000000000015 /* TutorialPlanAPIClientTests.swift */,
 				A70000000000000000000016 /* TutorialActionConsumerTests.swift */,
 				A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */,
+				AD0000000000000000000015 /* EdgeTabAnchorTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -256,6 +259,7 @@
 				A60000000000000000000011 /* TutorialPlan.swift */,
 				A60000000000000000000015 /* TutorialPlanDisplay.swift */,
 				A70000000000000000000011 /* TutorialAPIEndpointStore.swift */,
+				AD0000000000000000000011 /* EdgeTabAnchor.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -266,7 +270,6 @@
 				A20000000000000000000038 /* OverlayCoordinator.swift */,
 				AA0000000000000000000011 /* ApplicationMenuController.swift */,
 				A20000000000000000000039 /* PopupController.swift */,
-				A2000000000000000000003A /* IconMenuController.swift */,
 				A2000000000000000000003B /* DebugBboxController.swift */,
 				A20000000000000000000049 /* GroundingClient.swift */,
 				A2000000000000000000004A /* ScreenFrameCapture.swift */,
@@ -283,6 +286,7 @@
 				A70000000000000000000012 /* TutorialPlanController.swift */,
 				A80000000000000000000012 /* TutorialSessionController.swift */,
 				A90000000000000000000011 /* TutorialTooltipController.swift */,
+				AD0000000000000000000014 /* EdgeTabController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -320,9 +324,9 @@
 			isa = PBXGroup;
 			children = (
 				A2000000000000000000003C /* PopupPanel.swift */,
-				A2000000000000000000003D /* IconPanel.swift */,
 				A2000000000000000000003E /* DebugBboxPanel.swift */,
 				A50000000000000000000013 /* FocusMaskPanel.swift */,
+				AD0000000000000000000012 /* EdgeTabPanel.swift */,
 			);
 			path = Panels;
 			sourceTree = "<group>";
@@ -331,12 +335,12 @@
 			isa = PBXGroup;
 			children = (
 				A2000000000000000000003F /* ChatPopupView.swift */,
-				A20000000000000000000040 /* IconView.swift */,
 				A20000000000000000000041 /* DebugBboxView.swift */,
 				A50000000000000000000014 /* FocusMaskView.swift */,
 				A50000000000000000000015 /* FocusExitView.swift */,
 				A70000000000000000000013 /* TutorialAPISettingsView.swift */,
 				AB0000000000000000000011 /* MarkdownTextView.swift */,
+				AD0000000000000000000013 /* EdgeTabView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -344,7 +348,6 @@
 		A20000000000000000000023 /* Menu */ = {
 			isa = PBXGroup;
 			children = (
-				A20000000000000000000042 /* IconContextMenu.swift */,
 				A2000000000000000000004E /* CallbackMenuItem.swift */,
 			);
 			path = Menu;
@@ -464,15 +467,11 @@
 				A20000000000000000000007 /* ChatMessageStore.swift in Sources */,
 				A20000000000000000000008 /* OverlayCoordinator.swift in Sources */,
 				A20000000000000000000009 /* PopupController.swift in Sources */,
-				A2000000000000000000000A /* IconMenuController.swift in Sources */,
 				A2000000000000000000000B /* DebugBboxController.swift in Sources */,
 				A2000000000000000000000C /* PopupPanel.swift in Sources */,
-				A2000000000000000000000D /* IconPanel.swift in Sources */,
 				A2000000000000000000000E /* DebugBboxPanel.swift in Sources */,
 				A2000000000000000000000F /* ChatPopupView.swift in Sources */,
-				A20000000000000000000010 /* IconView.swift in Sources */,
 				A20000000000000000000011 /* DebugBboxView.swift in Sources */,
-				A20000000000000000000012 /* IconContextMenu.swift in Sources */,
 				A40000000000000000000001 /* OverlayTheme.swift in Sources */,
 				A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */,
 				A20000000000000000000019 /* GroundingClient.swift in Sources */,
@@ -503,6 +502,10 @@
 				A70000000000000000000003 /* TutorialAPISettingsView.swift in Sources */,
 				AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */,
 				AB0000000000000000000001 /* MarkdownTextView.swift in Sources */,
+				AD0000000000000000000001 /* EdgeTabAnchor.swift in Sources */,
+				AD0000000000000000000002 /* EdgeTabPanel.swift in Sources */,
+				AD0000000000000000000003 /* EdgeTabView.swift in Sources */,
+				AD0000000000000000000004 /* EdgeTabController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -527,6 +530,7 @@
 				A70000000000000000000005 /* TutorialPlanAPIClientTests.swift in Sources */,
 				A70000000000000000000006 /* TutorialActionConsumerTests.swift in Sources */,
 				A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */,
+				AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

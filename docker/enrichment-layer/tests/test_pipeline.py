@@ -1,8 +1,11 @@
 import pytest
 
+from enrichment import parse as parse_mod
 from enrichment import pipeline as pipeline_mod
 from enrichment.fetch import FetchResult
 from enrichment.models import QueryPlan, SearchHit
+from enrichment.parse import EnrichedDraft
+from enrichment.schema_draft import DraftPlan, DraftStep
 
 
 FAKE_HTML = b"""
@@ -13,6 +16,7 @@ FAKE_HTML = b"""
     <li>Select your frame in Figma.</li>
     <li>Open the export panel.</li>
     <li>Click PNG and press Export.</li>
+    <li>Choose your output directory.</li>
   </ol>
 </body></html>
 """
@@ -44,9 +48,28 @@ def fakes(monkeypatch):
             for i, u in enumerate(urls)
         ]
 
+    def fake_parse(page, application, goal):
+        return EnrichedDraft(
+            plan=DraftPlan(
+                goal=goal,
+                steps=[
+                    DraftStep(instruction="Select the frame.", kind="click"),
+                    DraftStep(instruction="Open the export panel.", kind="click"),
+                    DraftStep(instruction="Click Export.", kind="click"),
+                ],
+            ),
+            is_tutorial=True,
+            source_url=page.url,
+            source_content_hash=page.content_hash,
+            source_title=page.title,
+            model_name="fake-model",
+        )
+
     monkeypatch.setattr(pipeline_mod, "generate_queries", fake_gen)
     monkeypatch.setattr(pipeline_mod, "fan_out_search", fake_search)
     monkeypatch.setattr(pipeline_mod, "fan_out_fetch", fake_fetch)
+    monkeypatch.setattr(parse_mod, "parse_to_draft", fake_parse)
+    monkeypatch.setattr(pipeline_mod, "parse_to_draft", fake_parse)
     return plan
 
 
@@ -56,10 +79,11 @@ async def test_pipeline_end_to_end(fakes, isolated_data_dir):
     assert result.plan.application == "Figma"
     assert result.hit_count == 2
     assert result.page_count == 2
+    assert result.parsed_plan_count == 2
     assert result.run_id
 
-    # blob layout
     assert (isolated_data_dir / "runs" / result.run_id / "meta.json").exists()
     assert len(list((isolated_data_dir / "pages").glob("*.html"))) == 2
     assert len(list((isolated_data_dir / "parsed").glob("*.json"))) == 2
+    assert len(list((isolated_data_dir / "plans").glob("*.json"))) == 2
     assert (isolated_data_dir / "index.db").exists()

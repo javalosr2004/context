@@ -36,3 +36,4 @@ class RunResult(BaseModel):
     plan: QueryPlan
     hit_count: int
     page_count: int
+    parsed_plan_count: int = 0

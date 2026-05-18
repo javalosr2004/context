@@ -43,8 +43,6 @@ def make_action(action_type: str) -> TutorialAction:
             direction="down",
             requires_confirmation=True,
         )
-    if action_type == "confirm":
-        return TutorialAction(type="confirm", requires_confirmation=True)
     raise ValueError(f"unsupported action_type {action_type!r}")
 
 
@@ -99,7 +97,7 @@ class MergePlanTailTests(unittest.TestCase):
             awaiting_step_id=None,
             new_tail=[
                 candidate(make_step("ignored", action_type="scroll")),
-                candidate(make_step("ignored", action_type="confirm")),
+                candidate(make_step("ignored", action_type="wait")),
             ],
             step_counter=2,
         )

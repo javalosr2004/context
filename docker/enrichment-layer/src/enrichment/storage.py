@@ -16,6 +16,7 @@ from enrichment.config import settings
 from enrichment.fetch import FetchResult
 from enrichment.models import ExtractedPage, QueryPlan, SearchHit
 from enrichment.parse import EnrichedDraft
+from enrichment.quick import QuickGuide
 
 Base = declarative_base()
 
@@ -79,9 +80,22 @@ class Plan(Base):
     created_at = Column(DateTime, nullable=False)
 
 
+class QuickGuideRow(Base):
+    __tablename__ = "quick_guides"
+    run_id = Column(String, ForeignKey("runs.run_id"), primary_key=True)
+    application = Column(String, nullable=False)
+    goal = Column(String, nullable=False)
+    source_count = Column(Integer, nullable=False)
+    model_name = Column(String, nullable=False)
+    guide_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
 class AggregatePlanRow(Base):
     __tablename__ = "aggregate_plans"
-    run_id = Column(String, ForeignKey("runs.run_id"), primary_key=True)
+    aggregate_id = Column(String, primary_key=True)
+    run_id = Column(String, ForeignKey("runs.run_id"), nullable=False, index=True)
+    method_label = Column(String, nullable=False, default="default")
     application = Column(String, nullable=False)
     goal = Column(String, nullable=False)
     step_count = Column(Integer, nullable=False)
@@ -186,9 +200,26 @@ def get_job(job_id: str) -> dict | None:
 
 
 def get_aggregate_plan(run_id: str) -> dict | None:
+    """Returns the primary (most-sourced) aggregate plan for back-compat."""
+    plans = get_aggregate_plans(run_id)
+    return plans[0] if plans else None
+
+
+def get_quick_guide(run_id: str) -> dict | None:
     with _get_session() as session:
-        row = session.get(AggregatePlanRow, run_id)
-        return row.plan_json if row else None
+        row = session.get(QuickGuideRow, run_id)
+        return row.guide_json if row else None
+
+
+def get_aggregate_plans(run_id: str) -> list[dict]:
+    from sqlalchemy import select
+    with _get_session() as session:
+        rows = session.execute(
+            select(AggregatePlanRow)
+            .where(AggregatePlanRow.run_id == run_id)
+            .order_by(AggregatePlanRow.source_count.desc())
+        ).scalars().all()
+        return [r.plan_json for r in rows]
 
 
 def reap_orphan_jobs() -> int:
@@ -239,6 +270,90 @@ def _write_blob(rel: str, data: bytes | str) -> Path:
     return path
 
 
+def save_quick_guide(
+    raw_request: str,
+    plan: QueryPlan,
+    fetches: list[FetchResult],
+    extractions: list[ExtractedPage],
+    guide: QuickGuide | None,
+) -> str:
+    init_db()
+    run_id = str(uuid4())
+    now = _now()
+
+    _write_blob(
+        f"runs/{run_id}/meta.json",
+        json.dumps(
+            {
+                "run_id": run_id,
+                "mode": "quick",
+                "raw_request": raw_request,
+                "application": plan.application,
+                "goal": plan.goal,
+                "queries": plan.queries,
+                "created_at": now.isoformat(),
+            },
+            indent=2,
+        ),
+    )
+    for f in fetches:
+        _write_blob(f"pages/{f.content_hash}.html", f.html)
+    for e in extractions:
+        _write_blob(f"parsed/{e.content_hash}.json", e.model_dump_json(indent=2))
+    if guide is not None:
+        _write_blob(
+            f"runs/{run_id}/quick_guide.json",
+            guide.model_dump_json(indent=2),
+        )
+
+    with _get_session() as session:
+        session.add(Run(
+            run_id=run_id,
+            raw_request=raw_request,
+            application=plan.application,
+            goal=plan.goal,
+            source_type="web",
+            created_at=now,
+        ))
+        for f in fetches:
+            if session.get(Page, f.content_hash) is None:
+                session.add(Page(
+                    content_hash=f.content_hash,
+                    url=f.final_url,
+                    domain=_domain(f.final_url),
+                    http_status=f.http_status,
+                    fetched_at=now,
+                ))
+        for e in extractions:
+            if session.get(Parsed, e.content_hash) is not None:
+                continue
+            session.add(Parsed(
+                content_hash=e.content_hash,
+                title=e.title,
+                text_length=e.text_length,
+                ordered_list_items=e.ordered_list_items,
+                imperative_verb_density=e.imperative_verb_density,
+                image_count=e.image_count,
+                application_term_present=int(e.application_term_present),
+                goal_term_present=int(e.goal_term_present),
+                features=e.model_dump(),
+                parsed_at=now,
+            ))
+        if guide is not None:
+            session.add(QuickGuideRow(
+                run_id=run_id,
+                application=guide.application,
+                goal=guide.goal,
+                source_count=guide.source_count,
+                model_name=guide.model_name,
+                guide_json=guide.model_dump(),
+                created_at=now,
+            ))
+        session.commit()
+
+    return run_id
+
+
 def save_run(
     raw_request: str,
     plan: QueryPlan,
@@ -246,7 +361,7 @@ def save_run(
     fetches: list[FetchResult],
     extractions: list[ExtractedPage],
     drafts: list[EnrichedDraft],
-    aggregate: AggregatePlan | None,
+    aggregates: list[AggregatePlan],
 ) -> str:
     init_db()
     run_id = str(uuid4())
@@ -275,10 +390,10 @@ def save_run(
         _write_blob(f"parsed/{e.content_hash}.json", e.model_dump_json(indent=2))
     for d in drafts:
         _write_blob(f"plans/{d.source_content_hash}.json", d.model_dump_json(indent=2))
-    if aggregate is not None:
+    for agg in aggregates:
         _write_blob(
-            f"runs/{run_id}/aggregate_plan.json",
-            aggregate.model_dump_json(indent=2),
+            f"runs/{run_id}/aggregate_plans/{agg.method_label}.json",
+            agg.model_dump_json(indent=2),
         )
 
     with _get_session() as session:
@@ -337,16 +452,18 @@ def save_run(
                 parsed_at=now,
             ))
 
-        # aggregate plan
-        if aggregate is not None:
+        # aggregate plans (one per method cluster)
+        for agg in aggregates:
             session.add(AggregatePlanRow(
+                aggregate_id=str(uuid4()),
                 run_id=run_id,
-                application=aggregate.application,
-                goal=aggregate.goal,
-                step_count=len(aggregate.steps),
-                source_count=aggregate.source_count,
-                model_name=aggregate.model_name,
-                plan_json=aggregate.model_dump(),
+                method_label=agg.method_label,
+                application=agg.application,
+                goal=agg.goal,
+                step_count=len(agg.steps),
+                source_count=agg.source_count,
+                model_name=agg.model_name,
+                plan_json=agg.model_dump(),
                 created_at=now,
             ))
 

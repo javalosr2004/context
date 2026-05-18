@@ -199,7 +199,7 @@ class UpdatePlanParsingTests(unittest.TestCase):
             parse_update_plan_arguments(call)
         self.assertEqual(error.exception.code, INVALID_TOOL_CALL)
 
-    def test_confirm_action_always_requires_confirmation(self) -> None:
+    def test_confirm_action_kind_is_rejected(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
             arguments=_update_plan_args(
@@ -212,8 +212,9 @@ class UpdatePlanParsingTests(unittest.TestCase):
                 ]
             ),
         )
-        candidates = candidates_from_arguments(parse_update_plan_arguments(call))
-        self.assertTrue(candidates[0].step_template.actions[0].requires_confirmation)
+        with self.assertRaises(TutorialToolCallError) as error:
+            parse_update_plan_arguments(call)
+        self.assertEqual(error.exception.code, INVALID_TOOL_ARGUMENTS)
 
 
 if __name__ == "__main__":

@@ -142,13 +142,6 @@ class WaitAction(_ActionPayloadBase):
     )
 
 
-class ConfirmAction(_ActionPayloadBase):
-    kind: Literal["confirm"]
-    requires_confirmation: Literal[True] = Field(
-        default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
-    )
-
-
 ActionPayload = Annotated[
     Union[
         ClickAction,
@@ -156,7 +149,6 @@ ActionPayload = Annotated[
         ScrollAction,
         PressKeyAction,
         WaitAction,
-        ConfirmAction,
     ],
     Field(discriminator="kind"),
 ]
@@ -175,10 +167,13 @@ class PlanItem(_StrictModel):
             "user-perceived intent. Each action is a JSON object whose "
             "discriminator field is named exactly \"kind\" (NOT \"action\" or "
             "\"type\"), with value one of: \"click\", \"type\", \"scroll\", "
-            "\"press_key\", \"wait\", \"confirm\". The remaining fields depend "
-            "on kind (see the per-variant schemas). One step per user intent; "
-            "decompose into atomic actions inside. End with a confirm action "
-            "when the user should verify state before the next step begins."
+            "\"press_key\", \"wait\". The remaining fields depend on kind "
+            "(see the per-variant schemas). One step per user intent; "
+            "decompose into atomic actions inside. Set "
+            "requires_confirmation=true on the action whose result the user "
+            "should verify before advancing — the backend will pause for "
+            "user confirmation and then request a fresh screen so you can "
+            "re-validate before the next step."
         ),
     )
 
@@ -192,6 +187,20 @@ class TutorialUpdatePlanArguments(_StrictModel):
         description=(
             "One sentence: why this remaining trajectory, what changed from "
             "the prior emission (or 'unchanged' if you stand by it)."
+        ),
+    )
+    abandon_awaiting: bool = Field(
+        default=False,
+        description=(
+            "Set true ONLY when the AWAITING step is no longer valid given "
+            "what you now see — the user is on a completely wrong screen, "
+            "the target has disappeared, or the previous instruction was "
+            "incorrect. When true, the awaiting step is REMOVED from the "
+            "plan (it's neither completed nor refined) and your new plan "
+            "replaces it from scratch. Mutually exclusive with "
+            "refines_current=true on the first item. Completed steps are "
+            "still preserved. Use sparingly: prefer refines_current when "
+            "the step is right but the payload needs sharpening."
         ),
     )
     plan: list[PlanTailItem] = Field(
@@ -411,8 +420,6 @@ def _action_from_payload(payload: ActionPayload, human_text: str) -> TutorialAct
             duration_ms=payload.duration_ms,
             requires_confirmation=payload.requires_confirmation,
         )
-    if isinstance(payload, ConfirmAction):
-        return TutorialAction(type="confirm", requires_confirmation=True)
     raise TutorialToolCallError(  # pragma: no cover — discriminated union is exhaustive
         INVALID_TOOL_ARGUMENTS,
         f"Unsupported action payload kind: {type(payload).__name__}",

@@ -692,6 +692,7 @@ class TutorialSession:
                 awaiting_step_id=awaiting_in_prefix,
                 new_tail=candidates,
                 step_counter=self.step_counter,
+                abandon_awaiting=arguments.abandon_awaiting,
             )
         except (PlanMergeError, ValueError) as error:
             logger.warning(
@@ -914,6 +915,18 @@ class TutorialSession:
                 ]
                 self.prev_active_step_id = None
                 return True
+            # Step completed normally. If it had any user-confirmation
+            # action, break the walk so the agent re-validates against a
+            # fresh screen before the next step. The tail is preserved —
+            # we are not replanning, just gating.
+            completed_step = next(
+                (s for s in self.plan_steps if s.step_id == step.step_id),
+                None,
+            )
+            if completed_step is not None and any(
+                a.requires_confirmation for a in completed_step.actions
+            ):
+                return True
 
         return False
 
@@ -928,8 +941,16 @@ class TutorialSession:
             while True:
                 current = next(
                     (s for s in self.plan_steps if s.step_id == step.step_id),
-                    step,
+                    None,
                 )
+                if current is None:
+                    # The agent abandoned this step (abandon_awaiting=true)
+                    # or otherwise removed it mid-walk. Drop the walk so the
+                    # outer loop re-enters _run_agent_loop.
+                    return (
+                        f"step {step.step_id} was abandoned by a plan update; "
+                        "re-planning from the current screen."
+                    )
                 if action_index >= len(current.actions):
                     break
                 action = current.actions[action_index]
@@ -954,7 +975,10 @@ class TutorialSession:
         self.completed_step_ids.append(current.step_id)
         last_action = current.actions[-1]
         self.last_action_kind = last_action.type
-        if any(a.type in SCREEN_CHANGING_ACTION_TYPES for a in current.actions):
+        had_user_confirmation = any(a.requires_confirmation for a in current.actions)
+        if had_user_confirmation or any(
+            a.type in SCREEN_CHANGING_ACTION_TYPES for a in current.actions
+        ):
             self.screen_is_stale = True
         action_summary = ", ".join(a.type for a in current.actions)
         self.history.append(

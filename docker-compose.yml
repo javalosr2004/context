@@ -1,0 +1,35 @@
+services:
+  enrichment-layer:
+    build:
+      context: ./docker/enrichment-layer
+    ports:
+      - "7000:8000"
+    volumes:
+      - enrichment_data:/data
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - DATABASE_URL=sqlite:////data/index.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      - LOG_LEVEL=INFO
+      - ENRICHMENT_URL=http://enrichment-layer:8000
+    depends_on:
+      enrichment-layer:
+        condition: service_healthy
+
+volumes:
+  enrichment_data:

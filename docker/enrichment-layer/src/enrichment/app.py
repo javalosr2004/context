@@ -7,9 +7,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from enrichment.pipeline import run_enrichment
+from enrichment.pipeline import run_enrichment, run_quick_guide
 from enrichment.storage import (
-    create_job, get_aggregate_plan, get_job, init_db, reap_orphan_jobs, update_job,
+    create_job, get_aggregate_plan, get_aggregate_plans, get_job,
+    get_quick_guide, init_db, reap_orphan_jobs, update_job,
 )
 
 logger = logging.getLogger("enrichment")
@@ -48,6 +49,21 @@ async def query(body: QueryRequest) -> JobAck:
     return JobAck(job_id=job_id, status="pending")
 
 
+@app.post("/quick_guide", response_model=JobAck, status_code=202)
+async def quick_guide(body: QueryRequest) -> JobAck:
+    job_id = create_job(body.request)
+    asyncio.create_task(_run_quick_job(job_id, body.request))
+    return JobAck(job_id=job_id, status="pending")
+
+
+@app.get("/runs/{run_id}/quick_guide")
+def run_quick_guide_view(run_id: str) -> dict:
+    guide = get_quick_guide(run_id)
+    if guide is None:
+        raise HTTPException(404, "no quick guide for this run")
+    return guide
+
+
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str) -> dict:
     job = get_job(job_id)
@@ -64,6 +80,14 @@ def aggregate_plan(run_id: str) -> dict:
     return plan
 
 
+@app.get("/runs/{run_id}/aggregate_plans")
+def aggregate_plans(run_id: str) -> dict:
+    plans = get_aggregate_plans(run_id)
+    if not plans:
+        raise HTTPException(404, "no aggregate plans for this run")
+    return {"run_id": run_id, "plan_count": len(plans), "plans": plans}
+
+
 async def _run_job(job_id: str, raw_request: str) -> None:
     update_job(job_id, status="running")
     try:
@@ -73,3 +97,14 @@ async def _run_job(job_id: str, raw_request: str) -> None:
         update_job(job_id, status="failed", error=f"{type(exc).__name__}: {exc}")
         return
     update_job(job_id, status="done", run_id=result.run_id)
+
+
+async def _run_quick_job(job_id: str, raw_request: str) -> None:
+    update_job(job_id, status="running")
+    try:
+        result = await run_quick_guide(raw_request)
+    except Exception as exc:
+        logger.exception("quick job %s failed", job_id)
+        update_job(job_id, status="failed", error=f"{type(exc).__name__}: {exc}")
+        return
+    update_job(job_id, status="done", run_id=result["run_id"])

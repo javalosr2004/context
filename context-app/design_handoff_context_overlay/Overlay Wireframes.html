@@ -1478,6 +1478,335 @@ function HFStage({ children, label }) {
 Object.assign(window, { HFIdle, HFTyping, HFStreaming, HFAnswered, HFFinished, HFStage });
 
 
+// ════════════════════════════════════════════════════════════════════════════
+// THREE-MODE EXPLORATION — Launcher / Tutorial / Paused
+// Each mode optimizes the overlay for ONE job, instead of stacking them.
+// Reuses hf-card, hf-wall and HFChrome/HFAskBar from the hi-fi pass.
+// ════════════════════════════════════════════════════════════════════════════
+
+const MODE_CSS = `
+  .md, .md * {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .md-mono { font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace; }
+
+  /* LAUNCHER */
+  .md-launcher-hero { padding: 16px 18px 8px; }
+  .md-launcher-greeting { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; color: #0a0a0c; line-height: 1.15; }
+  .md-launcher-sub { font-size: 12.5px; color: rgba(0,0,0,0.5); margin-top: 4px; line-height: 1.4; }
+  .md-suggest-section { padding: 6px 12px 10px; }
+  .md-suggest-label { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(0,0,0,0.42); padding: 6px 6px 8px; }
+  .md-suggest { display: flex; flex-direction: column; gap: 2px; }
+  .md-suggest-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 8px;
+    font-size: 13px; color: #0a0a0c; cursor: pointer;
+    transition: background .12s;
+    border: none; background: transparent; text-align: left; width: 100%;
+  }
+  .md-suggest-item:hover { background: rgba(0,0,0,0.05); }
+  .md-suggest-icon {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: rgba(0,0,0,0.06);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: rgba(0,0,0,0.55); flex: 0 0 auto;
+  }
+  .md-suggest-arrow { margin-left: auto; color: rgba(0,0,0,0.3); }
+  .md-suggest-item:hover .md-suggest-arrow { color: rgba(0,0,0,0.55); }
+  .md-recent { padding: 4px 12px 8px; border-top: 0.5px solid rgba(0,0,0,0.07); }
+  .md-recent-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border-radius: 8px;
+    font-size: 12.5px; color: rgba(0,0,0,0.65); cursor: pointer;
+  }
+  .md-recent-row:hover { background: rgba(0,0,0,0.04); }
+  .md-recent-meta { font-size: 10.5px; color: rgba(0,0,0,0.4); }
+
+  /* TUTORIAL */
+  .md-tut-header { padding: 12px 16px 10px; display: flex; align-items: center; justify-content: space-between; }
+  .md-tut-title { font-size: 13.5px; font-weight: 600; color: #0a0a0c; letter-spacing: -0.005em; }
+  .md-tut-counter { font-size: 11px; color: rgba(0,0,0,0.45); font-family: 'SF Mono', ui-monospace, Menlo, monospace; }
+  .md-tut-progress-track { height: 3px; margin: 0 16px 14px; background: rgba(0,0,0,0.07); border-radius: 2px; overflow: hidden; }
+  .md-tut-progress-fill { height: 100%; background: #0a0a0c; border-radius: 2px; transition: width .4s ease; }
+  .md-tut-current {
+    margin: 0 12px; padding: 14px 16px 16px;
+    background: rgba(0,0,0,0.04); border-radius: 12px;
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.06);
+  }
+  .md-tut-current-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(0,0,0,0.5); margin-bottom: 8px; }
+  .md-tut-current-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #2dc940;
+    box-shadow: 0 0 0 3px rgba(45,201,64,0.22);
+    animation: md-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes md-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(45,201,64,0.22); }
+    50% { box-shadow: 0 0 0 5px rgba(45,201,64,0); }
+  }
+  .md-tut-current-text { font-size: 17px; line-height: 1.32; font-weight: 600; letter-spacing: -0.01em; color: #0a0a0c; }
+  .md-tut-current-hint { margin-top: 10px; font-size: 12px; color: rgba(0,0,0,0.55); line-height: 1.45; }
+  .md-tut-current-kbd {
+    display: inline-block;
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    font-size: 10.5px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(255,255,255,0.6); color: #0a0a0c;
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.1);
+    margin: 0 2px;
+  }
+  .md-tut-next { padding: 12px 16px 6px; font-size: 12px; color: rgba(0,0,0,0.45); display: flex; align-items: center; gap: 8px; }
+  .md-tut-next-arrow { opacity: 0.4; }
+  .md-tut-toolbar { padding: 6px 8px 8px; display: flex; align-items: center; gap: 2px; }
+  .md-tut-btn {
+    height: 28px; padding: 0 10px; border-radius: 7px;
+    border: none; background: transparent; cursor: pointer;
+    font-size: 12px; color: rgba(0,0,0,0.6);
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background .12s, color .12s;
+  }
+  .md-tut-btn:hover { background: rgba(0,0,0,0.05); color: #0a0a0c; }
+  .md-tut-btn.primary { background: #1a1a1c; color: #f8f6f4; margin-left: auto; padding: 0 12px; }
+  .md-tut-btn.primary:hover { background: #000; color: #fff; }
+  .md-tut-spacer { flex: 1; }
+
+  /* PAUSED */
+  .md-paused-banner {
+    margin: 12px 12px 0; padding: 10px 12px 10px 14px; border-radius: 10px;
+    background: linear-gradient(180deg, rgba(255,189,89,0.18), rgba(255,189,89,0.10));
+    box-shadow: inset 0 0 0 0.5px rgba(186,124,40,0.28);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .md-paused-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #d4880e;
+    box-shadow: 0 0 0 3px rgba(212,136,14,0.20);
+    flex: 0 0 auto;
+  }
+  .md-paused-label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: rgba(120,75,5,0.85); font-weight: 600; }
+  .md-paused-text { flex: 1; font-size: 12.5px; color: rgba(60,38,2,0.85); line-height: 1.35; margin-top: 2px; }
+  .md-paused-resume {
+    background: #1a1a1c; color: #f8f6f4; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+    padding: 6px 12px; border-radius: 7px;
+    display: inline-flex; align-items: center; gap: 6px;
+    flex: 0 0 auto;
+  }
+  .md-paused-resume:hover { background: #000; }
+  .md-paused-context { padding: 14px 18px 12px; color: rgba(0,0,0,0.45); }
+  .md-paused-context-eyebrow { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; }
+  .md-paused-context-step { font-size: 14px; color: rgba(0,0,0,0.65); line-height: 1.35; display: flex; gap: 8px; align-items: baseline; }
+  .md-paused-step-number { font-family: 'SF Mono', ui-monospace, monospace; font-size: 11px; color: rgba(0,0,0,0.4); padding-top: 2px; }
+  .md-paused-answer {
+    margin: 4px 12px 0; padding: 12px 14px;
+    background: rgba(255,255,255,0.55); border-radius: 10px;
+    box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.08);
+  }
+  .md-paused-answer-q { font-size: 11.5px; color: rgba(0,0,0,0.45); font-style: italic; margin-bottom: 4px; }
+  .md-paused-answer-body { font-size: 13px; line-height: 1.45; color: #0a0a0c; }
+  .md-paused-actions { padding: 10px 14px 8px; display: flex; gap: 6px; align-items: center; }
+`;
+
+if (typeof document !== 'undefined' && !document.getElementById('md-css')) {
+  const __ms = document.createElement('style'); __ms.id = 'md-css'; __ms.textContent = MODE_CSS;
+  document.head.appendChild(__ms);
+}
+
+const MDIcon = {
+  ArrowRight: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||12} height={p.size||12} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 8h10M9 4l4 4-4 4"/>
+    </svg>
+  ),
+  Book: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||12} height={p.size||12} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2.5 3h4a2 2 0 012 2v8a1.5 1.5 0 00-1.5-1.5h-4.5z"/>
+      <path d="M13.5 3h-4a2 2 0 00-2 2v8a1.5 1.5 0 011.5-1.5h4.5z"/>
+    </svg>
+  ),
+  Camera: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||12} height={p.size||12} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="4" width="13" height="9" rx="1.5"/>
+      <circle cx="8" cy="8.5" r="2.4"/>
+      <path d="M5.5 4l1-1.5h3l1 1.5"/>
+    </svg>
+  ),
+  Settings: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||12} height={p.size||12} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="2"/>
+      <path d="M8 1.5v2M8 12.5v2M3.5 3.5l1.5 1.5M11 11l1.5 1.5M1.5 8h2M12.5 8h2M3.5 12.5L5 11M11 5l1.5-1.5"/>
+    </svg>
+  ),
+  Pause: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||11} height={p.size||11} fill="currentColor">
+      <rect x="4" y="3" width="2.5" height="10" rx="1"/>
+      <rect x="9.5" y="3" width="2.5" height="10" rx="1"/>
+    </svg>
+  ),
+  Chevron: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||10} height={p.size||10} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 4l4 4-4 4"/>
+    </svg>
+  ),
+  ChevronDown: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||10} height={p.size||10} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 6l4 4 4-4"/>
+    </svg>
+  ),
+  Return: (p) => (
+    <svg viewBox="0 0 16 16" width={p.size||11} height={p.size||11} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M13 4v3a2 2 0 01-2 2H3M6 6L3 9l3 3"/>
+    </svg>
+  ),
+};
+
+// MODE 1 — LAUNCHER (no tutorial active)
+function ModeLauncher() {
+  return (
+    <div className="md">
+      <div className="hf-card" style={{ width: 360 }}>
+        <HFChrome/>
+        <div className="md-launcher-hero">
+          <div className="md-launcher-greeting">What should we figure out?</div>
+          <div className="md-launcher-sub">
+            Ask anything about what's on your screen, or pick a tutorial below.
+          </div>
+        </div>
+        <div className="md-suggest-section">
+          <div className="md-suggest-label">Try asking</div>
+          <div className="md-suggest">
+            <button className="md-suggest-item">
+              <span className="md-suggest-icon"><MDIcon.Camera/></span>
+              <span>Explain what's on my screen</span>
+              <span className="md-suggest-arrow"><MDIcon.Chevron/></span>
+            </button>
+            <button className="md-suggest-item">
+              <span className="md-suggest-icon"><MDIcon.Book/></span>
+              <span>Walk me through setting up Git</span>
+              <span className="md-suggest-arrow"><MDIcon.Chevron/></span>
+            </button>
+            <button className="md-suggest-item">
+              <span className="md-suggest-icon"><MDIcon.Settings/></span>
+              <span>Help me deploy this to Vercel</span>
+              <span className="md-suggest-arrow"><MDIcon.Chevron/></span>
+            </button>
+          </div>
+        </div>
+        <div className="md-recent">
+          <div className="md-suggest-label" style={{ padding: '4px 6px 6px' }}>Recent</div>
+          <div className="md-recent-row">
+            <span>Runpod Setup</span>
+            <span className="md-recent-meta">3 / 12 · yesterday</span>
+          </div>
+          <div className="md-recent-row">
+            <span>Configure SSH keys</span>
+            <span className="md-recent-meta">done · 2d ago</span>
+          </div>
+        </div>
+        <HFAskBar mode="idle"/>
+      </div>
+    </div>
+  );
+}
+
+// MODE 2 — TUTORIAL (running, one step in focus)
+function ModeTutorial() {
+  const step = 3, total = 12;
+  return (
+    <div className="md">
+      <div className="hf-card" style={{ width: 360 }}>
+        <HFChrome/>
+        <div className="md-tut-header">
+          <div className="md-tut-title">Runpod Setup</div>
+          <div className="md-tut-counter">{step} / {total}</div>
+        </div>
+        <div className="md-tut-progress-track">
+          <div className="md-tut-progress-fill" style={{ width: `${(step/total)*100}%` }}/>
+        </div>
+        <div className="md-tut-current">
+          <div className="md-tut-current-eyebrow">
+            <span className="md-tut-current-dot"/>
+            <span>Now</span>
+          </div>
+          <div className="md-tut-current-text">
+            Type the Runpod URL into the address bar
+          </div>
+          <div className="md-tut-current-hint">
+            Press <span className="md-tut-current-kbd">⌘L</span> to focus, then enter
+            <span className="md-tut-current-kbd md-mono" style={{ marginLeft: 4 }}>console.runpod.io</span>
+          </div>
+        </div>
+        <div className="md-tut-next">
+          <span className="md-tut-next-arrow"><MDIcon.ArrowRight/></span>
+          <span>Next: Click Sign In in the top-right</span>
+        </div>
+        <div className="md-tut-toolbar">
+          <button className="md-tut-btn"><MDIcon.Pause/> Pause</button>
+          <button className="md-tut-btn"><MDIcon.ChevronDown/> Steps</button>
+          <div className="md-tut-spacer"/>
+          <button className="md-tut-btn primary">
+            <MDIcon.Return/> Done with step
+          </button>
+        </div>
+        <HFAskBar mode="idle"/>
+      </div>
+    </div>
+  );
+}
+
+// MODE 3 — PAUSED (status banner + resume CTA at top)
+function ModePaused() {
+  return (
+    <div className="md">
+      <div className="hf-card" style={{ width: 360 }}>
+        <HFChrome/>
+        <div className="md-paused-banner">
+          <span className="md-paused-dot"/>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="md-paused-label">Paused on step 3</div>
+            <div className="md-paused-text">Answered your follow-up. Ready to keep going?</div>
+          </div>
+          <button className="md-paused-resume">
+            <MDIcon.Return/> Resume
+          </button>
+        </div>
+        <div className="md-paused-context">
+          <div className="md-paused-context-eyebrow">Where you left off</div>
+          <div className="md-paused-context-step">
+            <span className="md-paused-step-number">03</span>
+            <span>Type the Runpod URL into the address bar</span>
+          </div>
+        </div>
+        <div className="md-paused-answer">
+          <div className="md-paused-answer-q">"what's a Runpod URL?"</div>
+          <div className="md-paused-answer-body">
+            Runpod's dashboard lives at <span className="md-mono" style={{ fontSize: 12, padding: '1px 5px', background: 'rgba(0,0,0,0.05)', borderRadius: 4 }}>console.runpod.io</span> — that's the URL to type next.
+          </div>
+        </div>
+        <div className="md-paused-actions">
+          <button className="md-tut-btn">Ask follow-up</button>
+          <button className="md-tut-btn">End tutorial</button>
+        </div>
+        <HFAskBar mode="idle"/>
+      </div>
+    </div>
+  );
+}
+
+function MDStage({ children, label }) {
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+      <div className="hf-wall"/>
+      <div className="hf-cursor-graphic"/>
+      <div style={{ position: 'absolute', left: 30, top: 36 }}>
+        {children}
+      </div>
+      <div className="hf-state-label">{label}</div>
+    </div>
+  );
+}
+
+
 // App shell — wires the design canvas with five wireframe artboards + a tweak panel.
 
 function Artboard({ children, showContext, height = 480 }) {
@@ -1499,6 +1828,22 @@ function App() {
       <style>{`@keyframes blink{50%{opacity:0}}`}</style>
       <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
         <DesignCanvas>
+          <DCSection
+            id="modes"
+            title="Three modes · one job each"
+            subtitle="Launcher (idle) · Tutorial (running) · Paused — each surface optimizes for ONE state instead of stacking them"
+          >
+            <DCArtboard id="mode-launcher" label="1 · Launcher (idle)" width={460} height={560}>
+              <MDStage label="LAUNCHER · NO TUTORIAL"><ModeLauncher/></MDStage>
+            </DCArtboard>
+            <DCArtboard id="mode-tutorial" label="2 · Tutorial (running)" width={460} height={560}>
+              <MDStage label="TUTORIAL · RUNNING"><ModeTutorial/></MDStage>
+            </DCArtboard>
+            <DCArtboard id="mode-paused" label="3 · Paused" width={460} height={560}>
+              <MDStage label="PAUSED · AWAITING RESUME"><ModePaused/></MDStage>
+            </DCArtboard>
+          </DCSection>
+
           <DCSection
             id="hifi"
             title="Hi-fi · Hybrid A"

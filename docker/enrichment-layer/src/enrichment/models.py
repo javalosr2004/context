@@ -38,3 +38,4 @@ class RunResult(BaseModel):
     page_count: int
     parsed_plan_count: int = 0
     aggregate_step_count: int = 0
+    aggregate_plan_count: int = 0

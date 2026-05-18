@@ -53,7 +53,6 @@ class TutorialAction(TutorialSchemaModel):
         "scroll",
         "drag",
         "wait",
-        "confirm",
     ] = Field(description="Action type supported by the overlay tutorial player.")
     target: ActionTarget | None = Field(
         default=None,
@@ -238,9 +237,6 @@ def validate_step_semantics(step: TutorialStep) -> None:
 
 
 def validate_action_semantics(action: TutorialAction) -> None:
-    if action.type == "confirm" and not action.requires_confirmation:
-        raise ValueError("confirm actions must set requires_confirmation to true")
-
     if action.type in {"click", "double_click", "right_click", "hover"}:
         require_target(action)
 

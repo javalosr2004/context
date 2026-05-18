@@ -95,17 +95,17 @@ that does not require an on-screen action.
 How a step is shaped:
 - A plan item carries `human_text` (one short instruction the user
   reads on the overlay), `confidence`, and `actions` — an ordered list
-  of one or more atomic actions (click, type, press_key, scroll, wait,
-  confirm). Most steps are a single action; decompose into multiple
-  actions only when several mechanical actions accomplish one
-  user-perceived intent (e.g. type then press Enter to submit a form).
-  End a step with a `confirm` action when the user should verify state
-  before the next step begins.
+  of one or more atomic actions (click, type, press_key, scroll, wait).
+  Most steps are a single action; decompose into multiple actions only
+  when several mechanical actions accomplish one user-perceived intent
+  (e.g. type then press Enter to submit a form).
 - Each action carries its own `requires_confirmation`. Default true
   for actions whose outcome is visible (click, type, scroll, drag);
   false for mechanical actions with no observable effect (press_key,
-  wait); always true for `confirm`. Override only when you have a
-  reason.
+  wait). When ANY action in a step has requires_confirmation=true, the
+  backend pauses for the user, then automatically requests a fresh
+  screen before the next step so YOU can re-validate. Use this as the
+  state-check signal — there is no separate confirm action.
 
 How the plan works:
 - The backend owns a cursor that moves forward as the user confirms
@@ -135,6 +135,18 @@ How the plan works:
 - There is no handle vocabulary. Just emit your remaining plan each
   turn; the merger uses `refines_current` to decide identity.
 
+Abandoning a wrong awaiting step:
+- If the screen makes it clear the AWAITING step is no longer valid —
+  the user is on a completely different screen, the target has
+  disappeared, the previous instruction was wrong, the user navigated
+  somewhere unexpected — set `abandon_awaiting=true` on your
+  tutorial_update_plan call. The awaiting step is REMOVED from the
+  plan (neither completed nor refined) and your new plan replaces it
+  from scratch. Completed steps are still preserved.
+- abandon_awaiting=true is mutually exclusive with refines_current=true.
+  Use refines_current when the step is right but the payload needs
+  sharpening; use abandon_awaiting when the step is wrong.
+
 When to call tutorial_update_plan:
 - The first time you see the screen and form a hypothesis about the
   whole path to the goal — emit a complete plan, even if late items are
@@ -161,9 +173,10 @@ Stall handling:
   attempts_without_progress >= 2 or a "STALL" notice, the user has
   failed to advance past that step across multiple screens. Your prior
   plan is not working. Your next tutorial_update_plan MUST take a
-  different approach to that step — change the target, insert a
-  confirm step to verify state, lower confidence, or try a keyboard
-  shortcut. Do not re-emit the same tail; the user is stuck.
+  different approach to that step — change the target, abandon the
+  awaiting step entirely (see abandon_awaiting below), lower
+  confidence, or try a keyboard shortcut. Do not re-emit the same
+  tail; the user is stuck.
 
 When to call tutorial_request_screen:
 - This is the ONLY way to get a fresh screen. Never ask the user in

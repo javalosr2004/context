@@ -59,9 +59,26 @@ def merge_plan_tail(
     awaiting_step_id: str | None,
     new_tail: list[TailCandidate],
     step_counter: int,
+    abandon_awaiting: bool = False,
 ) -> PlanMergeResult:
     _require_contiguous_prefix(current_plan_steps, frozen_prefix_ids)
     _validate_refines_position(new_tail)
+
+    if abandon_awaiting:
+        if new_tail and new_tail[0].refines_current:
+            raise PlanMergeError(
+                "abandon_awaiting=true is mutually exclusive with "
+                "refines_current=true on the first tail item."
+            )
+        if awaiting_step_id is None:
+            raise PlanMergeError(
+                "abandon_awaiting=true requires a live awaiting step."
+            )
+        if not frozen_prefix_ids or frozen_prefix_ids[-1] != awaiting_step_id:
+            raise PlanMergeError(
+                "abandon_awaiting=true requires the awaiting step to be the "
+                "last frozen prefix entry."
+            )
 
     # Honor refines_current only when there's a live awaiting step at the
     # tail of the frozen prefix. Otherwise drop the bit and append — never
@@ -72,8 +89,12 @@ def merge_plan_tail(
         and awaiting_step_id is not None
         and bool(frozen_prefix_ids)
         and frozen_prefix_ids[-1] == awaiting_step_id
+        and not abandon_awaiting
     )
-    retained_count = len(frozen_prefix_ids) - 1 if refines else len(frozen_prefix_ids)
+    if abandon_awaiting:
+        retained_count = len(frozen_prefix_ids) - 1
+    else:
+        retained_count = len(frozen_prefix_ids) - 1 if refines else len(frozen_prefix_ids)
     new_steps: list[TutorialStep] = list(current_plan_steps[:retained_count])
     next_step_counter = step_counter
 

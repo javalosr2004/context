@@ -24,6 +24,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -36,10 +37,12 @@ from backend.tutorial_guide import (
     generate_draft_plan,
 )
 from backend.tutorial_schema import DraftPlan, TutorialAction, TutorialPlan, TutorialStep
-from backend.web_ground import NullWebGroundProducer, WebGroundProducer
+from backend.web_ground import NullWebGroundProducer, WebGroundProducer, WebGroundSnippet
 from backend.tutorial_session_events import (
+    AgentTurnEvent,
     AwaitingConfirmationEvent,
     DraftPlanReadyEvent,
+    PlanDiffEvent,
     PlanReadyEvent,
     PlanUpdatedEvent,
     ScreenRequestedEvent,
@@ -47,9 +50,13 @@ from backend.tutorial_session_events import (
     ServerSessionEvent,
     SessionCompletedEvent,
     StatusChangedEvent,
+    StepProgressEvent,
     StepReadyEvent,
     TutorialTextDeltaEvent,
     TextResponseEventLike,
+    WebSearchCompletedEvent,
+    WebSearchSource,
+    WebSearchStartedEvent,
 )
 from backend.plan_merge import (
     PlanMergeError,
@@ -350,6 +357,7 @@ class TutorialSession:
         last_screen_reason = ""
 
         for turn in range(MAX_AGENT_TURNS):
+            await self.emit(AgentTurnEvent(turn=turn + 1, max_turns=MAX_AGENT_TURNS))
             tool_calls, text = await self._stream_llm_once()
             logger.info(
                 "Agent loop turn",
@@ -586,6 +594,7 @@ class TutorialSession:
         image: UploadedImage | None,
         images: list[UploadedImage],
     ) -> None:
+        snippets = await self._ground_with_events(goal)
         try:
             plan = await asyncio.to_thread(
                 generate_draft_plan,
@@ -593,7 +602,8 @@ class TutorialSession:
                 goal,
                 image,
                 images,
-                self.web_ground,
+                None,
+                snippets,
             )
         except asyncio.CancelledError:
             raise
@@ -609,6 +619,32 @@ class TutorialSession:
             return
         self.draft_plan = plan
         await self.emit(DraftPlanReadyEvent(plan=plan))
+
+    async def _ground_with_events(self, goal: str) -> list[WebGroundSnippet]:
+        if isinstance(self.web_ground, NullWebGroundProducer):
+            return []
+        await self.emit(WebSearchStartedEvent(query=goal))
+        started_at = time.perf_counter()
+        try:
+            snippets = await asyncio.to_thread(self.web_ground.ground, goal)
+        except Exception:
+            logger.exception(
+                "Web grounding failed",
+                extra={"session_id": self.session_id, "query_chars": len(goal)},
+            )
+            snippets = []
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        await self.emit(
+            WebSearchCompletedEvent(
+                query=goal,
+                source_count=len(snippets),
+                sources=[
+                    WebSearchSource(title=s.title, url=s.url) for s in snippets
+                ],
+                elapsed_ms=elapsed_ms,
+            )
+        )
+        return snippets
 
     async def _cancel_draft_task(self) -> None:
         task = self.draft_plan_task
@@ -674,6 +710,24 @@ class TutorialSession:
         self.step_counter = result.step_counter
 
         plan = plan_from_steps(self.goal or "", self.plan_steps)
+        refined_current = bool(
+            candidates
+            and candidates[0].refines_current
+            and awaiting_in_prefix is not None
+            and frozen_prefix_ids
+            and frozen_prefix_ids[-1] == awaiting_in_prefix
+        )
+        frozen_prefix_len = (
+            len(frozen_prefix_ids) - 1 if refined_current else len(frozen_prefix_ids)
+        )
+        await self.emit(
+            PlanDiffEvent(
+                frozen_prefix_len=frozen_prefix_len,
+                new_tail_len=len(candidates),
+                refined_current=refined_current,
+                total_steps=len(self.plan_steps),
+            )
+        )
         if not self.plan_emitted:
             await self.emit(PlanReadyEvent(plan=plan))
             self.plan_emitted = True
@@ -929,6 +983,19 @@ class TutorialSession:
         slot = (step_id, action_index)
         self.status = "step_ready"
         await self.emit(StepReadyEvent(step_id=step_id, action_index=action_index))
+        current_step = next(
+            (s for s in self.plan_steps if s.step_id == step_id), None
+        )
+        total_actions = len(current_step.actions) if current_step is not None else 0
+        await self.emit(
+            StepProgressEvent(
+                step_id=step_id,
+                step_index=step_index,
+                total_steps=len(self.plan_steps),
+                action_index=action_index,
+                total_actions=total_actions,
+            )
+        )
 
         while slot not in self.pending_step_starts:
             if self._has_later_event(step_index):

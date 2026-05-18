@@ -150,6 +150,47 @@ class ScreenRequestedEvent(TutorialSessionEventModel):
     reason: str
 
 
+class WebSearchSource(TutorialSessionEventModel):
+    title: str
+    url: str
+
+
+class WebSearchStartedEvent(TutorialSessionEventModel):
+    type: Literal["web_search_started"] = "web_search_started"
+    query: str
+
+
+class WebSearchCompletedEvent(TutorialSessionEventModel):
+    type: Literal["web_search_completed"] = "web_search_completed"
+    query: str
+    source_count: int = Field(ge=0)
+    sources: list[WebSearchSource] = Field(default_factory=list)
+    elapsed_ms: float = Field(ge=0)
+
+
+class AgentTurnEvent(TutorialSessionEventModel):
+    type: Literal["agent_turn"] = "agent_turn"
+    turn: int = Field(ge=1)
+    max_turns: int = Field(ge=1)
+
+
+class PlanDiffEvent(TutorialSessionEventModel):
+    type: Literal["plan_diff"] = "plan_diff"
+    frozen_prefix_len: int = Field(ge=0)
+    new_tail_len: int = Field(ge=0)
+    refined_current: bool
+    total_steps: int = Field(ge=0)
+
+
+class StepProgressEvent(TutorialSessionEventModel):
+    type: Literal["step_progress"] = "step_progress"
+    step_id: str
+    step_index: int = Field(ge=0)
+    total_steps: int = Field(ge=0)
+    action_index: int = Field(ge=0)
+    total_actions: int = Field(ge=0)
+
+
 class SessionCompletedEvent(TutorialSessionEventModel):
     type: Literal["session_completed"] = "session_completed"
 
@@ -175,6 +216,11 @@ ServerSessionEvent = (
     | StepReadyEvent
     | AwaitingConfirmationEvent
     | ScreenRequestedEvent
+    | WebSearchStartedEvent
+    | WebSearchCompletedEvent
+    | AgentTurnEvent
+    | PlanDiffEvent
+    | StepProgressEvent
     | SessionCompletedEvent
     | ErrorEvent
 )

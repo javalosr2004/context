@@ -10,6 +10,7 @@ from backend.llm import LLMRequest, MultimodalLLM
 from backend.web_ground import (
     NullWebGroundProducer,
     WebGroundProducer,
+    WebGroundSnippet,
     format_snippets_for_prompt,
 )
 from backend.tutorial_schema import (
@@ -428,17 +429,29 @@ def generate_draft_plan(
     image: UploadedImage | None = None,
     images: list[UploadedImage] | None = None,
     web_ground: WebGroundProducer | None = None,
+    snippets: list[WebGroundSnippet] | None = None,
 ) -> DraftPlan:
-    """One-shot coarse plan generation. Images are optional visual context."""
+    """One-shot coarse plan generation. Images are optional visual context.
+
+    If ``snippets`` is provided, ``web_ground`` is ignored — the caller has
+    already done the grounding fetch (e.g. to emit progress events around it).
+    """
     request_images = images if images is not None else []
     if image is not None:
         request_images = [image, *request_images]
 
     grounding_block = ""
-    producer = web_ground if web_ground is not None else NullWebGroundProducer()
-    grounding_started_at = time.perf_counter()
-    snippets = producer.ground(goal)
-    grounding_elapsed_ms = round((time.perf_counter() - grounding_started_at) * 1000, 2)
+    if snippets is None:
+        producer_name = type(
+            web_ground if web_ground is not None else NullWebGroundProducer()
+        ).__name__
+        producer = web_ground if web_ground is not None else NullWebGroundProducer()
+        grounding_started_at = time.perf_counter()
+        snippets = producer.ground(goal)
+        grounding_elapsed_ms = round((time.perf_counter() - grounding_started_at) * 1000, 2)
+    else:
+        producer_name = "caller"
+        grounding_elapsed_ms = 0.0
     if snippets:
         grounding_block = format_snippets_for_prompt(snippets) + "\n\n"
         logger.info(
@@ -458,7 +471,7 @@ def generate_draft_plan(
             extra={
                 "query": goal,
                 "elapsed_ms": grounding_elapsed_ms,
-                "producer": type(producer).__name__,
+                "producer": producer_name,
             },
         )
 

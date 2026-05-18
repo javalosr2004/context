@@ -41,6 +41,42 @@ private struct StatusChip: Identifiable, Equatable {
     let showsDot: Bool
 }
 
+private struct ChipEnterModifier: ViewModifier, Animatable {
+    var progress: Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        // progress: 0 = hidden (small, offset, transparent), 1 = resting.
+        let clamped = min(max(progress, 0), 1)
+        let scale = 0.62 + 0.38 * clamped
+        let xOffset = (1 - clamped) * -6 // slide in from leading edge
+        let opacity = clamped
+        return content
+            .scaleEffect(scale, anchor: .leading)
+            .offset(x: xOffset)
+            .opacity(opacity)
+    }
+}
+
+private struct ChipExitModifier: ViewModifier, Animatable {
+    var progress: Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        // progress: 1 = resting, 0 = exited (collapses in place, no slide).
+        let clamped = min(max(progress, 0), 1)
+        let scale = 0.84 + 0.16 * clamped
+        let opacity = clamped
+        return content
+            .scaleEffect(scale, anchor: .center)
+            .opacity(opacity)
+    }
+}
+
 private struct StepChipFlash: Equatable {
     let id: UUID
     let text: String
@@ -1176,13 +1212,14 @@ struct ChatPopupView: View {
     @ViewBuilder
     private var statusChipRow: some View {
         let chips = statusChips
+        let chipIDs = chips.map { $0.id }
         Group {
             if !chips.isEmpty {
                 HStack(spacing: 6) {
-                    ForEach(chips) { chip in
+                    ForEach(Array(chips.enumerated()), id: \.element.id) { index, chip in
                         statusChipView(chip)
-                            .id("\(chip.id):\(chip.text)")
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .transition(chipTransition(forIndex: index, totalIncoming: chips.count))
+                            .zIndex(Double(chips.count - index))
                     }
                     Spacer(minLength: 0)
                 }
@@ -1191,11 +1228,29 @@ struct ChatPopupView: View {
                 .padding(.bottom, 2)
             }
         }
-        .animation(.easeInOut(duration: 0.22), value: chips.map { "\($0.id):\($0.text)" })
+        .animation(.spring(response: 0.42, dampingFraction: 0.82, blendDuration: 0.15), value: chipIDs)
         .onChange(of: planDiffSignature) { _ in handlePlanDiffChange() }
         .onChange(of: sessionController.stepProgress?.totalSteps ?? 0) { newTotal in
             if newTotal > 0 { lastSeenTotalSteps = newTotal }
         }
+    }
+
+    private func chipTransition(forIndex index: Int, totalIncoming: Int) -> AnyTransition {
+        // Stagger only when the row is populating fresh (≥2 chips arriving together).
+        let delay = totalIncoming >= 2 ? Double(index) * 0.04 : 0
+        let insertion = AnyTransition.modifier(
+            active: ChipEnterModifier(progress: 0),
+            identity: ChipEnterModifier(progress: 1)
+        )
+        .animation(.spring(response: 0.40, dampingFraction: 0.78).delay(delay))
+
+        let removal = AnyTransition.modifier(
+            active: ChipExitModifier(progress: 0),
+            identity: ChipExitModifier(progress: 1)
+        )
+        .animation(.spring(response: 0.28, dampingFraction: 0.95))
+
+        return .asymmetric(insertion: insertion, removal: removal)
     }
 
     private var planDiffSignature: String {
@@ -1257,6 +1312,8 @@ struct ChatPopupView: View {
                 .foregroundStyle(OverlayTheme.secondaryText)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.32, dampingFraction: 0.9), value: chip.text)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

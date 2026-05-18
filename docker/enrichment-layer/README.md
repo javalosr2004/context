@@ -13,12 +13,25 @@ cp .env.example .env  # add OPENAI_API_KEY (+ BRAVE_API_KEY when ready)
 uvicorn enrichment.app:app --reload
 ```
 
-Then:
+Then submit a job and poll:
 
 ```bash
-curl -X POST localhost:8000/query -H 'content-type: application/json' \
-  -d '{"request":"how do I export a PNG from a Figma frame?"}'
+JOB=$(curl -s -X POST localhost:8000/query -H 'content-type: application/json' \
+  -d '{"request":"how do I export a PNG from a Figma frame?"}' | jq -r .job_id)
+
+# poll until done
+while :; do
+  RES=$(curl -s localhost:8000/jobs/$JOB)
+  echo $RES
+  [[ $(echo $RES | jq -r .status) =~ done|failed ]] && break
+  sleep 2
+done
 ```
+
+`POST /query` returns `202 {job_id, status: "pending"}` immediately. `GET /jobs/{id}`
+returns `{status, run_id, error, ...}`. When `status == "done"`, look in
+`data/runs/{run_id}/`, `data/plans/`, etc. Jobs survive uvicorn restart;
+in-flight jobs are marked `failed` with "server restarted before completion".
 
 ## Layout
 

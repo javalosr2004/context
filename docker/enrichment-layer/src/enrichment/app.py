@@ -1,22 +1,39 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from enrichment.models import RunResult
 from enrichment.pipeline import run_enrichment
-from enrichment.storage import init_db
+from enrichment.storage import (
+    create_job, get_job, init_db, reap_orphan_jobs, update_job,
+)
 
-app = FastAPI(title="enrichment-layer")
+logger = logging.getLogger("enrichment")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    reaped = reap_orphan_jobs()
+    if reaped:
+        logger.warning("reaped %d orphan jobs from previous run", reaped)
+    yield
+
+
+app = FastAPI(title="enrichment-layer", lifespan=lifespan)
 
 
 class QueryRequest(BaseModel):
     request: str
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    init_db()
+class JobAck(BaseModel):
+    job_id: str
+    status: str
 
 
 @app.get("/health")
@@ -24,6 +41,27 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/query", response_model=RunResult)
-async def query(body: QueryRequest) -> RunResult:
-    return await run_enrichment(body.request)
+@app.post("/query", response_model=JobAck, status_code=202)
+async def query(body: QueryRequest) -> JobAck:
+    job_id = create_job(body.request)
+    asyncio.create_task(_run_job(job_id, body.request))
+    return JobAck(job_id=job_id, status="pending")
+
+
+@app.get("/jobs/{job_id}")
+def job_status(job_id: str) -> dict:
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    return job
+
+
+async def _run_job(job_id: str, raw_request: str) -> None:
+    update_job(job_id, status="running")
+    try:
+        result = await run_enrichment(raw_request)
+    except Exception as exc:
+        logger.exception("job %s failed", job_id)
+        update_job(job_id, status="failed", error=f"{type(exc).__name__}: {exc}")
+        return
+    update_job(job_id, status="done", run_id=result.run_id)

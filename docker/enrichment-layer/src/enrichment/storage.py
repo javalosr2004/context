@@ -19,6 +19,17 @@ from enrichment.parse import EnrichedDraft
 Base = declarative_base()
 
 
+class Job(Base):
+    __tablename__ = "jobs"
+    job_id = Column(String, primary_key=True)
+    status = Column(String, nullable=False)  # pending|running|done|failed
+    raw_request = Column(String, nullable=False)
+    run_id = Column(String, ForeignKey("runs.run_id"), nullable=True)
+    error = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+
 class Run(Base):
     __tablename__ = "runs"
     run_id = Column(String, primary_key=True)
@@ -105,6 +116,75 @@ def init_db() -> None:
     if _engine is None:
         _get_session().close()
     Base.metadata.create_all(_engine)
+
+
+# ---------- jobs ----------
+
+def create_job(raw_request: str) -> str:
+    init_db()
+    job_id = str(uuid4())
+    now = _now()
+    with _get_session() as session:
+        session.add(Job(
+            job_id=job_id,
+            status="pending",
+            raw_request=raw_request,
+            created_at=now,
+            updated_at=now,
+        ))
+        session.commit()
+    return job_id
+
+
+def update_job(
+    job_id: str,
+    *,
+    status: str,
+    run_id: str | None = None,
+    error: str | None = None,
+) -> None:
+    with _get_session() as session:
+        job = session.get(Job, job_id)
+        if job is None:
+            return
+        job.status = status
+        if run_id is not None:
+            job.run_id = run_id
+        if error is not None:
+            job.error = error
+        job.updated_at = _now()
+        session.commit()
+
+
+def get_job(job_id: str) -> dict | None:
+    with _get_session() as session:
+        job = session.get(Job, job_id)
+        if job is None:
+            return None
+        return {
+            "job_id": job.job_id,
+            "status": job.status,
+            "raw_request": job.raw_request,
+            "run_id": job.run_id,
+            "error": job.error,
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+        }
+
+
+def reap_orphan_jobs() -> int:
+    """Mark any pending/running jobs as failed; called on startup."""
+    init_db()
+    count = 0
+    with _get_session() as session:
+        from sqlalchemy import select
+        for job in session.execute(select(Job).where(Job.status.in_(["pending", "running"]))).scalars():
+            job.status = "failed"
+            job.error = "server restarted before completion"
+            job.updated_at = _now()
+            count += 1
+        session.commit()
+    return count
 
 
 def reset_engine_for_tests() -> None:

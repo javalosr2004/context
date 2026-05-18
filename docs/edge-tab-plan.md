@@ -1,9 +1,9 @@
 # Edge-tab plan
 
-A persistent floating handle pinned to a screen edge that gives the user a
-guaranteed way to reach the overlay. Replaces the today's "minified icon"
-mode and removes the panel close/miniaturize buttons that currently lead to
-an unrecoverable state.
+A persistent floating handle pinned to the bottom-right corner of the
+primary screen that gives the user a guaranteed way to reach the overlay.
+Replaces today's "minified icon" mode and removes the panel
+close/miniaturize buttons that currently lead to an unrecoverable state.
 
 ## Problem
 
@@ -20,16 +20,27 @@ close-button case, and its free-floating position is easy to lose.
 
 1. There is *always* something on screen the user can click to reach the
    overlay, regardless of how the popup got dismissed.
-2. The handle lives at a screen edge — predictable, out of the way, and
+2. The handle lives in a fixed, predictable spot — out of the way and
    not occluding work content.
 3. No panel chrome close/miniaturize that produces an orphaned state.
 
 ## Non-goals
 
 - Multi-monitor handle replication (MVP: primary screen only).
-- Hiding the handle entirely (out of scope; users who want it gone can
-  quit from the status bar).
+- Hiding the handle. It is always visible until the app quits.
+- Letting the user move the tab. Position is fixed.
 - Animating the popup as a sheet attached to the tab.
+
+## Decisions (locked)
+
+- **Tab position:** fixed in the bottom-right corner of the primary
+  screen's `visibleFrame` (so it clears the Dock). Not draggable, not
+  persisted, no edge-selection UI.
+- **Popup position:** independent from the tab. The popup keeps whatever
+  frame the user last placed it at; toggling via the tab does not move
+  the popup.
+- **Hideability:** none. The tab is always visible. To remove it the
+  user quits the app.
 
 ## Behaviour
 
@@ -40,31 +51,29 @@ and fullscreen apps, matching the existing panels.
 
 **States** (replaces the current `PopupState` two-state model):
 
-- `expanded` — popup panel front, edge tab visible.
-- `collapsed` — popup panel hidden, edge tab visible.
+- `expanded` — popup panel front at its last user-chosen frame, tab visible.
+- `collapsed` — popup panel hidden, tab visible.
 
 The "icon hidden when popup shown" rule from `PopupController` goes away.
 The tab is always there.
 
 **Interaction:**
 
-- *Click* the tab → toggle. If collapsed, restore popup at last expanded
-  frame. If expanded, collapse the popup.
-- *Drag* the tab → move along the current edge (one axis only). If
-  dragged past a threshold toward another edge, snap to that edge. Free
-  2D dragging is rejected to keep placement predictable.
-- *Right-click* → small context menu: "Show Overlay", "Pin to left/right
-  edge", "Quit".
+- *Click* the tab → toggle. If collapsed, restore popup at last
+  expanded frame. If expanded, collapse the popup.
+- *Right-click* → small context menu: "Show Overlay", "Quit".
+- No drag handling.
 
-**Persistence:** edge (`left | right | top | bottom`) and along-edge
-offset persist in `UserDefaults` under a single key, e.g.
-`overlay.edgeTab.position`. Re-clamped on launch and on
-`didChangeScreenParameters`.
+**Visual:** narrow vertical pill anchored to the bottom-right corner of
+`visibleFrame`, roughly 8pt wide × 56pt tall, with a small inset from the
+edge (e.g. 8pt from right, 12pt from bottom). Semi-transparent with the
+app's scope glyph centered. Hover bumps width slightly to telegraph it's
+interactive. Exact metrics live in `EdgeTabMetrics` so they are easy to
+tune.
 
-**Visual:** narrow vertical pill on the right edge by default — roughly
-8pt wide × 56pt tall, semi-transparent, with the app's scope glyph
-centered. Hover bumps width slightly to telegraph it's interactive.
-Exact metrics live in `EdgeTabMetrics` so they are easy to tune.
+**Re-anchoring:** on `NSApplication.didChangeScreenParametersNotification`,
+recompute the bottom-right frame from the new `visibleFrame` and apply.
+No persistence needed.
 
 ## Module boundaries
 
@@ -75,32 +84,31 @@ New files, each with a single responsibility:
   No close/miniaturize chrome.
 - `Presentation/Views/EdgeTabView.swift` — SwiftUI view for the pill.
   Hover + press states only; no logic.
-- `Application/EdgeTabController.swift` — owns the panel, applies
-  position from `EdgeTabPositionStore`, handles drag → edge snap →
-  persist, exposes `toggle()` / `show()` callbacks to the coordinator.
-- `Domain/EdgeTabPosition.swift` — pure value type (`edge`, `offset`)
-  plus snapping math. Unit-testable.
-- `Domain/EdgeTabPositionStore.swift` — `UserDefaults`-backed
-  load/save, mirroring `GroundingEndpointStore` shape.
+- `Application/EdgeTabController.swift` — owns the panel, computes the
+  bottom-right frame for the current screen, re-anchors on screen-
+  parameter changes, exposes `onToggle` to the coordinator.
+- `Domain/EdgeTabAnchor.swift` — pure function:
+  `func frame(in visibleFrame: CGRect, size: CGSize, inset: CGSize) -> CGRect`.
+  Unit-testable.
 
 Changes to existing files:
 
 - `Presentation/Panels/PopupPanel.swift` — drop `.closable` and
   `.miniaturizable` from `styleMask`. No more orphaning. (Keep `.titled`
-  for drag-by-titlebar, or switch to `.borderless` + `isMovableByWindowBackground` if cleaner.)
+  for drag-by-titlebar, or switch to `.borderless` +
+  `isMovableByWindowBackground` if cleaner.)
 - `Application/PopupController.swift` — collapse the icon-panel branch.
   `minify()`/`restore()` keep their names but stop toggling the icon
   panel; they only toggle the popup itself. State becomes
-  `expanded | collapsed`.
+  `expanded | collapsed`. Last expanded frame is still tracked so
+  `restore()` returns the popup to where the user left it.
 - `Application/OverlayCoordinator.swift` — instantiate
   `EdgeTabController`, wire its `onToggle` to `popupController.toggle()`,
   remove `iconPanel` construction and the `IconView` content. The
   in-popup "minify" button still works — it just calls `collapse()` on
   the controller instead of swapping panels.
 - `Application/StatusBarController.swift` — keep the "Show Overlay"
-  item as a belt-and-suspenders fallback (e.g. user dragged the tab
-  somewhere weird off-screen — the reclamp on next screen-change event
-  will recover, but the menu item is still nice to have).
+  item as a redundant fallback (cheap, no harm).
 
 Deleted (or kept dormant — confirm before deleting):
 
@@ -114,97 +122,85 @@ Deleted (or kept dormant — confirm before deleting):
 ## Data flow
 
 ```
+App launch
+  → OverlayCoordinator builds EdgeTabController
+  → EdgeTabAnchor.frame(in: screen.visibleFrame, ...)   [pure]
+  → EdgeTabPanel placed bottom-right, orderFrontRegardless
+
 User click on tab
   → EdgeTabPanel mouseDown
   → EdgeTabController.handleClick()
   → PopupController.toggle()
-  → PopupPanel orderFront / orderOut
+  → PopupPanel orderFront at last expanded frame / orderOut
   → state: expanded | collapsed (published)
-
-User drag on tab
-  → EdgeTabPanel mouseDragged delta
-  → EdgeTabController.handleDrag(delta)
-  → EdgeTabPosition.afterDrag(delta, on: screenFrame)  [pure]
-  → apply frame, debounce-save to EdgeTabPositionStore
 
 Screen parameters change
   → OverlayCoordinator observes NSApplication.didChangeScreenParameters
-  → EdgeTabController.reclamp(to: screen.frame)
-  → EdgeTabPosition.clamped(into: screenFrame)         [pure]
+  → EdgeTabController.reanchor(to: screen.visibleFrame)
+  → EdgeTabAnchor.frame(...)                            [pure]
+  → apply frame
+  (popup frame is left alone; PopupController already clamps on its own
+   reclamp path)
 ```
 
-The pure functions in `EdgeTabPosition` (snap, clamp, afterDrag) are the
-unit-test surface. Everything else is thin glue.
+`EdgeTabAnchor.frame` is the entire unit-test surface for placement.
+Everything else is thin glue.
 
 ## Failure modes & edge cases
 
-- *Multi-monitor / monitor disconnect.* If the persisted position
-  references a screen that no longer exists, fall back to the primary
-  screen's right edge at 40% from top. Reclamp on every
-  `didChangeScreenParameters`.
-- *Notch / menu bar overlap on top edge.* When `edge == .top`, offset
-  the panel below `NSScreen.main.safeAreaInsets.top` (or the legacy
-  menu-bar height) so it isn't obscured.
-- *Dock collision on bottom edge.* Use `screen.visibleFrame` (not
-  `screen.frame`) as the placement rect so the tab clears the Dock.
+- *Multi-monitor / monitor disconnect.* If the primary screen changes,
+  the next `didChangeScreenParameters` re-anchors using the new
+  `visibleFrame`. No persisted position to invalidate.
+- *Dock visibility changes.* Always use `screen.visibleFrame`, never
+  `screen.frame`, so the tab follows the Dock if the user hides/shows
+  or moves it.
 - *Click-through in fullscreen apps.* Confirm
   `.fullScreenAuxiliary + .canJoinAllSpaces + .nonactivatingPanel` keeps
   the tab clickable in another app's fullscreen — this mirrors what
   `PopupPanel` already does, so it should hold.
-- *Drag jitter near edge boundary.* Snap threshold must exceed the
-  hysteresis band (e.g. snap when drag delta perpendicular to current
-  edge > 60pt, then re-snap to nearest edge by center distance).
-- *Save thrash on drag.* Debounce `EdgeTabPositionStore.save` to ~250ms
-  trailing-edge so we don't hammer `UserDefaults`.
+- *Popup last-frame off-screen after monitor change.* `PopupController`
+  already runs `boundsKeeper.clamp` on `reclamp`; verify that still
+  fires when the popup is hidden so the next `restore()` lands on a
+  valid frame.
 
 ## Milestones
 
-**M1 — Tab exists and is always visible.**
-- New `EdgeTabPanel` + `EdgeTabView` rendered on app launch at fixed
-  right-edge position.
-- Click toggles `PopupPanel` via existing `PopupController.minify/restore`
-  wrappers.
+**M1 — Tab exists at bottom-right and toggles the popup.**
+- New `EdgeTabPanel` + `EdgeTabView` rendered on app launch at the
+  bottom-right of `visibleFrame`.
+- Click toggles `PopupPanel` via `PopupController.toggle()`; popup
+  restores to its last user-chosen frame.
 - `PopupPanel` style mask updated to drop `.closable, .miniaturizable`.
-- Acceptance: launching the app shows the tab; clicking it expands and
-  collapses the popup; there is no X button on the popup.
+- Re-anchor on `didChangeScreenParameters`.
+- Acceptance: launching the app shows the tab in the bottom-right;
+  clicking it expands and collapses the popup without moving the
+  popup's user-set position; there is no X button on the popup;
+  hiding/showing the Dock re-anchors the tab above the Dock.
 
-**M2 — Draggable + edge snapping + persistence.**
-- `EdgeTabPosition` pure type with `afterDrag`, `snapped`, `clamped`.
-- `EdgeTabController` applies drag, snaps to nearest edge past
-  threshold, debounce-saves to `EdgeTabPositionStore`.
-- Reclamp on `didChangeScreenParameters`.
-- Acceptance: drag to each of the four edges and verify snap; relaunch
-  app and verify position persists; disconnect a monitor and verify
-  reclamp.
-
-**M3 — Polish + retire icon panel.**
-- Right-click context menu on the tab.
+**M2 — Polish + retire icon panel.**
+- Right-click context menu on the tab (Show / Quit).
 - Visual hover/press states.
 - Delete `IconPanel` and `IconView` after confirming no other code path
   uses them.
 - Update or remove `IconMenuController` accordingly.
 - Acceptance: no references to `IconPanel`/`IconView` remain; tab
-  context menu exposes Show / Pin / Quit.
+  context menu exposes Show / Quit.
 
 ## Tests
 
 Pure-logic tests under `ContextAppTests/`:
 
-- `EdgeTabPositionTests` — snapping past threshold, clamping inside
-  `visibleFrame`, top-edge menu-bar inset, drag math along each axis.
-- `EdgeTabPositionStoreTests` — round-trip save/load, default value
-  when unset, invalid stored payload falls back to default.
+- `EdgeTabAnchorTests` — bottom-right placement inside `visibleFrame`,
+  inset honored, behaves correctly when `visibleFrame.origin` is
+  non-zero (menu bar at top, Dock on left).
 - `PopupControllerTests` — collapse/expand transitions no longer
-  reference an icon panel; state machine reduces to two states.
+  reference an icon panel; state machine reduces to two states;
+  `restore()` returns the popup to its last expanded frame.
 
 UI / integration smoke (manual, documented in acceptance per
-milestone): launch, drag, restart, monitor disconnect.
+milestone): launch, toggle, Dock show/hide, monitor disconnect.
 
 ## Open questions
 
-1. Should the tab be hideable (e.g. ⌥-click to fade for 30s)? Not in
-   MVP, but worth deciding before we lock the UX.
-2. Right-click "Pin to edge" — useful, or is drag-to-snap enough? Lean
-   toward drag-only for MVP; add menu only if users get stuck.
-3. Keep or drop the in-popup "minify" button now that the tab does the
-   same job? Keep for M1 (familiar surface), revisit in M3.
+1. Keep or drop the in-popup "minify" button now that the tab does the
+   same job? Keep for M1 (familiar surface), revisit in M2.

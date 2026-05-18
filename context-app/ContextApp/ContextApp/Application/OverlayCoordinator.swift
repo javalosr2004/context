@@ -70,7 +70,17 @@ final class OverlayCoordinator {
                         )
                         self.stabilityIndicator?.hide()
                     }
-                    await sessionController.confirmStep(stepID: stepID, actionIndex: actionIndex, confirmed: true, note: nil)
+                    // Capture the stable post-action screen and ship it with the
+                    // confirmation so the backend planner runs on a fresh frame
+                    // without a separate request_screen round-trip.
+                    let stableScreen = await sessionController.currentScreenSnapshot()
+                    await sessionController.confirmStep(
+                        stepID: stepID,
+                        actionIndex: actionIndex,
+                        confirmed: true,
+                        note: nil,
+                        screen: stableScreen
+                    )
                 }
             },
             onOutsideClick: { [weak bboxPanel, weak self] in
@@ -182,6 +192,7 @@ final class OverlayCoordinator {
         self.statusBarController = StatusBarController(
             endpointStore: endpointStore,
             tutorialEndpointStore: tutorialEndpointStore,
+            onShowOverlay: { popupController.showPopup() },
             onTestBbox: { debugController.showReplacementBbox() }
         )
         self.tutorialActionConsumer = tutorialActionConsumer

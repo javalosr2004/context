@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class StatusBarController {
     private let endpointStore: GroundingEndpointStore
+    private let onShowOverlay: () -> Void
     private let onTestBbox: () -> Void
     private let statusItem: NSStatusItem
     private let tutorialEndpointStore: TutorialAPIEndpointStore
@@ -10,9 +11,11 @@ final class StatusBarController {
     init(
         endpointStore: GroundingEndpointStore,
         tutorialEndpointStore: TutorialAPIEndpointStore,
+        onShowOverlay: @escaping () -> Void,
         onTestBbox: @escaping () -> Void
     ) {
         self.endpointStore = endpointStore
+        self.onShowOverlay = onShowOverlay
         self.onTestBbox = onTestBbox
         self.tutorialEndpointStore = tutorialEndpointStore
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -34,6 +37,10 @@ final class StatusBarController {
 
     private func rebuildMenu() {
         let menu = NSMenu()
+        menu.addItem(CallbackMenuItem(title: "Show Overlay", actionHandler: { [weak self] in
+            self?.showOverlay()
+        }))
+        menu.addItem(NSMenuItem.separator())
         let endpointItem = NSMenuItem(title: endpointTitle(), action: nil, keyEquivalent: "")
         endpointItem.isEnabled = false
         menu.addItem(endpointItem)
@@ -148,6 +155,11 @@ final class StatusBarController {
         alert.informativeText = "Enter an absolute URL with a scheme, such as http://localhost:8000."
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func showOverlay() {
+        NSApp.activate(ignoringOtherApps: true)
+        onShowOverlay()
     }
 
     private func quitApplication() {

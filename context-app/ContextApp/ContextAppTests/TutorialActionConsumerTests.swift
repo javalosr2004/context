@@ -18,7 +18,7 @@ final class TutorialActionConsumerTests: XCTestCase {
 
         XCTAssertEqual(
             TutorialActionConsumer.groundingInstructionText(for: step, actionIndex: 0),
-            "Click the New repository button.\n\nTarget: Starts repository creation"
+            "Starts repository creation"
         )
     }
 
@@ -38,7 +38,7 @@ final class TutorialActionConsumerTests: XCTestCase {
 
         XCTAssertEqual(
             TutorialActionConsumer.groundingInstructionText(for: step, actionIndex: 0),
-            "Click the icon."
+            ""
         )
     }
 
@@ -66,7 +66,7 @@ final class TutorialActionConsumerTests: XCTestCase {
         XCTAssertEqual(object?.keys.sorted(), ["instruction"])
         XCTAssertEqual(
             object?["instruction"] as? String,
-            "Scroll down to the billing section.\n\nTarget: The app settings window"
+            "The app settings window"
         )
     }
 
@@ -147,6 +147,6 @@ final class TutorialActionConsumerTests: XCTestCase {
         let result = await consumer.consume(step: step, actionIndex: 0)
 
         XCTAssertEqual(result, "highlighted")
-        XCTAssertEqual(receivedText, "Click the search field.")
+        XCTAssertEqual(receivedText, "")
     }
 }

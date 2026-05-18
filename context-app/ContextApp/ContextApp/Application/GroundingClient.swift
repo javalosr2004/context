@@ -210,7 +210,7 @@ final class GroundingClient {
         let response = try await predict(
             inputImageJPEGData: screenshotJPEGData,
             referenceImageJPEGData: referenceJPEGData(from: instruction),
-            instruction: nil
+            instruction: instruction.text
         )
 
         guard let boundingBox = GroundingBoundingBox(guiActorResponse: response) else {

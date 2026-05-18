@@ -52,7 +52,13 @@ struct CreateTutorialSessionResponse: Codable, Equatable {
 enum TutorialSessionClientEvent: Codable, Equatable {
     case userMessage(text: String, uploadedImages: [TutorialSessionScreenSnapshot] = [])
     case stepStarted(stepID: String, actionIndex: Int)
-    case userConfirmation(stepID: String, actionIndex: Int, confirmed: Bool, note: String?)
+    case userConfirmation(
+        stepID: String,
+        actionIndex: Int,
+        confirmed: Bool,
+        note: String?,
+        screen: TutorialSessionScreenSnapshot? = nil
+    )
     case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
 
     private enum CodingKeys: String, CodingKey {
@@ -90,7 +96,11 @@ enum TutorialSessionClientEvent: Codable, Equatable {
                 stepID: try container.decode(String.self, forKey: .stepID),
                 actionIndex: try container.decode(Int.self, forKey: .actionIndex),
                 confirmed: try container.decode(Bool.self, forKey: .confirmed),
-                note: try container.decodeIfPresent(String.self, forKey: .note)
+                note: try container.decodeIfPresent(String.self, forKey: .note),
+                screen: try container.decodeIfPresent(
+                    TutorialSessionScreenSnapshot.self,
+                    forKey: .screen
+                )
             )
         case "user_screen":
             self = .userScreen(
@@ -120,12 +130,13 @@ enum TutorialSessionClientEvent: Codable, Equatable {
             try container.encode("step_started", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
             try container.encode(actionIndex, forKey: .actionIndex)
-        case .userConfirmation(let stepID, let actionIndex, let confirmed, let note):
+        case .userConfirmation(let stepID, let actionIndex, let confirmed, let note, let screen):
             try container.encode("user_confirmation", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
             try container.encode(actionIndex, forKey: .actionIndex)
             try container.encode(confirmed, forKey: .confirmed)
             try container.encodeIfPresent(note, forKey: .note)
+            try container.encodeIfPresent(screen, forKey: .screen)
         case .userScreen(let requestID, let screen):
             try container.encode("user_screen", forKey: .type)
             try container.encode(requestID, forKey: .requestID)

@@ -120,7 +120,13 @@ final class TutorialSessionController: ObservableObject {
         pendingContinuePromptStepID = nil
     }
 
-    func confirmStep(stepID: String, actionIndex: Int, confirmed: Bool, note: String?) async {
+    func confirmStep(
+        stepID: String,
+        actionIndex: Int,
+        confirmed: Bool,
+        note: String?,
+        screen: TutorialSessionScreenSnapshot? = nil
+    ) async {
         pendingContinuePromptStepID = nil
         do {
             status = .sending
@@ -129,7 +135,8 @@ final class TutorialSessionController: ObservableObject {
                     stepID: stepID,
                     actionIndex: actionIndex,
                     confirmed: confirmed,
-                    note: note
+                    note: note,
+                    screen: screen
                 )
             )
             awaitingConfirmationStepID = nil
@@ -479,6 +486,19 @@ final class TutorialSessionController: ObservableObject {
     private func applyFailure(_ message: String) {
         logger.error("\(message, privacy: .public)")
         status = .failed(message)
+    }
+
+    /// Best-effort capture for callers (e.g. OverlayCoordinator after a
+    /// stability wait) that want to attach the post-action screen to a
+    /// confirmation. Returns nil on failure rather than throwing so the
+    /// caller can still send the confirmation without a screen.
+    func currentScreenSnapshot() async -> TutorialSessionScreenSnapshot? {
+        do {
+            return try await captureScreenSnapshot()
+        } catch {
+            logger.error("currentScreenSnapshot capture failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     private func captureScreenSnapshot() async throws -> TutorialSessionScreenSnapshot {

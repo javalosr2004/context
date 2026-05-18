@@ -66,16 +66,10 @@ final class TutorialActionConsumer {
 
     static func groundingInstructionText(for step: TutorialStep, actionIndex: Int) -> String {
         guard actionIndex >= 0, actionIndex < step.actions.count else {
-            return step.instruction
+            return ""
         }
-        guard
-            let description = targetDescription(for: step.actions[actionIndex])?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-            !description.isEmpty
-        else {
-            return step.instruction
-        }
-        return "\(step.instruction)\n\nTarget: \(description)"
+        return targetDescription(for: step.actions[actionIndex])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private static func targetDescription(for action: TutorialAction) -> String? {

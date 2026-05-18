@@ -131,12 +131,15 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         async def emit(event: Any) -> None:
             events.append(event)
 
-        # Turn 1: emit a 2-step plan. The walk processes both steps in one
-        # pass (no agent re-entry between confirmations).
-        # Turn 2 (after the post-walk fresh screen): final text -> done.
+        # Turn 1: emit a 2-step plan.
+        # Walk bails after step_001 (requires_confirmation=true on click)
+        # so the agent re-validates against a fresh screen before step_002.
+        # Turn 2: text-only continuation, walker resumes on step_002.
+        # Turn 3: final text after step_002.
         llm = ScriptedLLM(
             [
                 [LLMToolCallEvent(tool_call=PLAN_TWO_CLICKS)],
+                [LLMTextDelta(text="Looks good, continuing.")],
                 [LLMTextDelta(text="All done.")],
             ]
         )
@@ -151,6 +154,8 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         )
         await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
 
+        # Walker bails after step_001 -> screen request -> turn 2.
+        await send_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_002")
         self.assertEqual(
             [s.step_id for s in session.plan_steps], ["step_001", "step_002"]
@@ -181,10 +186,14 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         async def emit(event: Any) -> None:
             events.append(event)
 
-        # Turn 1: 2-step plan. Turn 2 (after step_002 rejected): text.
+        # Turn 1: 2-step plan.
+        # Walker bails after step_001 (requires_confirmation=true), screen
+        # check, turn 2 emits intermediate text, walker resumes on step_002,
+        # which the user rejects. Turn 3 emits the rethink text.
         llm = ScriptedLLM(
             [
                 [LLMToolCallEvent(tool_call=PLAN_TWO_CLICKS)],
+                [LLMTextDelta(text="Continuing.")],
                 [LLMTextDelta(text="Got it, will rethink.")],
             ]
         )
@@ -197,6 +206,7 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
 
+        await send_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_002")
         await session.handle_step_started("step_002", action_index=0)
         await wait_until(lambda: session.status == "awaiting_confirmation")

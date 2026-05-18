@@ -172,9 +172,13 @@ class PlanItem(_StrictModel):
         min_length=1,
         description=(
             "Ordered mechanical actions that together accomplish this step's "
-            "user-perceived intent. One step per intent; decompose into "
-            "atomic actions inside. End with a confirm action when the user "
-            "should verify state before the next step begins."
+            "user-perceived intent. Each action is a JSON object whose "
+            "discriminator field is named exactly \"kind\" (NOT \"action\" or "
+            "\"type\"), with value one of: \"click\", \"type\", \"scroll\", "
+            "\"press_key\", \"wait\", \"confirm\". The remaining fields depend "
+            "on kind (see the per-variant schemas). One step per user intent; "
+            "decompose into atomic actions inside. End with a confirm action "
+            "when the user should verify state before the next step begins."
         ),
     )
 
@@ -338,49 +342,12 @@ def parse_update_plan_arguments(call: TutorialToolCall) -> TutorialUpdatePlanArg
             f"Expected {UPDATE_PLAN_TOOL_NAME}, got {call.name!r}.",
         )
     try:
-        payload = json.loads(call.arguments)
-    except json.JSONDecodeError as error:
-        raise TutorialToolCallError(
-            INVALID_TOOL_ARGUMENTS,
-            f"Invalid arguments for {call.name}: {error}",
-        ) from error
-
-    _normalize_update_plan_payload(payload)
-
-    try:
-        return _update_plan_adapter.validate_python(payload)
+        return _update_plan_adapter.validate_json(call.arguments)
     except ValidationError as error:
         raise TutorialToolCallError(
             INVALID_TOOL_ARGUMENTS,
             f"Invalid arguments for {call.name}: {error}",
         ) from error
-
-
-# Some providers emit the action discriminator under the wrong field name
-# (`action` or `type`) instead of `kind`. We normalize before validation
-# rather than weakening the canonical schema.
-_ACTION_KIND_ALIASES = ("action", "type", "action_type")
-
-
-def _normalize_update_plan_payload(payload: object) -> None:
-    if not isinstance(payload, dict):
-        return
-    plan = payload.get("plan")
-    if not isinstance(plan, list):
-        return
-    for item in plan:
-        if not isinstance(item, dict):
-            continue
-        actions = item.get("actions")
-        if not isinstance(actions, list):
-            continue
-        for action in actions:
-            if not isinstance(action, dict) or "kind" in action:
-                continue
-            for alias in _ACTION_KIND_ALIASES:
-                if alias in action:
-                    action["kind"] = action.pop(alias)
-                    break
 
 
 # ---------------- Materialization: PlanTailItem -> TailCandidate ----------------

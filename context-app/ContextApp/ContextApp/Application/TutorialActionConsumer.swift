@@ -31,9 +31,16 @@ final class TutorialActionConsumer {
             referenceImageData: nil,
             imageEncodingConfig: .groundingRequest,
             submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds,
-            tooltip: step.instruction
+            tooltip: step.instruction,
+            copiableText: Self.copiableText(for: action)
         )
         return await groundInstruction(instruction)
+    }
+
+    static func copiableText(for action: TutorialAction) -> String? {
+        guard case .type(let typeAction) = action else { return nil }
+        let trimmed = typeAction.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : typeAction.text
     }
 
     static func skipsGrounding(action: TutorialAction) -> Bool {

@@ -12,6 +12,7 @@ final class ScreenGroundingController {
     private let ignoredWindowProvider: () -> [NSWindow]
     private let screenProvider: () -> NSScreen?
     private let tooltipController: TutorialTooltipController?
+    private let clipboardPopoverController: ClipboardPopoverController?
 
     init(
         bboxController: DebugBboxController,
@@ -19,7 +20,8 @@ final class ScreenGroundingController {
         endpointStore: GroundingEndpointStore,
         ignoredWindowProvider: @escaping () -> [NSWindow] = { [] },
         screenProvider: @escaping () -> NSScreen?,
-        tooltipController: TutorialTooltipController? = nil
+        tooltipController: TutorialTooltipController? = nil,
+        clipboardPopoverController: ClipboardPopoverController? = nil
     ) {
         self.bboxController = bboxController
         self.capture = capture
@@ -27,6 +29,7 @@ final class ScreenGroundingController {
         self.ignoredWindowProvider = ignoredWindowProvider
         self.screenProvider = screenProvider
         self.tooltipController = tooltipController
+        self.clipboardPopoverController = clipboardPopoverController
     }
 
     func submit(_ instruction: GroundingInstruction) async -> String {
@@ -80,6 +83,11 @@ final class ScreenGroundingController {
                 tooltipController?.show(beside: rect, message: tooltip)
             } else {
                 tooltipController?.hide()
+            }
+            if let copiableText = instruction.copiableText, !copiableText.isEmpty {
+                clipboardPopoverController?.show(beside: rect, text: copiableText)
+            } else {
+                clipboardPopoverController?.hide()
             }
             let overlayEndedAt = DispatchTime.now().uptimeNanoseconds
             let timing = GroundingRoundTripTiming(

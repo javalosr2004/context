@@ -23,6 +23,7 @@ final class OverlayCoordinator {
     private var tutorialActionConsumer: TutorialActionConsumer?
     private var tutorialPlanController: TutorialPlanController?
     private var tutorialSessionController: TutorialSessionController?
+    private var clipboardPopoverController: ClipboardPopoverController?
     private let stabilityWatcher = ScreenStabilityWatcher()
     private var stabilityIndicator: StabilityIndicatorController?
     private var errorIndicator: ErrorIndicatorController?
@@ -53,17 +54,21 @@ final class OverlayCoordinator {
         )
 
         var sessionControllerRef: TutorialSessionController?
+        let clipboardPopoverController = ClipboardPopoverController(screenProvider: screenProvider)
         let focusMaskController = FocusMaskController(
             screenProvider: screenProvider,
-            interactiveWindowsProvider: {
-                [popupPanel, edgeTabController.window]
+            interactiveWindowsProvider: { [weak clipboardPopoverController] in
+                [popupPanel, edgeTabController.window, clipboardPopoverController?.interactiveWindow]
+                    .compactMap { $0 }
             },
-            onExit: { [weak bboxPanel, weak self] in
+            onExit: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
                 bboxPanel?.orderOut(nil)
+                clipboardPopoverController?.hide()
                 self?.stabilityWatcher.cancel()
             },
-            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, screenProvider] in
+            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak clipboardPopoverController, screenProvider] in
                 bboxPanel?.orderOut(nil)
+                clipboardPopoverController?.hide()
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID,
                       let actionIndex = sessionController.currentActionIndex else { return }
@@ -91,8 +96,9 @@ final class OverlayCoordinator {
                     )
                 }
             },
-            onOutsideClick: { [weak bboxPanel, weak self] in
+            onOutsideClick: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
                 bboxPanel?.orderOut(nil)
+                clipboardPopoverController?.hide()
                 self?.stabilityWatcher.cancel()
             }
         )
@@ -104,10 +110,12 @@ final class OverlayCoordinator {
         let screenGroundingController = ScreenGroundingController(
             bboxController: debugController,
             endpointStore: endpointStore,
-            ignoredWindowProvider: {
-                [popupPanel, edgeTabController.window, bboxPanel]
+            ignoredWindowProvider: { [weak clipboardPopoverController] in
+                [popupPanel, edgeTabController.window, bboxPanel, clipboardPopoverController?.interactiveWindow]
+                    .compactMap { $0 }
             },
-            screenProvider: screenProvider
+            screenProvider: screenProvider,
+            clipboardPopoverController: clipboardPopoverController
         )
         let tutorialPlanController = TutorialPlanController(
             endpointStore: tutorialEndpointStore,
@@ -195,6 +203,7 @@ final class OverlayCoordinator {
         self.tutorialActionConsumer = tutorialActionConsumer
         self.tutorialPlanController = tutorialPlanController
         self.tutorialSessionController = tutorialSessionController
+        self.clipboardPopoverController = clipboardPopoverController
 
         popupController.showPopup()
         edgeTabController.start()
@@ -225,6 +234,8 @@ final class OverlayCoordinator {
         tutorialActionConsumer = nil
         tutorialPlanController = nil
         tutorialSessionController = nil
+        clipboardPopoverController?.hide()
+        clipboardPopoverController = nil
         devSettingsWindowController?.close()
         devSettingsWindowController = nil
     }

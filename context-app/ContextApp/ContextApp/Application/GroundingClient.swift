@@ -14,19 +14,22 @@ struct GroundingInstruction {
     let imageEncodingConfig: ScreenFrameEncodingConfig
     let submittedAtUptimeNanoseconds: UInt64?
     let tooltip: String?
+    let copiableText: String?
 
     init(
         text: String,
         referenceImageData: Data?,
         imageEncodingConfig: ScreenFrameEncodingConfig,
         submittedAtUptimeNanoseconds: UInt64?,
-        tooltip: String? = nil
+        tooltip: String? = nil,
+        copiableText: String? = nil
     ) {
         self.text = text
         self.referenceImageData = referenceImageData
         self.imageEncodingConfig = imageEncodingConfig
         self.submittedAtUptimeNanoseconds = submittedAtUptimeNanoseconds
         self.tooltip = tooltip
+        self.copiableText = copiableText
     }
 }
 

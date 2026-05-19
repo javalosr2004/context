@@ -75,6 +75,7 @@
 		AE0000000000000000000001 /* WebGroundingEndpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000011 /* WebGroundingEndpointStore.swift */; };
 		AE0000000000000000000002 /* DevSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000012 /* DevSettingsView.swift */; };
 		AE0000000000000000000003 /* DevSettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000013 /* DevSettingsWindowController.swift */; };
+		AF0000000000000000000001 /* ClipboardPopoverController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0000000000000000000011 /* ClipboardPopoverController.swift */; };
 		AD0000000000000000000003 /* EdgeTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000013 /* EdgeTabView.swift */; };
 		AD0000000000000000000004 /* EdgeTabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000014 /* EdgeTabController.swift */; };
 		AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000015 /* EdgeTabAnchorTests.swift */; };
@@ -162,6 +163,7 @@
 		AE0000000000000000000011 /* WebGroundingEndpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebGroundingEndpointStore.swift; sourceTree = "<group>"; };
 		AE0000000000000000000012 /* DevSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevSettingsView.swift; sourceTree = "<group>"; };
 		AE0000000000000000000013 /* DevSettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevSettingsWindowController.swift; sourceTree = "<group>"; };
+		AF0000000000000000000011 /* ClipboardPopoverController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardPopoverController.swift; sourceTree = "<group>"; };
 		AD0000000000000000000013 /* EdgeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabView.swift; sourceTree = "<group>"; };
 		AD0000000000000000000014 /* EdgeTabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabController.swift; sourceTree = "<group>"; };
 		AD0000000000000000000015 /* EdgeTabAnchorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchorTests.swift; sourceTree = "<group>"; };
@@ -295,6 +297,7 @@
 				A90000000000000000000011 /* TutorialTooltipController.swift */,
 				AD0000000000000000000014 /* EdgeTabController.swift */,
 				AE0000000000000000000013 /* DevSettingsWindowController.swift */,
+				AF0000000000000000000011 /* ClipboardPopoverController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -518,6 +521,7 @@
 				AE0000000000000000000001 /* WebGroundingEndpointStore.swift in Sources */,
 				AE0000000000000000000002 /* DevSettingsView.swift in Sources */,
 				AE0000000000000000000003 /* DevSettingsWindowController.swift in Sources */,
+				AF0000000000000000000001 /* ClipboardPopoverController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

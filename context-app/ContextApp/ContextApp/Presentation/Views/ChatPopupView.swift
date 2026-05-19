@@ -1101,7 +1101,7 @@ struct ChatPopupView: View {
                 return "\(label) · \(sessionController.webSources.count) source\(sessionController.webSources.count == 1 ? "" : "s")"
             }
             return label
-        case .ready, .awaitingConfirmation, .completed, .failed:
+        case .ready, .awaitingConfirmation, .awaitingCompletion, .completed, .failed:
             return Self.loadingWords[loadingWordIndex]
         }
     }

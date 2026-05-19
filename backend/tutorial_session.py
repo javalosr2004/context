@@ -568,6 +568,12 @@ class TutorialSession:
     async def _run_agent_loop(self) -> None:
         self.status = "planning"
         await self.emit(StatusChangedEvent(status="planning", label="Thinking"))
+        # Block the first planner turn until the web-enriched draft plan is
+        # ready. Without this, the LLM emits an optimistic hypothesis from
+        # the goal alone and the draft (when it lands) competes with an
+        # already-installed plan tail instead of seeding it.
+        if not self.plan_steps and self.draft_plan is None:
+            await self._await_draft_plan()
         logger.info(
             "[session] agent_loop start",
             extra={
@@ -1356,6 +1362,20 @@ class TutorialSession:
             pass
         finally:
             self.verification_task = None
+
+    async def _await_draft_plan(self) -> None:
+        task = self.draft_plan_task
+        if task is None or task.done():
+            return
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "[session] await draft_plan failed",
+                extra={"session_id": self.session_id},
+            )
 
     async def _cancel_draft_task(self) -> None:
         task = self.draft_plan_task

@@ -460,6 +460,18 @@ class TutorialSession:
         completed = set(self.completed_step_ids)
         return [s for s in self.plan_steps if s.step_id not in completed]
 
+    def _last_completed_instruction(self) -> str | None:
+        """Instruction text of the most recently completed step, for the
+        verifier to check whether its intended effect is visible on
+        screen. Returns None when nothing has been completed yet."""
+        if not self.completed_step_ids:
+            return None
+        last_id = self.completed_step_ids[-1]
+        for step in self.plan_steps:
+            if step.step_id == last_id:
+                return step.instruction
+        return None
+
     def _completed_changed_screen(self, completed_step_ids: list[str]) -> bool:
         if not completed_step_ids:
             return False
@@ -1009,6 +1021,7 @@ class TutorialSession:
         if screen is None:
             return VerifierVerdict(verdict="unsure", reason="no_screen")
         verifier_llm = self.fast_llm or self.llm
+        prev_instruction = self._last_completed_instruction()
         await self.emit(InstructionVerificationStartedEvent(step_id=step.step_id))
         started_at = time.perf_counter()
         logger.info(
@@ -1017,6 +1030,7 @@ class TutorialSession:
                 "session_id": self.session_id,
                 "step_id": step.step_id,
                 "instruction": step.instruction[:120],
+                "previous_instruction": (prev_instruction or "")[:120],
                 "goal": (self.goal or "")[:120],
                 "screen_bytes": len(screen.data),
                 "screen_captured_at": (
@@ -1033,6 +1047,7 @@ class TutorialSession:
                 step.instruction,
                 screen,
                 self.goal,
+                prev_instruction,
             )
         except asyncio.CancelledError:
             logger.info(
@@ -1119,7 +1134,12 @@ class TutorialSession:
         )
         try:
             verdict: VerifierVerdict = await asyncio.to_thread(
-                classify_screen, verifier_llm, instruction, screen, self.goal
+                classify_screen,
+                verifier_llm,
+                instruction,
+                screen,
+                self.goal,
+                self._last_completed_instruction(),
             )
         except asyncio.CancelledError:
             logger.info(

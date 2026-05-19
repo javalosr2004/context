@@ -43,13 +43,18 @@ class _StubLLM:
 class ParseVerdictTests(unittest.TestCase):
     def test_on_track_verdict(self) -> None:
         v = parse_verdict(
-            '{"verdict": "on_track", "evidence": "GitHub signup page visible"}'
+            '{"screen_summary": "GitHub signup form", '
+            '"verdict": "on_track", "evidence": "GitHub signup page visible"}'
         )
-        self.assertEqual(
-            v,
-            VerifierVerdict(verdict="on_track", reason="GitHub signup page visible"),
-        )
+        self.assertEqual(v.verdict, "on_track")
+        self.assertEqual(v.reason, "GitHub signup page visible")
+        self.assertEqual(v.screen_summary, "GitHub signup form")
         self.assertTrue(v.ok)
+
+    def test_screen_summary_optional_when_absent(self) -> None:
+        v = parse_verdict('{"verdict": "on_track", "evidence": "fine"}')
+        self.assertEqual(v.verdict, "on_track")
+        self.assertEqual(v.screen_summary, "")
 
     def test_blocked_verdict(self) -> None:
         v = parse_verdict('{"verdict": "blocked", "evidence": "Colab dialog"}')
@@ -124,6 +129,21 @@ class BuildRequestTests(unittest.TestCase):
     def test_request_includes_goal_when_provided(self) -> None:
         req = build_request("Open Settings", make_screen(), goal="Create an account")
         self.assertIn("Overall tutorial goal: Create an account", req.user_text)
+
+    def test_request_includes_previous_instruction(self) -> None:
+        req = build_request(
+            "Start creating a new account",
+            make_screen(),
+            previous_instruction="Sign out of GitHub",
+        )
+        self.assertIn(
+            "Previous step the user just attempted: Sign out of GitHub",
+            req.user_text,
+        )
+
+    def test_request_omits_previous_when_absent(self) -> None:
+        req = build_request("Open Settings", make_screen())
+        self.assertNotIn("Previous step", req.user_text)
 
 
 class ClassifyScreenTests(unittest.TestCase):

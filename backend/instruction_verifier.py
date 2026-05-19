@@ -5,12 +5,20 @@ the session asks a fast multimodal LLM to classify the current screen
 relative to that instruction:
 
     on_track  — screen is a plausible starting state; proceed.
-    blocked   — a concrete element (modal, error, sign-in wall) prevents
-                attempting the instruction; replan.
+    blocked   — a concrete element (modal, error, sign-in wall, an
+                in-flight picker/confirmation from a different flow)
+                prevents attempting the instruction; replan. Also: the
+                previous step's intended effect did not occur (e.g. user
+                clicked Sign Out but is still in the sign-out picker).
     diverged  — screen is a coherent app state, but not the one this
                 instruction assumes; the user is somewhere else in the
                 flow (often already past it). Replan.
     unsure    — verifier can't tell. Fail-open: proceed.
+
+The model is forced to first describe the dominant visible UI in one
+phrase ("screen_summary") before picking a verdict — this disciplines
+the judgment by making the model commit to what it actually sees before
+classifying.
 
 Fail-open: any error or unparseable response yields `unsure` so a flaky
 verifier never locks the user out of the tutorial.
@@ -39,32 +47,44 @@ _VALID_VERDICTS: frozenset[str] = frozenset(
 
 VERIFIER_SYSTEM_PROMPT = (
     "You classify whether the user's screen matches the next tutorial "
-    "instruction. Choose exactly one verdict:\n\n"
-    "  on_track  — from THIS exact screen, the user can plausibly "
-    "attempt the instruction's first action, possibly after one obvious "
-    "click on a visible target. If reaching the instruction would "
-    "require completing a different flow first (finishing a sign-out, "
-    "dismissing an account picker, resolving a confirmation dialog, "
-    "navigating through unrelated pages), that is NOT on_track.\n"
-    "  blocked   — a specific UI element occupies the screen and must "
-    "be resolved before the instruction can be attempted. Examples: a "
-    "modal/error dialog, a sign-in wall, an OS permission prompt, a "
-    "picker / confirmation / wizard step belonging to a different flow, "
-    "or visible evidence the previous step failed. Name the element.\n"
-    "  diverged  — the screen shows a coherent app state, but it is NOT "
-    "where this instruction assumes the user is. Common cases: the user "
-    "has already completed this step (and likely later ones) — e.g. the "
-    "instruction says 'sign up' but the screen shows a signed-in "
-    "dashboard; the user is in a different app or a different section "
-    "of the flow than the instruction expects. Name what you see vs. "
-    "what the instruction assumes.\n"
-    "  unsure    — you cannot confidently pick one of the above.\n\n"
-    "Do NOT default to on_track just because the right app/site is "
-    "visible and no error is shown. Ask: can the user, RIGHT NOW from "
-    "this screen, begin the instruction? If they must first finish some "
-    "other flow, the verdict is blocked or diverged. Respond strictly "
-    'as JSON: {"verdict": "on_track"|"blocked"|"diverged"|"unsure", '
-    '"evidence": "one short sentence"}. No text outside the JSON.'
+    "instruction. You MUST answer in two steps, both in the JSON "
+    "response:\n\n"
+    "  1. screen_summary — a short phrase (<= 12 words) naming the "
+    "dominant visible UI on screen. Examples: 'GitHub sign-out account "
+    "picker', 'Signed-in GitHub dashboard', 'Empty new tab page', "
+    "'GitHub signup form with email field focused'. Be concrete about "
+    "what is in front of the user RIGHT NOW — don't summarize what "
+    "they could navigate to.\n"
+    "  2. verdict — one of:\n"
+    "      on_track  — from the screen you just summarized, the user "
+    "can begin the instruction's first action right now, possibly after "
+    "one obvious click on something visible. If reaching the "
+    "instruction would require completing a different flow first "
+    "(finishing a sign-out, dismissing an account picker, resolving a "
+    "confirmation dialog, navigating through unrelated pages), that is "
+    "NOT on_track.\n"
+    "      blocked   — a specific UI element occupies the screen and "
+    "must be resolved before the instruction can be attempted. "
+    "Examples: a modal/error dialog, a sign-in wall, an OS permission "
+    "prompt, a picker / confirmation / wizard step belonging to a "
+    "DIFFERENT flow, or visible evidence the previous step did not "
+    "complete (e.g. the previous step was 'Sign out' but the screen "
+    "still shows the sign-out picker). Name the element.\n"
+    "      diverged  — the screen is a coherent app state, but it is "
+    "NOT where this instruction assumes the user is. Common cases: the "
+    "user has already completed this step (and likely later ones) — "
+    "e.g. the instruction says 'sign up' but the screen shows a "
+    "signed-in dashboard. Name what you see vs. what the instruction "
+    "assumes.\n"
+    "      unsure    — you cannot confidently pick one of the above.\n\n"
+    "If a previous step is provided, FIRST check whether its intended "
+    "effect is visible. If the previous step was 'Sign out' but the "
+    "screen still shows the sign-out picker, the prior step did not "
+    "complete — that is blocked. Do NOT default to on_track just "
+    "because the right app is visible and no error is shown.\n\n"
+    'Respond strictly as JSON: {"screen_summary": "...", "verdict": '
+    '"on_track"|"blocked"|"diverged"|"unsure", "evidence": "one short '
+    'sentence"}. No text outside the JSON.'
 )
 
 
@@ -72,6 +92,7 @@ VERIFIER_SYSTEM_PROMPT = (
 class VerifierVerdict:
     verdict: Verdict
     reason: str
+    screen_summary: str = ""
 
     @property
     def ok(self) -> bool:
@@ -83,28 +104,32 @@ def build_request(
     instruction: str,
     screen: UploadedImage,
     goal: str | None = None,
+    previous_instruction: str | None = None,
 ) -> LLMRequest:
-    goal_line = (
-        f"Overall tutorial goal: {goal}\n\n" if goal else ""
+    goal_line = f"Overall tutorial goal: {goal}\n" if goal else ""
+    prev_line = (
+        f"Previous step the user just attempted: {previous_instruction}\n"
+        if previous_instruction
+        else ""
     )
     user_text = (
         f"{goal_line}"
+        f"{prev_line}"
         f"Next instruction the user will attempt: {instruction}\n\n"
-        "Classify the screen as on_track, blocked, diverged, or unsure. "
-        "Test: from this exact screen, can the user begin the "
-        "instruction's first action right now (possibly after one "
-        "obvious click on something visible)? If yes → on_track. If a "
-        "specific UI element occupies the screen and must be resolved "
-        "first — modal, error, sign-in wall, OS prompt, or a picker / "
-        "confirmation / wizard step from a DIFFERENT flow (e.g. a "
-        "sign-out picker when the instruction is to sign up) — that is "
-        "blocked; name the element. If the screen is a coherent state "
-        "that contradicts where this instruction assumes the user is "
-        "(e.g. instruction says 'sign up' but the screen is a "
-        "signed-in dashboard, or the user is past this step) → "
-        "diverged.\n\n"
-        'Respond with JSON: {"verdict": "on_track"|"blocked"|"diverged"'
-        '|"unsure", "evidence": "..."}'
+        "Answer in two steps. First, in screen_summary, name the "
+        "dominant visible UI on the screen in <= 12 words — be "
+        "concrete about what's in front of the user right now. Then "
+        "pick a verdict.\n\n"
+        "Test for on_track: from the screen you just summarized, can "
+        "the user begin the next instruction's first action right now "
+        "(possibly after one obvious click on something visible)? If "
+        "they must first finish some other flow (sign-out, picker, "
+        "confirmation, wizard step), it is blocked. If the previous "
+        "step's effect isn't visible on screen, it is also blocked. If "
+        "the screen contradicts where this instruction assumes the "
+        "user is (already past it, wrong section), it is diverged.\n\n"
+        'Respond with JSON: {"screen_summary": "...", "verdict": '
+        '"on_track"|"blocked"|"diverged"|"unsure", "evidence": "..."}'
     )
     return LLMRequest(
         system_prompt=VERIFIER_SYSTEM_PROMPT,
@@ -146,10 +171,15 @@ def parse_verdict(raw: str) -> VerifierVerdict:
         or str(payload.get("reason", "")).strip()
         or "no evidence given"
     )
+    screen_summary = str(payload.get("screen_summary", "")).strip()
     if verdict is None:
         # Unknown label: fail-open as unsure so the walk continues.
-        return VerifierVerdict(verdict="unsure", reason=evidence)
-    return VerifierVerdict(verdict=verdict, reason=evidence)
+        return VerifierVerdict(
+            verdict="unsure", reason=evidence, screen_summary=screen_summary
+        )
+    return VerifierVerdict(
+        verdict=verdict, reason=evidence, screen_summary=screen_summary
+    )
 
 
 def classify_screen(
@@ -157,11 +187,14 @@ def classify_screen(
     instruction: str,
     screen: UploadedImage,
     goal: str | None = None,
+    previous_instruction: str | None = None,
 ) -> VerifierVerdict:
     """Sync, single-shot classification. Caller should run in a thread."""
     started_at = time.perf_counter()
     try:
-        raw = llm.complete_text(build_request(instruction, screen, goal))
+        raw = llm.complete_text(
+            build_request(instruction, screen, goal, previous_instruction)
+        )
     except Exception:
         logger.exception(
             "[verifier] llm call failed",
@@ -181,9 +214,11 @@ def classify_screen(
         "[verifier] raw_response",
         extra={
             "instruction": instruction[:120],
+            "previous_instruction": (previous_instruction or "")[:120],
             "raw_chars": len(raw),
             "raw_preview": raw.strip()[:200],
             "verdict": verdict.verdict,
+            "screen_summary": verdict.screen_summary,
             "parsed_ok": verdict.ok,
             "parsed_reason": verdict.reason,
         },

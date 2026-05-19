@@ -9,7 +9,7 @@ WebSocket disconnects the live session is removed.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Literal
 from uuid import uuid4
 
 from backend.embeddings_client import EmbeddingsClient, NullEmbeddingsClient
@@ -42,6 +42,7 @@ class TutorialSessionStore:
         verifier_llm: MultimodalLLM | None = None,
         embeddings_client: EmbeddingsClient | None = None,
         step_tools_enabled: bool = True,
+        grounding_strategy: Literal["parallel", "planner"] = "parallel",
     ) -> None:
         self._llm = llm
         self._fast_llm = fast_llm or llm
@@ -50,6 +51,7 @@ class TutorialSessionStore:
         self._session_id_factory = session_id_factory or (lambda: str(uuid4()))
         self._web_ground = web_ground or NullWebGroundProducer()
         self._step_tools_enabled = step_tools_enabled
+        self._grounding_strategy = grounding_strategy
         self._reserved: set[str] = set()
         self._live: dict[str, TutorialSession] = {}
 
@@ -87,6 +89,7 @@ class TutorialSessionStore:
             step_tools_mode=(
                 "capped_head" if self._step_tools_enabled else "full_plan"
             ),
+            grounding_strategy=self._grounding_strategy,
         )
         self._live[session_id] = session
         return session

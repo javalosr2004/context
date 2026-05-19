@@ -776,5 +776,39 @@ def tiny_png_base64() -> str:
     )
 
 
+class GroundingStrategyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parallel_mode_kicks_off_draft_plan(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM([[LLMTextDelta(text="ok")]])
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+        self.assertEqual(session.grounding_strategy, "parallel")
+
+        await session.handle_user_message("Do a thing.")
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertIsNotNone(session.draft_plan_task)
+        self.assertFalse(llm.requests[0].enable_search_grounding)
+
+    async def test_planner_mode_skips_draft_plan_and_enables_search(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM([[LLMTextDelta(text="ok")]])
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            emit=await collect_events(events),
+            grounding_strategy="planner",
+        )
+
+        await session.handle_user_message("Do a thing.")
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertIsNone(session.draft_plan_task)
+        self.assertTrue(llm.requests[0].enable_search_grounding)
+
+
 if __name__ == "__main__":
     unittest.main()

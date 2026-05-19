@@ -215,6 +215,13 @@ class TutorialSession:
     # default to "capped_head" via TutorialSessionStore / the
     # STEP_TOOLS_ENABLED env var (see backend/main.py).
     step_tools_mode: Literal["full_plan", "capped_head"] = "full_plan"
+    # GROUNDING_STRATEGY: ``parallel`` runs the enrichment service + draft
+    # plan pre-pipeline before the planner sees the goal; ``planner``
+    # skips the pre-pipeline and lets the planner call web_search as a
+    # native tool. See backend/main.py for the env var and
+    # backend/tutorial_guide.tool_stream_system_prompt for the prompt
+    # block surfaced under planner mode.
+    grounding_strategy: Literal["parallel", "planner"] = "parallel"
     # Bound for the capped_head replan-on-exhaustion loop: how many
     # times in a row may the outer loop regrow the head without any
     # newly-walked step before falling through to a completion proposal.
@@ -542,7 +549,8 @@ class TutorialSession:
                 await self._request_screen(
                     "Capturing the current screen alongside the user's message."
                 )
-                self._kick_off_draft_plan()
+                if self.grounding_strategy == "parallel":
+                    self._kick_off_draft_plan()
             any_steps_walked = False
             while True:
                 await self._plan_or_gate()
@@ -1009,7 +1017,8 @@ class TutorialSession:
     def _build_llm_request(self) -> LLMRequest:
         request = LLMRequest(
             system_prompt=tool_stream_system_prompt(
-                capped_head=self.step_tools_mode == "capped_head"
+                capped_head=self.step_tools_mode == "capped_head",
+                planner_search=self.grounding_strategy == "planner",
             ),
             user_text=render_history(
                 goal=self.goal or "",
@@ -1026,7 +1035,7 @@ class TutorialSession:
                 uploaded_image_count=len(self.uploaded_images),
             ),
             images=self._llm_images(),
-            enable_search_grounding=False,
+            enable_search_grounding=self.grounding_strategy == "planner",
             temperature=0,
         )
         return request

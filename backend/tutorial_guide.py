@@ -378,24 +378,41 @@ overlay. Just answer, or just act.
 """.strip()
 
 
-def tool_stream_system_prompt(*, capped_head: bool) -> str:
+TUTORIAL_TOOL_STREAM_PLANNER_SEARCH_OVERRIDE = """
+Searching the web (when available). If the web_search tool is offered,
+you may call it on the FIRST turn when the goal references specific
+apps, APIs, or workflows you need procedural knowledge about (e.g.
+"set up Stripe webhook", "configure GitHub Actions matrix"). Search at
+most once per turn. Do NOT search before tutorial_ask_user if the goal
+is ambiguous — clarify first, then search with a sharper query. Do NOT
+search when the screen already shows everything you need.
+""".strip()
+
+
+def tool_stream_system_prompt(
+    *, capped_head: bool, planner_search: bool = False
+) -> str:
     """Pick the planner system prompt for the active A/B mode.
 
     When ``capped_head`` is True, the planner emits only the next 1–5
     detailed steps per turn (STEP_TOOLS_ENABLED=on). Otherwise the
     planner emits the full remaining plan each turn (today's default).
 
-    The capped-head variant prepends an override block; the base prompt
-    is reused verbatim so single-source-of-truth tooling/role text
-    doesn't drift between the two arms of the test.
+    When ``planner_search`` is True, the planner has a native web_search
+    tool available (GROUNDING_STRATEGY=planner) and gets the extra
+    guidance block prepended.
+
+    Override blocks prepend the base prompt so single-source-of-truth
+    tooling/role text doesn't drift between A/B arms.
     """
-    if not capped_head:
+    prefix_blocks: list[str] = []
+    if planner_search:
+        prefix_blocks.append(TUTORIAL_TOOL_STREAM_PLANNER_SEARCH_OVERRIDE)
+    if capped_head:
+        prefix_blocks.append(TUTORIAL_TOOL_STREAM_CAPPED_HEAD_OVERRIDE)
+    if not prefix_blocks:
         return TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
-    return (
-        TUTORIAL_TOOL_STREAM_CAPPED_HEAD_OVERRIDE
-        + "\n\n"
-        + TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
-    )
+    return "\n\n".join(prefix_blocks + [TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT])
 
 USER_MESSAGE_INTENT_SYSTEM_PROMPT = """
 You are a routing classifier inside a macOS tutorial system.

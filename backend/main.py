@@ -74,6 +74,35 @@ def _step_tools_enabled_from_env() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _grounding_strategy_from_env() -> str:
+    """Read the GROUNDING_STRATEGY flag. ``parallel`` (default) runs the
+    enrichment service + draft plan pre-pipeline; ``planner`` skips the
+    pre-pipeline and exposes web_search as a planner tool instead.
+
+    Planner mode currently requires the OpenAI provider — Gemini's native
+    search tool is not yet wired through. We fail-fast here so the
+    misconfig is visible at startup rather than silently producing a
+    planner with no search capability."""
+    raw = os.environ.get("GROUNDING_STRATEGY")
+    if raw is None:
+        return "parallel"
+    value = raw.strip().lower()
+    if value not in {"parallel", "planner"}:
+        raise RuntimeError(
+            f"GROUNDING_STRATEGY must be 'parallel' or 'planner', got {raw!r}"
+        )
+    if value == "planner":
+        provider = (
+            os.environ.get("LLM_PROVIDER") or "gemini"
+        ).strip().lower()
+        if provider != "openai":
+            raise RuntimeError(
+                "GROUNDING_STRATEGY=planner requires LLM_PROVIDER=openai; "
+                f"got {provider!r}"
+            )
+    return value
+
+
 def configure_logging() -> None:
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -353,6 +382,7 @@ def get_tutorial_session_store(
             embeddings_client=embeddings_client,
             web_ground=web_ground_producer_from_environment(),
             step_tools_enabled=_step_tools_enabled_from_env(),
+            grounding_strategy=_grounding_strategy_from_env(),
         )
         connection.app.state.tutorial_session_store = store
     return store

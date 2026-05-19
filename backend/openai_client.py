@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import logging
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -9,6 +11,9 @@ from openai import OpenAI
 from backend.images import UploadedImage
 from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
 from backend.tutorial_tools import TutorialToolCall, openai_tutorial_tool_definitions
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClient:
@@ -67,6 +72,12 @@ class OpenAIClient:
                 yield event.tool_call
 
     def stream_tutorial_events(self, request: LLMRequest) -> Iterator[LLMStreamEvent]:
+        tools = openai_tutorial_tool_definitions()
+        logger.info(
+            "[llm] stream start",
+            extra={"model": self._model, "tool_count": len(tools)},
+        )
+        started_at = time.perf_counter()
         stream = self._client.responses.create(
             model=self._model,
             input=build_input(request),
@@ -77,14 +88,44 @@ class OpenAIClient:
                 enable_search_grounding=request.enable_search_grounding,
                 response_mime_type=request.response_mime_type,
                 response_schema=request.response_schema,
-                tools=openai_tutorial_tool_definitions(),
+                tools=tools,
             ),
         )
 
+        first_event_logged = False
+        text_delta_count = 0
+        tool_call_count = 0
+        other_count = 0
         for event in stream:
+            if not first_event_logged:
+                logger.info(
+                    "[llm] stream first_event",
+                    extra={
+                        "model": self._model,
+                        "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    },
+                )
+                first_event_logged = True
             stream_event = stream_event_from_response_event(event)
-            if stream_event is not None:
-                yield stream_event
+            if stream_event is None:
+                other_count += 1
+                continue
+            if isinstance(stream_event, LLMTextDelta):
+                text_delta_count += 1
+            elif isinstance(stream_event, LLMToolCallEvent):
+                tool_call_count += 1
+            yield stream_event
+
+        logger.info(
+            "[llm] stream end",
+            extra={
+                "model": self._model,
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "text_delta_count": text_delta_count,
+                "tool_call_count": tool_call_count,
+                "other_event_count": other_count,
+            },
+        )
 
 
 def build_input(request: LLMRequest) -> list[dict[str, Any]]:

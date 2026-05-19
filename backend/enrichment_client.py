@@ -14,6 +14,7 @@ set.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -69,19 +70,47 @@ class EnrichmentSnippetsProducer:
             ),
         }
 
+        logger.info(
+            "[enrichment] ground start",
+            extra={"mode": "text", "query_chars": len(query)},
+        )
+        started_at = time.perf_counter()
         try:
             response = self._post_form(data=data, files=None, timeout=self._timeout)
         except httpx.HTTPError as error:
             logger.warning(
                 "Enrichment grounding request failed",
-                extra={"error": str(error), "query_chars": len(query)},
+                extra={
+                    "error": str(error),
+                    "query_chars": len(query),
+                    "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                },
             )
             return []
 
         body = self._parse_response_body(response)
         if body is None:
+            logger.info(
+                "[enrichment] ground end",
+                extra={
+                    "mode": "text",
+                    "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    "status_code": response.status_code,
+                    "snippet_count": 0,
+                },
+            )
             return []
-        return parse_enrichment_results(body)
+        snippets = parse_enrichment_results(body)
+        logger.info(
+            "[enrichment] ground end",
+            extra={
+                "mode": "text",
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "status_code": response.status_code,
+                "snippet_count": len(snippets),
+            },
+        )
+        return snippets
 
     def ground_multimodal(
         self,
@@ -106,6 +135,15 @@ class EnrichmentSnippetsProducer:
         }
         files = {"image": (image.filename or "screen.png", image.data, image.mime_type)}
 
+        logger.info(
+            "[enrichment] ground start",
+            extra={
+                "mode": "multimodal",
+                "request_chars": len(request_text),
+                "image_bytes": len(image.data),
+            },
+        )
+        started_at = time.perf_counter()
         try:
             response = self._post_form(
                 data=data, files=files, timeout=self._multimodal_timeout
@@ -113,15 +151,38 @@ class EnrichmentSnippetsProducer:
         except httpx.HTTPError as error:
             logger.warning(
                 "Enrichment multimodal grounding request failed",
-                extra={"error": str(error), "request_chars": len(request_text)},
+                extra={
+                    "error": str(error),
+                    "request_chars": len(request_text),
+                    "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                },
             )
             return empty
 
         body = self._parse_response_body(response)
         if body is None:
+            logger.info(
+                "[enrichment] ground end",
+                extra={
+                    "mode": "multimodal",
+                    "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    "status_code": response.status_code,
+                    "snippet_count": 0,
+                },
+            )
             return empty
+        snippets = parse_enrichment_results(body)
+        logger.info(
+            "[enrichment] ground end",
+            extra={
+                "mode": "multimodal",
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "status_code": response.status_code,
+                "snippet_count": len(snippets),
+            },
+        )
         return MultimodalGroundResult(
-            snippets=parse_enrichment_results(body),
+            snippets=snippets,
             queries_used=_as_str_list(body.get("queries_used")),
             application=_as_optional_str(body.get("application")),
             environment=_as_optional_str(body.get("environment")),

@@ -173,6 +173,8 @@ class TutorialSession:
     verification_task: asyncio.Task[None] | None = None
     pending_verification_replan: str | None = None
     web_ground: WebGroundProducer = field(default_factory=NullWebGroundProducer)
+    # Last gate (verifier) elapsed_ms, consumed by the next turn summary.
+    _last_gate_elapsed_ms: float | None = None
     status: str = "created"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -470,6 +472,13 @@ class TutorialSession:
 
     # -------- Agent loop --------
 
+    def _consume_last_gate_elapsed_ms(self) -> float | None:
+        """Read & clear the most recent gate timing so it's attributed to
+        exactly one turn summary (the turn that immediately follows the gate)."""
+        elapsed = getattr(self, "_last_gate_elapsed_ms", None)
+        self._last_gate_elapsed_ms = None
+        return elapsed
+
     async def _run_agent_loop(self) -> None:
         self.status = "planning"
         await self.emit(StatusChangedEvent(status="planning", label="Thinking"))
@@ -492,8 +501,17 @@ class TutorialSession:
         last_screen_reason = ""
 
         for turn in range(MAX_AGENT_TURNS):
+            turn_started_at = time.perf_counter()
+            gate_elapsed_ms = self._consume_last_gate_elapsed_ms()
+            merge_elapsed_ms = 0.0
             await self.emit(AgentTurnEvent(turn=turn + 1, max_turns=MAX_AGENT_TURNS))
-            tool_calls, text = await self._stream_llm_once()
+            llm_started_at = time.perf_counter()
+            try:
+                tool_calls, text = await self._stream_llm_once()
+            finally:
+                llm_stream_elapsed_ms = round(
+                    (time.perf_counter() - llm_started_at) * 1000, 2
+                )
             logger.info(
                 "[session] agent_loop turn",
                 extra={
@@ -505,6 +523,21 @@ class TutorialSession:
                     "text_chars": len(text),
                 },
             )
+
+            def _log_turn_summary() -> None:
+                logger.info(
+                    "[session] turn summary",
+                    extra={
+                        "session_id": self.session_id,
+                        "turn": turn + 1,
+                        "gate_elapsed_ms": gate_elapsed_ms,
+                        "llm_stream_elapsed_ms": llm_stream_elapsed_ms,
+                        "merge_elapsed_ms": round(merge_elapsed_ms, 2),
+                        "total_turn_elapsed_ms": round(
+                            (time.perf_counter() - turn_started_at) * 1000, 2
+                        ),
+                    },
+                )
 
             if not tool_calls:
                 if self.screen_is_stale:
@@ -533,6 +566,7 @@ class TutorialSession:
                     consecutive_screen_requests += 1
                     if consecutive_screen_requests >= MAX_CONSECUTIVE_SCREEN_REQUESTS:
                         await self._emit_screen_request_stall(synthetic_reason)
+                        _log_turn_summary()
                         return
                     await self._execute_screen_request(
                         TutorialToolCall(
@@ -540,6 +574,7 @@ class TutorialSession:
                             arguments=json.dumps({"reason": synthetic_reason}),
                         )
                     )
+                    _log_turn_summary()
                     continue
                 if text.strip():
                     self.history.append(HistoryEntry(
@@ -547,6 +582,7 @@ class TutorialSession:
                     await self.emit(TextResponseEventLike(text=text))
                 self.status = "ready"
                 await self.emit(StatusChangedEvent(status="ready", label="Ready"))
+                _log_turn_summary()
                 return
 
             request_screen_call = first_request_screen_call(tool_calls)
@@ -591,7 +627,11 @@ class TutorialSession:
             for call in update_plan_calls[:-1]:
                 self._log_dropped_update_plan(call)
             if update_plan_calls:
-                await self._execute_plan_update_call(update_plan_calls[-1])
+                merge_started_at = time.perf_counter()
+                try:
+                    await self._execute_plan_update_call(update_plan_calls[-1])
+                finally:
+                    merge_elapsed_ms = (time.perf_counter() - merge_started_at) * 1000.0
 
             if request_screen_call is not None:
                 try:
@@ -603,8 +643,10 @@ class TutorialSession:
                 consecutive_screen_requests += 1
                 if consecutive_screen_requests >= MAX_CONSECUTIVE_SCREEN_REQUESTS:
                     await self._emit_screen_request_stall(last_screen_reason)
+                    _log_turn_summary()
                     return
                 await self._execute_screen_request(request_screen_call)
+                _log_turn_summary()
                 # Loop again with the new screen available.
                 continue
 
@@ -614,6 +656,7 @@ class TutorialSession:
                 self._record_completion_request(request_completion_call)
 
             # No request_screen this turn — agent loop is done.
+            _log_turn_summary()
             return
 
         logger.warning(
@@ -656,13 +699,21 @@ class TutorialSession:
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
+        consume_started_at = time.perf_counter()
+        logger.info(
+            "[session] stream consume start",
+            extra={"session_id": self.session_id},
+        )
         producer = asyncio.create_task(asyncio.to_thread(produce_events))
         tool_calls: list[TutorialToolCall] = []
         text_parts: list[str] = []
+        queue_wait_ms_total = 0.0
 
         try:
             while True:
+                wait_started = time.perf_counter()
                 event = await queue.get()
+                queue_wait_ms_total += (time.perf_counter() - wait_started) * 1000.0
                 if event is None:
                     break
                 if isinstance(event, Exception):
@@ -674,6 +725,17 @@ class TutorialSession:
                     tool_calls.append(event.tool_call)
         finally:
             await producer
+
+        logger.info(
+            "[session] stream consume end",
+            extra={
+                "session_id": self.session_id,
+                "elapsed_ms": round((time.perf_counter() - consume_started_at) * 1000, 2),
+                "queue_wait_ms_total": round(queue_wait_ms_total, 2),
+                "text_delta_count": len(text_parts),
+                "tool_call_count": len(tool_calls),
+            },
+        )
 
         text = "".join(text_parts)
         if text_parts:
@@ -975,6 +1037,7 @@ class TutorialSession:
             # Fail-open: don't lock the user out on a verifier glitch.
             return VerifierVerdict(ok=True, reason="gate_error")
         elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        self._last_gate_elapsed_ms = elapsed_ms
         logger.info(
             "[verifier] gate verdict",
             extra={

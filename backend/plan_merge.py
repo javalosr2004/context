@@ -21,9 +21,13 @@ Contract enforced here:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from backend.tutorial_schema import TutorialStep, validate_step_semantics
+
+
+logger = logging.getLogger(__name__)
 
 
 STEP_ID_PREFIX = "step_"
@@ -109,6 +113,16 @@ def merge_plan_tail(
         validate_step_semantics(merged)
         new_steps.append(merged)
 
+    logger.info(
+        "[plan_merge] merged",
+        extra={
+            "step_count": len(new_steps),
+            "tail_count": len(new_tail),
+            "refines_current": refines,
+            "abandon_awaiting": abandon_awaiting,
+            "frozen_prefix_count": len(frozen_prefix_ids),
+        },
+    )
     return PlanMergeResult(plan_steps=new_steps, step_counter=next_step_counter)
 
 

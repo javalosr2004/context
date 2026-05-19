@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 
 from backend.images import UploadedImage
@@ -102,11 +103,23 @@ def classify_screen(
     screen: UploadedImage,
 ) -> VerifierVerdict:
     """Sync, single-shot classification. Caller should run in a thread."""
+    started_at = time.perf_counter()
     try:
         raw = llm.complete_text(build_request(instruction, screen))
     except Exception:
-        logger.exception("[verifier] llm call failed")
+        logger.exception(
+            "[verifier] llm call failed",
+            extra={"elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2)},
+        )
         return VerifierVerdict(ok=True, reason="verifier_error")
+    llm_elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    logger.info(
+        "[verifier] llm_call",
+        extra={
+            "elapsed_ms": llm_elapsed_ms,
+            "raw_chars": len(raw),
+        },
+    )
     verdict = parse_verdict(raw)
     logger.info(
         "[verifier] raw_response",

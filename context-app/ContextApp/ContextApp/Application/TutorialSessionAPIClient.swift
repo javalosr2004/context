@@ -29,6 +29,31 @@ enum TutorialSessionAPIClientError: LocalizedError {
     }
 }
 
+enum StepAnnotationVerdict: String, Codable, Equatable {
+    case correct
+    case offTrack = "off_track"
+    case ambiguous
+}
+
+enum StepAnnotationCategory: String, Codable, Equatable {
+    case plan
+    case grounding
+    case verifier
+    case loop
+}
+
+struct StepAnnotationCorrections: Codable, Equatable {
+    let instruction: String?
+    let targetBbox: [Double]?
+    let verifierShouldHaveSaid: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case instruction
+        case targetBbox = "target_bbox"
+        case verifierShouldHaveSaid = "verifier_should_have_said"
+    }
+}
+
 struct TutorialSessionScreenSnapshot: Codable, Equatable {
     let mimeType: String
     let dataBase64: String
@@ -61,6 +86,15 @@ enum TutorialSessionClientEvent: Codable, Equatable {
     )
     case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
     case userCompletionResponse(confirmed: Bool, note: String?)
+    case userStepAnnotation(
+        stepID: String,
+        actionIndex: Int,
+        frameHash: String?,
+        verdict: StepAnnotationVerdict,
+        category: StepAnnotationCategory?,
+        note: String?,
+        corrections: StepAnnotationCorrections?
+    )
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -72,6 +106,10 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         case requestID = "request_id"
         case confirmed
         case note
+        case frameHash = "frame_hash"
+        case verdict
+        case category
+        case corrections
     }
 
     init(from decoder: Decoder) throws {
@@ -113,6 +151,16 @@ enum TutorialSessionClientEvent: Codable, Equatable {
                 confirmed: try container.decode(Bool.self, forKey: .confirmed),
                 note: try container.decodeIfPresent(String.self, forKey: .note)
             )
+        case "user_step_annotation":
+            self = .userStepAnnotation(
+                stepID: try container.decode(String.self, forKey: .stepID),
+                actionIndex: try container.decode(Int.self, forKey: .actionIndex),
+                frameHash: try container.decodeIfPresent(String.self, forKey: .frameHash),
+                verdict: try container.decode(StepAnnotationVerdict.self, forKey: .verdict),
+                category: try container.decodeIfPresent(StepAnnotationCategory.self, forKey: .category),
+                note: try container.decodeIfPresent(String.self, forKey: .note),
+                corrections: try container.decodeIfPresent(StepAnnotationCorrections.self, forKey: .corrections)
+            )
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -151,6 +199,15 @@ enum TutorialSessionClientEvent: Codable, Equatable {
             try container.encode("user_completion_response", forKey: .type)
             try container.encode(confirmed, forKey: .confirmed)
             try container.encodeIfPresent(note, forKey: .note)
+        case .userStepAnnotation(let stepID, let actionIndex, let frameHash, let verdict, let category, let note, let corrections):
+            try container.encode("user_step_annotation", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+            try container.encode(actionIndex, forKey: .actionIndex)
+            try container.encodeIfPresent(frameHash, forKey: .frameHash)
+            try container.encode(verdict, forKey: .verdict)
+            try container.encodeIfPresent(category, forKey: .category)
+            try container.encodeIfPresent(note, forKey: .note)
+            try container.encodeIfPresent(corrections, forKey: .corrections)
         }
     }
 }

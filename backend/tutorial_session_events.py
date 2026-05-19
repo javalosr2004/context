@@ -68,6 +68,36 @@ class UserScreenEvent(TutorialSessionEventModel):
     screen: ScreenSnapshot
 
 
+class StepAnnotationCorrections(TutorialSessionEventModel):
+    """Optional human corrections attached to an off-track verdict.
+
+    Each field targets a specific agent so the extractor can emit per-agent
+    eval fixtures without re-parsing free text.
+    """
+
+    instruction: str | None = None
+    target_bbox: tuple[float, float, float, float] | None = None
+    verifier_should_have_said: Literal["ok", "blocked"] | None = None
+
+
+class UserStepAnnotationEvent(TutorialSessionEventModel):
+    """Human eval annotation attached to a step.
+
+    Emitted by the overlay when the user toggles eval mode and marks a step.
+    ``verdict`` is the minimum payload; ``category`` and ``corrections`` are
+    populated when the annotator drills in.
+    """
+
+    type: Literal["user_step_annotation"]
+    step_id: str = Field(min_length=1)
+    action_index: int = Field(ge=0)
+    frame_hash: str | None = None
+    verdict: Literal["correct", "off_track", "ambiguous"]
+    category: Literal["plan", "grounding", "verifier", "loop"] | None = None
+    note: str | None = None
+    corrections: StepAnnotationCorrections | None = None
+
+
 class UserCompletionResponseEvent(TutorialSessionEventModel):
     """User reply to a CompletionProposedEvent.
 
@@ -87,7 +117,8 @@ ClientSessionEvent = Annotated[
     | StepStartedEvent
     | UserConfirmationEvent
     | UserScreenEvent
-    | UserCompletionResponseEvent,
+    | UserCompletionResponseEvent
+    | UserStepAnnotationEvent,
     Field(discriminator="type"),
 ]
 

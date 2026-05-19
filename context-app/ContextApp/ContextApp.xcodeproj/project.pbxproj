@@ -72,6 +72,9 @@
 		AB0000000000000000000002 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000000000000000000013 /* Markdown */; };
 		AD0000000000000000000001 /* EdgeTabAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000011 /* EdgeTabAnchor.swift */; };
 		AD0000000000000000000002 /* EdgeTabPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000012 /* EdgeTabPanel.swift */; };
+		AE0000000000000000000001 /* WebGroundingEndpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000011 /* WebGroundingEndpointStore.swift */; };
+		AE0000000000000000000002 /* DevSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000012 /* DevSettingsView.swift */; };
+		AE0000000000000000000003 /* DevSettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000013 /* DevSettingsWindowController.swift */; };
 		AD0000000000000000000003 /* EdgeTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000013 /* EdgeTabView.swift */; };
 		AD0000000000000000000004 /* EdgeTabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000014 /* EdgeTabController.swift */; };
 		AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000015 /* EdgeTabAnchorTests.swift */; };
@@ -156,6 +159,9 @@
 		AB0000000000000000000011 /* MarkdownTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextView.swift; sourceTree = "<group>"; };
 		AD0000000000000000000011 /* EdgeTabAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchor.swift; sourceTree = "<group>"; };
 		AD0000000000000000000012 /* EdgeTabPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabPanel.swift; sourceTree = "<group>"; };
+		AE0000000000000000000011 /* WebGroundingEndpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebGroundingEndpointStore.swift; sourceTree = "<group>"; };
+		AE0000000000000000000012 /* DevSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevSettingsView.swift; sourceTree = "<group>"; };
+		AE0000000000000000000013 /* DevSettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevSettingsWindowController.swift; sourceTree = "<group>"; };
 		AD0000000000000000000013 /* EdgeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabView.swift; sourceTree = "<group>"; };
 		AD0000000000000000000014 /* EdgeTabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabController.swift; sourceTree = "<group>"; };
 		AD0000000000000000000015 /* EdgeTabAnchorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchorTests.swift; sourceTree = "<group>"; };
@@ -260,6 +266,7 @@
 				A60000000000000000000015 /* TutorialPlanDisplay.swift */,
 				A70000000000000000000011 /* TutorialAPIEndpointStore.swift */,
 				AD0000000000000000000011 /* EdgeTabAnchor.swift */,
+				AE0000000000000000000011 /* WebGroundingEndpointStore.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -287,6 +294,7 @@
 				A80000000000000000000012 /* TutorialSessionController.swift */,
 				A90000000000000000000011 /* TutorialTooltipController.swift */,
 				AD0000000000000000000014 /* EdgeTabController.swift */,
+				AE0000000000000000000013 /* DevSettingsWindowController.swift */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -341,6 +349,7 @@
 				A70000000000000000000013 /* TutorialAPISettingsView.swift */,
 				AB0000000000000000000011 /* MarkdownTextView.swift */,
 				AD0000000000000000000013 /* EdgeTabView.swift */,
+				AE0000000000000000000012 /* DevSettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -506,6 +515,9 @@
 				AD0000000000000000000002 /* EdgeTabPanel.swift in Sources */,
 				AD0000000000000000000003 /* EdgeTabView.swift in Sources */,
 				AD0000000000000000000004 /* EdgeTabController.swift in Sources */,
+				AE0000000000000000000001 /* WebGroundingEndpointStore.swift in Sources */,
+				AE0000000000000000000002 /* DevSettingsView.swift in Sources */,
+				AE0000000000000000000003 /* DevSettingsWindowController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

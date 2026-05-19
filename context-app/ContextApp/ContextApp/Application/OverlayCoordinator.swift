@@ -8,6 +8,8 @@ final class OverlayCoordinator {
     private let messageStore = ChatMessageStore()
     private let screenProvider: () -> NSScreen?
     private let tutorialEndpointStore = TutorialAPIEndpointStore()
+    private let webGroundingEndpointStore = WebGroundingEndpointStore()
+    private var devSettingsWindowController: DevSettingsWindowController?
 
     private var applicationMenuController: ApplicationMenuController?
     private var debugBboxController: DebugBboxController?
@@ -46,7 +48,8 @@ final class OverlayCoordinator {
         )
         let edgeTabController = EdgeTabController(
             screenProvider: screenProvider,
-            onToggle: { popupController.toggle() }
+            onToggle: { popupController.toggle() },
+            onShiftRightClick: { [weak self] in self?.showDevSettings() }
         )
 
         var sessionControllerRef: TutorialSessionController?
@@ -222,6 +225,8 @@ final class OverlayCoordinator {
         tutorialActionConsumer = nil
         tutorialPlanController = nil
         tutorialSessionController = nil
+        devSettingsWindowController?.close()
+        devSettingsWindowController = nil
     }
 
     private func initialPopupFrame(on screen: CGRect) -> CGRect {
@@ -250,5 +255,16 @@ final class OverlayCoordinator {
     private func fitPopupToContent() {
         guard let screen = screenProvider() else { return }
         popupController?.fitPopupHeight(to: screen.frame)
+    }
+
+    private func showDevSettings() {
+        if devSettingsWindowController == nil {
+            devSettingsWindowController = DevSettingsWindowController(
+                visualStore: endpointStore,
+                webStore: webGroundingEndpointStore,
+                tutorialStore: tutorialEndpointStore
+            )
+        }
+        devSettingsWindowController?.show()
     }
 }

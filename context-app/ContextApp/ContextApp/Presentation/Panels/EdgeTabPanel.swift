@@ -1,6 +1,8 @@
 import AppKit
 
 final class EdgeTabPanel: NSPanel {
+    var onShiftRightClick: (() -> Void)?
+
     init(frame: NSRect) {
         super.init(
             contentRect: frame,
@@ -26,4 +28,12 @@ final class EdgeTabPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.shift), let onShiftRightClick {
+            onShiftRightClick()
+            return
+        }
+        super.rightMouseDown(with: event)
+    }
 }

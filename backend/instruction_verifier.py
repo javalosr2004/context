@@ -23,16 +23,21 @@ logger = logging.getLogger(__name__)
 
 
 VERIFIER_SYSTEM_PROMPT = (
-    "You verify whether a screenshot shows the expected state for the "
-    "next step of a tutorial. You must ground every verdict in specific "
-    "visual evidence — name the exact UI element, quote the exact text, "
-    "or describe the exact region you observed. Do NOT accept the screen "
-    "just because it looks like the right page or app; that is not "
-    "evidence. If you cannot point to concrete evidence, answer 'unsure' "
-    "or 'no'.\n\n"
-    "Answer strictly in JSON with two fields: verdict (one of 'yes', "
-    "'no', 'unsure') and evidence (one short sentence quoting or naming "
-    "the specific element you observed, or describing what is missing). "
+    "You are a safety check for a tutorial overlay. The user is about to "
+    "attempt the next instruction. Your only job is to detect when the "
+    "screen is CLEARLY INCONSISTENT with that instruction — for example: "
+    "an unrelated application is in focus, an error dialog is blocking "
+    "the UI, the user is on a sign-in wall when the instruction assumes "
+    "they are signed in, or the previous step obviously failed. \n\n"
+    "Default to 'yes'. Only answer 'no' when you can point to a SPECIFIC "
+    "blocking element (name it or quote its text). If the screen merely "
+    "lacks the exact element named in the instruction, that is NOT a "
+    "blocker — the instruction's element may be one click or scroll "
+    "away. Answer 'unsure' only when something looks off but you cannot "
+    "name a concrete blocker.\n\n"
+    "Respond strictly as JSON with two fields: verdict (one of 'yes', "
+    "'no', 'unsure') and evidence (one short sentence naming the "
+    "blocking element for 'no', or what looks plausible for 'yes'). "
     "Do not include any text outside the JSON object."
 )
 
@@ -45,13 +50,13 @@ class VerifierVerdict:
 
 def build_request(instruction: str, screen: UploadedImage) -> LLMRequest:
     user_text = (
-        f"Expected state after the previous action: {instruction}\n\n"
-        "Look at the screenshot and find SPECIFIC visual evidence that "
-        "this state has been reached — a labeled button, a status badge, "
-        "a page title, a URL bar, a confirmation message. Quote or name "
-        "the exact element. If you can only say 'looks like the right "
-        "page' without pointing to a concrete element, the correct "
-        "verdict is 'unsure', not 'yes'.\n\n"
+        f"Next instruction the user will attempt: {instruction}\n\n"
+        "Look at the screenshot. Is there a SPECIFIC blocker that makes "
+        "this instruction impossible to attempt right now — wrong app in "
+        "focus, modal error, sign-in wall, prior step visibly failed? "
+        "Name the blocking element if so. Otherwise answer 'yes' — the "
+        "target element doesn't need to be visible on screen; the user "
+        "may need to click, scroll, or navigate to reach it.\n\n"
         'Respond with JSON: {"verdict": "yes"|"no"|"unsure", '
         '"evidence": "..."}'
     )
@@ -85,10 +90,9 @@ def parse_verdict(raw: str) -> VerifierVerdict:
     if verdict == "no":
         return VerifierVerdict(ok=False, reason=evidence)
     if verdict == "unsure":
-        # No concrete evidence → treat as rejection so we replan rather
-        # than rubber-stamp. The replan note carries the evidence string
-        # so the planner sees what was missing.
-        return VerifierVerdict(ok=False, reason=f"unsure: {evidence}")
+        # Pass through — a precondition gate shouldn't replan on doubt;
+        # only a confident "no" (a named blocker) interrupts the walk.
+        return VerifierVerdict(ok=True, reason=f"unsure: {evidence}")
     return VerifierVerdict(ok=True, reason=evidence)
 
 

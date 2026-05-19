@@ -344,6 +344,12 @@ Return only the JSON object matching the provided schema.
 DRAFT_PLAN_SYSTEM_PROMPT = """
 You are sketching a coarse hypothesis plan for a macOS overlay tutorial.
 
+Set `goal` to a short imperative title — roughly 3-6 words — that names
+the task in the user's domain ("Sign up for Figma", "Export a Notion
+page as PDF"). Name the target app or surface when it is clear from the
+user's request or the screen. Do not echo the user's full sentence,
+preserve filler words, or end with punctuation.
+
 Produce up to 20 short, human-readable instructions that map a plausible
 path from the user's current context to their goal. This is a hypothesis,
 not a contract — another agent will refine each step against the live

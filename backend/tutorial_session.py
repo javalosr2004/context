@@ -1103,7 +1103,7 @@ class TutorialSession:
         self.plan_steps = result.plan_steps
         self.step_counter = result.step_counter
 
-        plan = plan_from_steps(self.goal or "", self.plan_steps)
+        plan = plan_from_steps(self._display_goal(), self.plan_steps)
         refined_current = bool(
             candidates
             and candidates[0].refines_current
@@ -1544,7 +1544,15 @@ class TutorialSession:
     def current_plan(self) -> TutorialPlan | None:
         if not self.plan_steps:
             return None
-        return plan_from_steps(self.goal or "", self.plan_steps)
+        return plan_from_steps(self._display_goal(), self.plan_steps)
+
+    def _display_goal(self) -> str:
+        """Goal text shown in the UI — prefer the planner-refined title."""
+        if self.draft_plan is not None:
+            refined = self.draft_plan.goal.strip()
+            if refined:
+                return refined
+        return self.goal or ""
 
 
 # ---------------- Helpers ----------------

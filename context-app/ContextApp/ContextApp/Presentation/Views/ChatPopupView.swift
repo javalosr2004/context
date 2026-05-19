@@ -209,7 +209,12 @@ struct ChatPopupView: View {
                     answerCard(answer)
                 }
 
-                if !sessionController.status.isBusy {
+                if let prompt = sessionController.pendingCompletionPrompt {
+                    completionPromptCard(prompt)
+                }
+
+                if !sessionController.status.isBusy
+                    && sessionController.pendingCompletionPrompt == nil {
                     launcherView
                 }
             } else {
@@ -221,9 +226,20 @@ struct ChatPopupView: View {
                     answerCard(answer)
                 }
 
+                if let prompt = sessionController.pendingCompletionPrompt {
+                    completionPromptCard(prompt)
+                }
+
                 peekStack
-                    .opacity(isTutorialPaused ? 0.35 : 1)
-                    .allowsHitTesting(!isTutorialPaused)
+                    .opacity(
+                        (isTutorialPaused
+                            || sessionController.pendingCompletionPrompt != nil)
+                            ? 0.35 : 1
+                    )
+                    .allowsHitTesting(
+                        !isTutorialPaused
+                            && sessionController.pendingCompletionPrompt == nil
+                    )
             }
 
             askBar
@@ -834,6 +850,61 @@ struct ChatPopupView: View {
                 }
                 .padding(.top, 4)
             }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder
+    private func completionPromptCard(_ prompt: PendingCompletionPrompt) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: 11, weight: .medium))
+                Text(prompt.source == .llm ? "Looks done?" : "No more steps")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.42)
+                    .textCase(.uppercase)
+            }
+            .foregroundStyle(OverlayTheme.tertiaryText)
+
+            Text(prompt.reason)
+                .font(.system(size: 13.5))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                Button("Finish tutorial") {
+                    Task { await sessionController.confirmCompletion() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OverlayTheme.invertedForeground)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(OverlayTheme.invertedAccent)
+                .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+
+                Button("Keep going") {
+                    Task { await sessionController.rejectCompletion() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+            }
+            .padding(.top, 2)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

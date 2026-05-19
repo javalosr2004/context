@@ -43,6 +43,49 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         XCTAssertNil(object["screen"])
     }
 
+    func testUserCompletionResponseEncodingUsesWireKeys() throws {
+        let confirm = TutorialSessionClientEvent.userCompletionResponse(
+            confirmed: true,
+            note: nil
+        )
+        let confirmData = try JSONEncoder().encode(confirm)
+        let confirmObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: confirmData) as? [String: Any]
+        )
+        XCTAssertEqual(confirmObject["type"] as? String, "user_completion_response")
+        XCTAssertEqual(confirmObject["confirmed"] as? Bool, true)
+        XCTAssertNil(confirmObject["note"])
+
+        let reject = TutorialSessionClientEvent.userCompletionResponse(
+            confirmed: false,
+            note: "Still need to save."
+        )
+        let rejectData = try JSONEncoder().encode(reject)
+        let rejectObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: rejectData) as? [String: Any]
+        )
+        XCTAssertEqual(rejectObject["confirmed"] as? Bool, false)
+        XCTAssertEqual(rejectObject["note"] as? String, "Still need to save.")
+    }
+
+    func testServerEventDecodingCompletionProposed() throws {
+        let data = Data("""
+        {
+          "type": "completion_proposed",
+          "reason": "Confirmation banner is visible.",
+          "source": "llm"
+        }
+        """.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .completionProposed(let reason, let source) = event else {
+            return XCTFail("Expected completionProposed, got \(event)")
+        }
+        XCTAssertEqual(reason, "Confirmation banner is visible.")
+        XCTAssertEqual(source, "llm")
+    }
+
     func testUserScreenEventEncodingUsesWireKeys() throws {
         let event = TutorialSessionClientEvent.userScreen(
             requestID: "screen_001",

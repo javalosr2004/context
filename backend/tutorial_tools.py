@@ -33,7 +33,12 @@ from backend.tutorial_schema import (
 
 UPDATE_PLAN_TOOL_NAME = "tutorial_update_plan"
 REQUEST_SCREEN_TOOL_NAME = "tutorial_request_screen"
-TUTORIAL_TOOL_NAMES = frozenset({UPDATE_PLAN_TOOL_NAME, REQUEST_SCREEN_TOOL_NAME})
+REQUEST_COMPLETION_TOOL_NAME = "tutorial_request_completion"
+TUTORIAL_TOOL_NAMES = frozenset({
+    UPDATE_PLAN_TOOL_NAME,
+    REQUEST_SCREEN_TOOL_NAME,
+    REQUEST_COMPLETION_TOOL_NAME,
+})
 
 INVALID_TOOL_CALL = "invalid_tool_call"
 INVALID_TOOL_ARGUMENTS = "invalid_tool_arguments"
@@ -237,8 +242,23 @@ class TutorialRequestScreenArguments(_StrictModel):
     reason: str = Field(min_length=1)
 
 
+class TutorialRequestCompletionArguments(_StrictModel):
+    reason: str = Field(
+        min_length=1,
+        description=(
+            "One short sentence summarising why you believe the user's goal "
+            "is reached. The backend shows this to the user verbatim and "
+            "asks them to confirm before ending the tutorial."
+        ),
+    )
+
+
 class _ToolCallPayload(_StrictModel):
-    name: Literal["tutorial_update_plan", "tutorial_request_screen"]
+    name: Literal[
+        "tutorial_update_plan",
+        "tutorial_request_screen",
+        "tutorial_request_completion",
+    ]
     arguments: dict[str, Any]
 
 
@@ -248,6 +268,7 @@ class _ToolCallList(_StrictModel):
 
 _tool_call_list_adapter = TypeAdapter(_ToolCallList)
 _update_plan_adapter = TypeAdapter(TutorialUpdatePlanArguments)
+_request_completion_adapter = TypeAdapter(TutorialRequestCompletionArguments)
 
 
 # ---------------- Schema export (for LLM clients) ----------------
@@ -280,6 +301,18 @@ def openai_tutorial_tool_definitions() -> list[dict[str, Any]]:
                 "rest of the turn is discarded."
             ),
             model=TutorialRequestScreenArguments,
+        ),
+        _build_openai_tool(
+            name=REQUEST_COMPLETION_TOOL_NAME,
+            description=(
+                "Propose that the user's goal is reached and the tutorial "
+                "should end. The backend shows your reason to the user and "
+                "asks them to confirm before terminating the session. Only "
+                "call this when the latest screen — or the user's last "
+                "message — gives you a concrete reason to believe the goal "
+                "is met. Do not use this as a way to abandon a stuck plan."
+            ),
+            model=TutorialRequestCompletionArguments,
         ),
     ]
 
@@ -349,6 +382,21 @@ def is_request_screen_call(call: TutorialToolCall) -> bool:
 
 def is_update_plan_call(call: TutorialToolCall) -> bool:
     return call.name == UPDATE_PLAN_TOOL_NAME
+
+
+def is_request_completion_call(call: TutorialToolCall) -> bool:
+    return call.name == REQUEST_COMPLETION_TOOL_NAME
+
+
+def parse_request_completion_reason(call: TutorialToolCall) -> str:
+    try:
+        arguments = _request_completion_adapter.validate_json(call.arguments)
+    except ValidationError as error:
+        raise TutorialToolCallError(
+            INVALID_TOOL_ARGUMENTS,
+            f"Invalid arguments for {call.name}: {error}",
+        ) from error
+    return arguments.reason
 
 
 def parse_request_screen_reason(call: TutorialToolCall) -> str:

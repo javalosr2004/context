@@ -21,6 +21,7 @@ from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEve
 from backend.tutorial_schema import ActionTarget, TutorialAction, TutorialStep
 from backend.tutorial_session import HistoryEntry, TutorialSession, render_history
 from backend.tutorial_session_events import (
+    CompletionProposedEvent,
     PlanReadyEvent,
     PlanUpdatedEvent,
     ScreenRequestedEvent,
@@ -169,6 +170,10 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
         )
         await session.handle_user_confirmation("step_002", action_index=0, confirmed=True, note=None)
         await send_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         plan_ready = [e for e in events if isinstance(e, PlanReadyEvent)]
@@ -214,6 +219,10 @@ class PersistentPlanTests(unittest.IsolatedAsyncioTestCase):
             "step_002", action_index=0, confirmed=False, note="Button is gone."
         )
         await send_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertEqual([s.step_id for s in session.plan_steps], ["step_001"])
@@ -405,6 +414,10 @@ class MultiActionWalkTests(unittest.IsolatedAsyncioTestCase):
         await wait_until(lambda: "step_001" in session.completed_step_ids)
 
         await send_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertEqual(session.completed_step_ids, ["step_001"])
@@ -455,6 +468,10 @@ class MultiActionWalkTests(unittest.IsolatedAsyncioTestCase):
             "step_001", action_index=1, confirmed=False, note="Save not visible."
         )
         await send_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         # Step never completed; truncated.

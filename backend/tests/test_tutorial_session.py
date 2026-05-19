@@ -10,6 +10,7 @@ from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEve
 from backend.tutorial_session import TutorialSession
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
+    CompletionProposedEvent,
     InstructionVerifiedEvent,
     PlanReadyEvent,
     PlanUpdatedEvent,
@@ -49,6 +50,10 @@ CLICK_PLAN_CALL = update_plan_call(click_item())
 REQUEST_SCREEN_CALL = TutorialToolCall(
     name="tutorial_request_screen",
     arguments='{"reason": "Need to see current screen."}',
+)
+REQUEST_COMPLETION_CALL = TutorialToolCall(
+    name="tutorial_request_completion",
+    arguments='{"reason": "Goal screen visible."}',
 )
 
 
@@ -184,9 +189,96 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         ))
         await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
         await send_next_requested_screen(session, events)
+        # Plan tail is now empty; the backend should ASK the user instead
+        # of auto-completing.
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        self.assertNotIn(SessionCompletedEvent(), events)
+        proposal = next(e for e in events if isinstance(e, CompletionProposedEvent))
+        self.assertEqual(proposal.source, "backend")
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
-
         self.assertIn(SessionCompletedEvent(), events)
+
+    async def test_llm_completion_request_is_user_gated(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
+                [LLMToolCallEvent(tool_call=REQUEST_COMPLETION_CALL)],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: any(
+            isinstance(e, AwaitingConfirmationEvent) for e in events
+        ))
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        proposal = next(e for e in events if isinstance(e, CompletionProposedEvent))
+        self.assertEqual(proposal.source, "llm")
+        self.assertIn("Goal screen visible.", proposal.reason)
+        self.assertNotIn(SessionCompletedEvent(), events)
+        await session.handle_user_completion_response(confirmed=True, note=None)
+        await wait_for_idle(session)
+        self.assertIn(SessionCompletedEvent(), events)
+
+    async def test_completion_rejection_replans_instead_of_ending(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
+                [LLMToolCallEvent(tool_call=REQUEST_COMPLETION_CALL)],
+                # After rejection, planner is re-engaged with the user's
+                # note and emits a fresh step.
+                [LLMToolCallEvent(tool_call=update_plan_call(
+                    click_item(human_text="Click Save.", description="Save button.")
+                ))],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: any(
+            isinstance(e, AwaitingConfirmationEvent) for e in events
+        ))
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(
+            confirmed=False, note="I still need to save the file."
+        )
+        # Rejection triggers a fresh screen + replan.
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(
+                isinstance(e, PlanUpdatedEvent)
+                and any(s.instruction == "Click Save." for s in e.plan.steps)
+                for e in events
+            )
+        )
+        self.assertNotIn(SessionCompletedEvent(), events)
 
     async def test_completed_screen_changing_step_triggers_fresh_screen(self) -> None:
         events: list[Any] = []
@@ -212,6 +304,10 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(llm.requests), 1)
         await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertEqual(len(llm.requests), 2)
@@ -247,6 +343,10 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
         await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertGreaterEqual(len(llm.requests), 2)
@@ -319,6 +419,12 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
             "step_001", action_index=0, confirmed=False, note="That button is gone."
         )
         await send_next_requested_screen(session, events)
+        # Plan was cleared on rejection and the planner returned text-only,
+        # so the backend asks the user before terminating.
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertEqual(len(llm.requests), 2)
@@ -414,6 +520,10 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
             "step_002", action_index=0, confirmed=True, note=None
         )
         await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         # 2 planner calls: initial plan + post-step_002 cleanup.
@@ -453,6 +563,10 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
             "step_001", action_index=0, confirmed=True, note=None
         )
         await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         # Plan tail trimmed to completed prefix after gate rejection.

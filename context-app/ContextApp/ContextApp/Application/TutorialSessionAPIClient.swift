@@ -60,6 +60,7 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         screen: TutorialSessionScreenSnapshot? = nil
     )
     case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
+    case userCompletionResponse(confirmed: Bool, note: String?)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -107,6 +108,11 @@ enum TutorialSessionClientEvent: Codable, Equatable {
                 requestID: try container.decode(String.self, forKey: .requestID),
                 screen: try container.decode(TutorialSessionScreenSnapshot.self, forKey: .screen)
             )
+        case "user_completion_response":
+            self = .userCompletionResponse(
+                confirmed: try container.decode(Bool.self, forKey: .confirmed),
+                note: try container.decodeIfPresent(String.self, forKey: .note)
+            )
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -141,6 +147,10 @@ enum TutorialSessionClientEvent: Codable, Equatable {
             try container.encode("user_screen", forKey: .type)
             try container.encode(requestID, forKey: .requestID)
             try container.encode(screen, forKey: .screen)
+        case .userCompletionResponse(let confirmed, let note):
+            try container.encode("user_completion_response", forKey: .type)
+            try container.encode(confirmed, forKey: .confirmed)
+            try container.encodeIfPresent(note, forKey: .note)
         }
     }
 }
@@ -169,6 +179,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case planDiff(frozenPrefixLen: Int, newTailLen: Int, refinedCurrent: Bool, totalSteps: Int)
     case stepProgress(stepID: String, stepIndex: Int, totalSteps: Int, actionIndex: Int, totalActions: Int)
     case sessionCompleted
+    case completionProposed(reason: String, source: String)
     case error(code: String, message: String)
 
     private enum CodingKeys: String, CodingKey {
@@ -183,6 +194,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case actionIndex = "action_index"
         case requestID = "request_id"
         case reason
+        case source
         case code
         case message
         case query
@@ -269,6 +281,11 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             )
         case "session_completed":
             self = .sessionCompleted
+        case "completion_proposed":
+            self = .completionProposed(
+                reason: try container.decode(String.self, forKey: .reason),
+                source: try container.decode(String.self, forKey: .source)
+            )
         case "error":
             self = .error(
                 code: try container.decode(String.self, forKey: .code),
@@ -350,6 +367,10 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             try container.encode(totalActions, forKey: .totalActions)
         case .sessionCompleted:
             try container.encode("session_completed", forKey: .type)
+        case .completionProposed(let reason, let source):
+            try container.encode("completion_proposed", forKey: .type)
+            try container.encode(reason, forKey: .reason)
+            try container.encode(source, forKey: .source)
         case .error(let code, let message):
             try container.encode("error", forKey: .type)
             try container.encode(code, forKey: .code)

@@ -10,6 +10,7 @@ enum TutorialSessionUIStatus: Equatable {
     case sending
     case planning(String)
     case awaitingConfirmation
+    case awaitingCompletion
     case completed
     case failed(String)
 
@@ -25,6 +26,8 @@ enum TutorialSessionUIStatus: Equatable {
             return label
         case .awaitingConfirmation:
             return "Awaiting confirmation"
+        case .awaitingCompletion:
+            return "Confirm completion"
         case .completed:
             return "Completed"
         case .failed:
@@ -36,10 +39,20 @@ enum TutorialSessionUIStatus: Equatable {
         switch self {
         case .preparingScreen, .sending, .planning:
             return true
-        case .ready, .awaitingConfirmation, .completed, .failed:
+        case .ready, .awaitingConfirmation, .awaitingCompletion, .completed, .failed:
             return false
         }
     }
+}
+
+struct PendingCompletionPrompt: Equatable {
+    enum Source: String, Equatable {
+        case llm
+        case backend
+    }
+
+    let reason: String
+    let source: Source
 }
 
 @MainActor
@@ -51,6 +64,7 @@ final class TutorialSessionController: ObservableObject {
     @Published private(set) var draftPlan: DraftPlan?
     @Published private(set) var messages: [ChatMessage]
     @Published private(set) var pendingContinuePromptStepID: String?
+    @Published private(set) var pendingCompletionPrompt: PendingCompletionPrompt?
     @Published private(set) var status: TutorialSessionUIStatus = .ready
     @Published private(set) var agentTurn: (turn: Int, maxTurns: Int)?
     @Published private(set) var webSources: [TutorialSessionWebSource] = []
@@ -118,6 +132,35 @@ final class TutorialSessionController: ObservableObject {
 
     func dismissContinuePrompt() {
         pendingContinuePromptStepID = nil
+    }
+
+    /// Confirm the backend's "are you done?" prompt and let the session end.
+    func confirmCompletion() async {
+        guard pendingCompletionPrompt != nil else { return }
+        pendingCompletionPrompt = nil
+        do {
+            status = .sending
+            try await sendSessionEvent(
+                .userCompletionResponse(confirmed: true, note: nil)
+            )
+        } catch {
+            applyFailure("Could not confirm tutorial completion: \(error.localizedDescription)")
+        }
+    }
+
+    /// Reject the completion prompt; the planner will re-engage with the note
+    /// (if any) as context for the next step.
+    func rejectCompletion(note: String? = nil) async {
+        guard pendingCompletionPrompt != nil else { return }
+        pendingCompletionPrompt = nil
+        do {
+            status = .planning("Replanning")
+            try await sendSessionEvent(
+                .userCompletionResponse(confirmed: false, note: note)
+            )
+        } catch {
+            applyFailure("Could not reject tutorial completion: \(error.localizedDescription)")
+        }
     }
 
     func confirmStep(
@@ -227,6 +270,7 @@ final class TutorialSessionController: ObservableObject {
         awaitingConfirmationStepID = nil
         awaitingActionIndex = nil
         pendingContinuePromptStepID = nil
+        pendingCompletionPrompt = nil
         draftPlan = nil
         optimisticallyGroundedSlot = nil
         agentTurn = nil
@@ -418,8 +462,16 @@ final class TutorialSessionController: ObservableObject {
             awaitingConfirmationStepID = nil
             awaitingActionIndex = nil
             optimisticallyGroundedSlot = nil
+            pendingCompletionPrompt = nil
             appendTutorialText("Tutorial completed.")
             status = .completed
+        case .completionProposed(let reason, let source):
+            let promptSource = PendingCompletionPrompt.Source(rawValue: source) ?? .backend
+            pendingCompletionPrompt = PendingCompletionPrompt(
+                reason: reason,
+                source: promptSource
+            )
+            status = .awaitingCompletion
         case .error(_, let message):
             applyFailure(message)
         }
@@ -433,6 +485,8 @@ final class TutorialSessionController: ObservableObject {
             status = .planning(label)
         case "awaiting_confirmation":
             status = .awaitingConfirmation
+        case "awaiting_completion":
+            status = .awaitingCompletion
         case "completed":
             status = .completed
         default:

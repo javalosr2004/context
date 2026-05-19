@@ -7,14 +7,17 @@ from typing import Any
 from backend.tutorial_tools import (
     INVALID_TOOL_ARGUMENTS,
     INVALID_TOOL_CALL,
+    REQUEST_COMPLETION_TOOL_NAME,
     REQUEST_SCREEN_TOOL_NAME,
     UPDATE_PLAN_TOOL_NAME,
     TutorialToolCall,
     TutorialToolCallError,
     candidates_from_arguments,
+    is_request_completion_call,
     is_request_screen_call,
     is_update_plan_call,
     openai_tutorial_tool_definitions,
+    parse_request_completion_reason,
     parse_request_screen_reason,
     parse_update_plan_arguments,
 )
@@ -35,10 +38,17 @@ class TutorialToolDispatchTests(unittest.TestCase):
         self.assertTrue(is_request_screen_call(screen_call))
         self.assertFalse(is_update_plan_call(screen_call))
 
-    def test_openai_tool_definitions_expose_two_tools(self) -> None:
+    def test_openai_tool_definitions_expose_three_tools(self) -> None:
         defs = openai_tutorial_tool_definitions()
         names = {tool["name"] for tool in defs}
-        self.assertEqual(names, {UPDATE_PLAN_TOOL_NAME, REQUEST_SCREEN_TOOL_NAME})
+        self.assertEqual(
+            names,
+            {
+                UPDATE_PLAN_TOOL_NAME,
+                REQUEST_SCREEN_TOOL_NAME,
+                REQUEST_COMPLETION_TOOL_NAME,
+            },
+        )
 
     def test_parse_request_screen_reason(self) -> None:
         call = TutorialToolCall(
@@ -46,6 +56,29 @@ class TutorialToolDispatchTests(unittest.TestCase):
             arguments='{"reason": "verify the click landed"}',
         )
         self.assertEqual(parse_request_screen_reason(call), "verify the click landed")
+
+    def test_request_completion_call_helpers(self) -> None:
+        call = TutorialToolCall(
+            name=REQUEST_COMPLETION_TOOL_NAME,
+            arguments='{"reason": "Signup confirmation visible."}',
+        )
+        self.assertTrue(is_request_completion_call(call))
+        self.assertFalse(is_request_completion_call(
+            TutorialToolCall(name=UPDATE_PLAN_TOOL_NAME, arguments="{}")
+        ))
+        self.assertEqual(
+            parse_request_completion_reason(call),
+            "Signup confirmation visible.",
+        )
+
+    def test_parse_request_completion_rejects_empty_reason(self) -> None:
+        call = TutorialToolCall(
+            name=REQUEST_COMPLETION_TOOL_NAME,
+            arguments='{"reason": ""}',
+        )
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_request_completion_reason(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_ARGUMENTS)
 
 
 def _click_payload(description: str = "Green New button.") -> dict[str, Any]:

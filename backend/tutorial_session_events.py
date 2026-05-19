@@ -68,12 +68,26 @@ class UserScreenEvent(TutorialSessionEventModel):
     screen: ScreenSnapshot
 
 
+class UserCompletionResponseEvent(TutorialSessionEventModel):
+    """User reply to a CompletionProposedEvent.
+
+    confirmed=True  -> end the session.
+    confirmed=False -> keep going; ``note`` is appended to history so the
+    planner sees the user's reason for continuing.
+    """
+
+    type: Literal["user_completion_response"]
+    confirmed: bool
+    note: str | None = None
+
+
 ClientSessionEvent = Annotated[
     UserMessageEvent
     | UserAnswerEvent
     | StepStartedEvent
     | UserConfirmationEvent
-    | UserScreenEvent,
+    | UserScreenEvent
+    | UserCompletionResponseEvent,
     Field(discriminator="type"),
 ]
 
@@ -199,6 +213,23 @@ class SessionCompletedEvent(TutorialSessionEventModel):
     type: Literal["session_completed"] = "session_completed"
 
 
+class CompletionProposedEvent(TutorialSessionEventModel):
+    """Backend is asking the user to confirm that the tutorial is finished.
+
+    ``source="llm"``   — the planner called tutorial_request_completion.
+    ``source="backend"`` — the plan ran out and the backend is double-checking
+    instead of auto-completing.
+
+    The session waits for a UserCompletionResponseEvent before either firing
+    SessionCompletedEvent (on confirmed=True) or re-engaging the planner
+    (on confirmed=False).
+    """
+
+    type: Literal["completion_proposed"] = "completion_proposed"
+    reason: str
+    source: Literal["llm", "backend"]
+
+
 class InstructionVerificationStartedEvent(TutorialSessionEventModel):
     type: Literal["instruction_verification_started"] = (
         "instruction_verification_started"
@@ -240,6 +271,7 @@ ServerSessionEvent = (
     | PlanDiffEvent
     | StepProgressEvent
     | SessionCompletedEvent
+    | CompletionProposedEvent
     | InstructionVerificationStartedEvent
     | InstructionVerifiedEvent
     | ErrorEvent

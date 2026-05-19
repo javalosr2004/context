@@ -43,6 +43,7 @@ from backend.web_ground import NullWebGroundProducer, WebGroundProducer, WebGrou
 from backend.tutorial_session_events import (
     AgentTurnEvent,
     AwaitingConfirmationEvent,
+    CompletionProposedEvent,
     DraftPlanReadyEvent,
     InstructionVerificationStartedEvent,
     InstructionVerifiedEvent,
@@ -68,13 +69,16 @@ from backend.plan_merge import (
     merge_plan_tail,
 )
 from backend.tutorial_tools import (
+    REQUEST_COMPLETION_TOOL_NAME,
     REQUEST_SCREEN_TOOL_NAME,
     UPDATE_PLAN_TOOL_NAME,
     TutorialToolCall,
     TutorialToolCallError,
     candidates_from_arguments,
+    is_request_completion_call,
     is_request_screen_call,
     is_update_plan_call,
+    parse_request_completion_reason,
     parse_request_screen_reason,
     parse_update_plan_arguments,
     plan_from_steps,
@@ -130,6 +134,15 @@ class TutorialSession:
     uploaded_images: list[UploadedImage] = field(default_factory=list)
     pending_screen: asyncio.Future[UploadedImage] | None = None
     pending_screen_request_id: str | None = None
+    # Completion proposal flow. ``pending_completion`` is set by the agent
+    # loop when the LLM calls tutorial_request_completion; the outer
+    # session loop reads it and emits CompletionProposedEvent.
+    # ``pending_completion_response`` is the future the session loop awaits;
+    # ``handle_user_completion_response`` resolves it with (confirmed, note).
+    pending_completion: tuple[str, str] | None = None  # (reason, source)
+    pending_completion_response: (
+        asyncio.Future[tuple[bool, str | None]] | None
+    ) = None
     pending_step_starts: set[tuple[str, int]] = field(default_factory=set)
     pending_step_confirmations: dict[tuple[str, int], tuple[bool, str]] = field(
         default_factory=dict
@@ -282,6 +295,31 @@ class TutorialSession:
         # preserved (a "no" verdict still warrants replan).
         await self._cancel_verification()
 
+    async def handle_user_completion_response(
+        self,
+        confirmed: bool,
+        note: str | None,
+    ) -> None:
+        logger.info(
+            "[session] user_completion_response",
+            extra={
+                "session_id": self.session_id,
+                "confirmed": confirmed,
+                "note_chars": len((note or "").strip()),
+                "had_pending": self.pending_completion_response is not None,
+            },
+        )
+        future = self.pending_completion_response
+        if future is None:
+            logger.debug(
+                "[session] user_completion_response no pending future; dropping",
+                extra={"session_id": self.session_id},
+            )
+            return
+        cleaned_note = (note or "").strip() or None
+        if not future.done():
+            future.set_result((confirmed, cleaned_note))
+
     async def handle_user_confirmation(
         self,
         step_id: str,
@@ -369,12 +407,31 @@ class TutorialSession:
             any_steps_walked = False
             while True:
                 await self._plan_or_gate()
+                # Completion is now user-gated. Two paths can request it:
+                #   (a) LLM called tutorial_request_completion in the agent
+                #       loop — handled via self.pending_completion.
+                #   (b) Plan tail ran out after at least one walked step —
+                #       backend synthesises a reason and asks the user.
+                if self.pending_completion is not None:
+                    reason, source = self.pending_completion
+                    self.pending_completion = None
+                    confirmed = await self._propose_completion(reason, source)
+                    if confirmed:
+                        return
+                    await self._request_fresh_screen_after_user_action()
+                    continue
                 unwalked = self._unwalked_steps()
                 if not unwalked:
-                    if any_steps_walked:
-                        await self.emit(SessionCompletedEvent())
-                        self.status = "completed"
-                    return
+                    if not any_steps_walked:
+                        return
+                    confirmed = await self._propose_completion(
+                        "The planner has no more steps to suggest.",
+                        "backend",
+                    )
+                    if confirmed:
+                        return
+                    await self._request_fresh_screen_after_user_action()
+                    continue
                 walk_started_completed = set(self.completed_step_ids)
                 replan_requested = await self._walk_steps()
                 any_steps_walked = True
@@ -495,19 +552,26 @@ class TutorialSession:
             request_screen_call = first_request_screen_call(tool_calls)
             update_plan_calls = [
                 c for c in tool_calls if is_update_plan_call(c)]
+            request_completion_call = next(
+                (c for c in tool_calls if is_request_completion_call(c)),
+                None,
+            )
             unknown_calls = [
                 c
                 for c in tool_calls
-                if not is_update_plan_call(c) and not is_request_screen_call(c)
+                if not is_update_plan_call(c)
+                and not is_request_screen_call(c)
+                and not is_request_completion_call(c)
             ]
             for call in unknown_calls:
                 self.history.append(
                     HistoryEntry(
                         role="tool",
                         content=(
-                            f"{call.name} rejected: unknown tool. The only "
-                            f"available tools are {UPDATE_PLAN_TOOL_NAME} "
-                            f"and {REQUEST_SCREEN_TOOL_NAME}."
+                            f"{call.name} rejected: unknown tool. Available "
+                            f"tools are {UPDATE_PLAN_TOOL_NAME}, "
+                            f"{REQUEST_SCREEN_TOOL_NAME}, and "
+                            f"{REQUEST_COMPLETION_TOOL_NAME}."
                         ),
                     )
                 )
@@ -545,6 +609,9 @@ class TutorialSession:
                 continue
 
             consecutive_screen_requests = 0
+
+            if request_completion_call is not None:
+                self._record_completion_request(request_completion_call)
 
             # No request_screen this turn — agent loop is done.
             return
@@ -1194,6 +1261,109 @@ class TutorialSession:
             self.attempts_without_progress.pop(active, None)
         self.prev_active_step_id = active
 
+    def _record_completion_request(self, call: TutorialToolCall) -> None:
+        """Stash an LLM completion request for the outer loop to act on.
+
+        We don't emit anything from inside the agent loop — the proposal is
+        emitted by ``_propose_completion`` after the loop returns, so any
+        plan_update from the same turn is applied first.
+        """
+        try:
+            reason = parse_request_completion_reason(call)
+        except TutorialToolCallError as error:
+            logger.warning(
+                "[session] invalid request_completion call",
+                extra={"session_id": self.session_id, "error": error.message},
+            )
+            self.history.append(
+                HistoryEntry(
+                    role="tool",
+                    content=f"{call.name} rejected: {error.message}",
+                )
+            )
+            return
+        self.pending_completion = (reason, "llm")
+        self.history.append(
+            HistoryEntry(
+                role="assistant",
+                content=f"called {call.name}(reason={reason!r})",
+            )
+        )
+
+    async def _propose_completion(self, reason: str, source: str) -> bool:
+        """Ask the user whether the session is finished.
+
+        Returns True if the user confirmed (caller should terminate), False
+        if they rejected (caller should replan). On cancellation, raises.
+        """
+        cleaned_reason = reason.strip() or "Tutorial may be complete."
+        loop = asyncio.get_running_loop()
+        self.pending_completion_response = loop.create_future()
+        self.status = "awaiting_completion"
+        await self.emit(
+            StatusChangedEvent(
+                status="awaiting_completion",
+                label="Confirm completion",
+            )
+        )
+        await self.emit(
+            CompletionProposedEvent(reason=cleaned_reason, source=source)
+        )
+        logger.info(
+            "[session] completion_proposed",
+            extra={
+                "session_id": self.session_id,
+                "source": source,
+                "reason": cleaned_reason[:160],
+            },
+        )
+        try:
+            confirmed, note = await self.pending_completion_response
+        finally:
+            self.pending_completion_response = None
+
+        logger.info(
+            "[session] completion_response",
+            extra={
+                "session_id": self.session_id,
+                "confirmed": confirmed,
+                "note_chars": len(note or ""),
+            },
+        )
+        if confirmed:
+            self.history.append(
+                HistoryEntry(
+                    role="user",
+                    content=(
+                        f"User confirmed completion (proposal source={source}, "
+                        f"reason={cleaned_reason!r})."
+                    ),
+                )
+            )
+            await self.emit(SessionCompletedEvent())
+            self.status = "completed"
+            return True
+
+        # Rejection — record the user's note so the planner can re-engage
+        # with a concrete reason to continue.
+        note_text = note or ""
+        if note_text:
+            history_note = (
+                f"User rejected the completion proposal (source={source}). "
+                f"They said: {note_text}. Plan the next move from the "
+                "current screen — do NOT propose completion again unless "
+                "the screen gives a new reason."
+            )
+        else:
+            history_note = (
+                f"User rejected the completion proposal (source={source}) "
+                "with no note. They are not done yet. Plan the next move "
+                "from the current screen — do NOT propose completion again "
+                "unless the screen gives a new reason."
+            )
+        self.history.append(HistoryEntry(role="user", content=history_note))
+        return False
+
     async def _execute_screen_request(self, call: TutorialToolCall) -> None:
         try:
             reason = parse_request_screen_reason(call)
@@ -1527,6 +1697,11 @@ class TutorialSession:
             self.current_task = None
             self.pending_screen = None
             self.pending_screen_request_id = None
+            future = self.pending_completion_response
+            if future is not None and not future.done():
+                future.cancel()
+            self.pending_completion_response = None
+            self.pending_completion = None
             self.pending_step_starts.clear()
             self.pending_step_confirmations.clear()
             self.step_event.clear()

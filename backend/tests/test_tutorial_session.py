@@ -6,7 +6,14 @@ import unittest
 from collections.abc import Iterator
 from typing import Any
 
-from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
+from backend.llm import (
+    LLMRequest,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMToolCallEvent,
+    LLMWebSearchCompleted,
+    LLMWebSearchStarted,
+)
 from backend.tutorial_session import TutorialSession
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
@@ -20,6 +27,8 @@ from backend.tutorial_session_events import (
     StepReadyEvent,
     TextResponseEventLike,
     TutorialTextDeltaEvent,
+    WebSearchCompletedEvent,
+    WebSearchStartedEvent,
     client_session_event_adapter,
 )
 from backend.tutorial_tools import TutorialToolCall
@@ -808,6 +817,41 @@ class GroundingStrategyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(session.draft_plan_task)
         self.assertTrue(llm.requests[0].enable_search_grounding)
+
+
+class WebSearchOverlayEventTests(unittest.IsolatedAsyncioTestCase):
+    async def test_llm_web_search_events_fan_out_to_overlay(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [
+                    LLMWebSearchStarted(query="set up Stripe webhook"),
+                    LLMWebSearchCompleted(
+                        query="set up Stripe webhook", elapsed_ms=123.4
+                    ),
+                    LLMTextDelta(text="Here's how."),
+                ]
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            emit=await collect_events(events),
+            grounding_strategy="planner",
+        )
+
+        await session.handle_user_message("How do I set up a Stripe webhook?")
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        started = [e for e in events if isinstance(e, WebSearchStartedEvent)]
+        completed = [e for e in events if isinstance(e, WebSearchCompletedEvent)]
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0].query, "set up Stripe webhook")
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0].query, "set up Stripe webhook")
+        self.assertAlmostEqual(completed[0].elapsed_ms, 123.4)
+        self.assertEqual(completed[0].source_count, 0)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,14 @@ from typing import Any
 from openai import OpenAI
 
 from backend.images import UploadedImage
-from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
+from backend.llm import (
+    LLMRequest,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMToolCallEvent,
+    LLMWebSearchCompleted,
+    LLMWebSearchStarted,
+)
 from backend.tutorial_tools import TutorialToolCall, openai_tutorial_tool_definitions
 
 
@@ -95,7 +102,14 @@ class OpenAIClient:
         first_event_logged = False
         text_delta_count = 0
         tool_call_count = 0
+        web_search_count = 0
         other_count = 0
+        # When the planner runs web_search the API streams Started before
+        # Completed; we stamp elapsed_ms here because it's the only place
+        # both timestamps are visible. Track the last Started across all
+        # in-flight searches — OpenAI emits at most one in flight per
+        # response, so a single timestamp suffices.
+        last_search_started_at: float | None = None
         for event in stream:
             if not first_event_logged:
                 logger.info(
@@ -114,6 +128,18 @@ class OpenAIClient:
                 text_delta_count += 1
             elif isinstance(stream_event, LLMToolCallEvent):
                 tool_call_count += 1
+            elif isinstance(stream_event, LLMWebSearchStarted):
+                web_search_count += 1
+                last_search_started_at = time.perf_counter()
+            elif isinstance(stream_event, LLMWebSearchCompleted):
+                if last_search_started_at is not None:
+                    elapsed_ms = (
+                        time.perf_counter() - last_search_started_at
+                    ) * 1000.0
+                    stream_event = LLMWebSearchCompleted(
+                        query=stream_event.query, elapsed_ms=elapsed_ms
+                    )
+                    last_search_started_at = None
             yield stream_event
 
         logger.info(
@@ -123,6 +149,7 @@ class OpenAIClient:
                 "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
                 "text_delta_count": text_delta_count,
                 "tool_call_count": tool_call_count,
+                "web_search_count": web_search_count,
                 "other_event_count": other_count,
             },
         )
@@ -200,7 +227,56 @@ def stream_event_from_response_event(event: object) -> LLMStreamEvent | None:
     if tool_call is not None:
         return LLMToolCallEvent(tool_call=tool_call)
 
+    web_search = web_search_event_from_response_event(event)
+    if web_search is not None:
+        return web_search
+
     return None
+
+
+def web_search_event_from_response_event(
+    event: object,
+) -> LLMWebSearchStarted | LLMWebSearchCompleted | None:
+    """Detect lifecycle events for OpenAI's native web_search tool.
+
+    The Responses API surfaces a web_search_call as a regular output item:
+      - ``response.output_item.added`` fires when the model starts a
+        search. The item carries ``type='web_search_call'`` and an
+        ``action`` whose ``query`` may already be populated.
+      - ``response.output_item.done`` fires when the search finishes.
+        The final item shape carries ``action.query`` and a status.
+
+    We map these to Started/Completed. The Completed event's
+    ``elapsed_ms`` field is filled in by the streaming loop, which is
+    the only place we know when the matching Started actually fired.
+    """
+    event_type = getattr(event, "type", "")
+    if event_type not in {
+        "response.output_item.added",
+        "response.output_item.done",
+    }:
+        return None
+    item = getattr(event, "item", None)
+    if getattr(item, "type", "") != "web_search_call":
+        return None
+    query = _web_search_query_from_item(item)
+    if event_type == "response.output_item.added":
+        return LLMWebSearchStarted(query=query)
+    return LLMWebSearchCompleted(query=query)
+
+
+def _web_search_query_from_item(item: object) -> str:
+    action = getattr(item, "action", None)
+    if action is None:
+        return ""
+    query = getattr(action, "query", None)
+    if isinstance(query, str):
+        return query
+    if isinstance(action, dict):
+        value = action.get("query")
+        if isinstance(value, str):
+            return value
+    return ""
 
 
 def build_text_format(

@@ -3,12 +3,18 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from backend.llm import LLMTextDelta, LLMToolCallEvent
+from backend.llm import (
+    LLMTextDelta,
+    LLMToolCallEvent,
+    LLMWebSearchCompleted,
+    LLMWebSearchStarted,
+)
 from backend.openai_client import (
     build_response_params,
     build_text_format,
     stream_event_from_response_event,
     tool_call_from_response_event,
+    web_search_event_from_response_event,
 )
 from backend.tutorial_schema import tutorial_plan_response_schema
 
@@ -106,6 +112,55 @@ class OpenAIClientSchemaTests(unittest.TestCase):
 
         self.assertIsInstance(stream_event, LLMToolCallEvent)
         self.assertEqual(stream_event.tool_call.name, "tutorial_confirm")
+
+
+    def test_web_search_added_event_maps_to_started(self) -> None:
+        event = SimpleNamespace(
+            type="response.output_item.added",
+            item=SimpleNamespace(
+                type="web_search_call",
+                action=SimpleNamespace(query="set up Stripe webhook"),
+            ),
+        )
+
+        stream_event = stream_event_from_response_event(event)
+
+        self.assertIsInstance(stream_event, LLMWebSearchStarted)
+        self.assertEqual(stream_event.query, "set up Stripe webhook")
+
+    def test_web_search_done_event_maps_to_completed(self) -> None:
+        event = SimpleNamespace(
+            type="response.output_item.done",
+            item=SimpleNamespace(
+                type="web_search_call",
+                action=SimpleNamespace(query="set up Stripe webhook"),
+            ),
+        )
+
+        stream_event = stream_event_from_response_event(event)
+
+        self.assertIsInstance(stream_event, LLMWebSearchCompleted)
+        self.assertEqual(stream_event.query, "set up Stripe webhook")
+        # elapsed_ms is stamped by the stream loop, not the per-event helper.
+        self.assertEqual(stream_event.elapsed_ms, 0.0)
+
+    def test_web_search_helper_ignores_unrelated_output_items(self) -> None:
+        function_call = SimpleNamespace(
+            type="response.output_item.done",
+            item=SimpleNamespace(type="function_call", name="x", arguments="{}"),
+        )
+        self.assertIsNone(web_search_event_from_response_event(function_call))
+
+    def test_web_search_helper_returns_none_when_query_absent(self) -> None:
+        event = SimpleNamespace(
+            type="response.output_item.added",
+            item=SimpleNamespace(type="web_search_call", action=None),
+        )
+
+        stream_event = web_search_event_from_response_event(event)
+
+        self.assertIsInstance(stream_event, LLMWebSearchStarted)
+        self.assertEqual(stream_event.query, "")
 
 
 def assert_openai_strict_objects(value: object) -> None:

@@ -41,7 +41,15 @@ from backend.embeddings_client import (
 )
 from backend.images import UploadedImage, downscale_for_verifier
 from backend.instruction_verifier import VerifierVerdict, classify_screen
-from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
+from backend.llm import (
+    LLMRequest,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMToolCallEvent,
+    LLMWebSearchCompleted,
+    LLMWebSearchStarted,
+    MultimodalLLM,
+)
 from backend.enrichment_client import EnrichmentSnippetsProducer
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
@@ -986,6 +994,17 @@ class TutorialSession:
                     await self.emit(TutorialTextDeltaEvent(text=event.text))
                 elif isinstance(event, LLMToolCallEvent):
                     tool_calls.append(event.tool_call)
+                elif isinstance(event, LLMWebSearchStarted):
+                    await self.emit(WebSearchStartedEvent(query=event.query))
+                elif isinstance(event, LLMWebSearchCompleted):
+                    await self.emit(
+                        WebSearchCompletedEvent(
+                            query=event.query,
+                            source_count=0,
+                            sources=[],
+                            elapsed_ms=event.elapsed_ms,
+                        )
+                    )
         finally:
             await producer
 

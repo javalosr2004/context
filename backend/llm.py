@@ -29,7 +29,25 @@ class LLMToolCallEvent:
     tool_call: TutorialToolCall
 
 
-LLMStreamEvent = LLMTextDelta | LLMToolCallEvent
+@dataclass(frozen=True)
+class LLMWebSearchStarted:
+    """The model invoked a native web_search tool. ``query`` may be empty
+    if the provider hasn't surfaced it yet — the started event fires on
+    output_item.added, which can precede the query being known."""
+    query: str = ""
+
+
+@dataclass(frozen=True)
+class LLMWebSearchCompleted:
+    """The model's native web_search tool finished. ``elapsed_ms`` is
+    measured from the matching ``LLMWebSearchStarted`` event."""
+    query: str = ""
+    elapsed_ms: float = 0.0
+
+
+LLMStreamEvent = (
+    LLMTextDelta | LLMToolCallEvent | LLMWebSearchStarted | LLMWebSearchCompleted
+)
 
 
 class MultimodalLLM(Protocol):

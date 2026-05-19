@@ -10,6 +10,7 @@ dependencies = [
     "openai>=1.50.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.4.0",
+    "python-multipart>=0.0.9",
     "sqlalchemy>=2.0.30",
     "trafilatura>=1.12.0",
     "beautifulsoup4>=4.12.0",

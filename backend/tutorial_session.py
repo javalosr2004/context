@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from backend.images import UploadedImage
 from backend.instruction_verifier import VerifierVerdict, classify_screen
 from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
+from backend.enrichment_client import EnrichmentSnippetsProducer
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
     generate_draft_plan,
@@ -706,6 +707,19 @@ class TutorialSession:
     ) -> list[WebGroundSnippet]:
         if isinstance(self.web_ground, NullWebGroundProducer):
             return []
+        if (
+            isinstance(self.web_ground, EnrichmentSnippetsProducer)
+            and image is not None
+        ):
+            return await self._ground_multimodal_with_events(goal, image)
+        return await self._ground_single_query_with_events(goal, image, refiner_llm)
+
+    async def _ground_single_query_with_events(
+        self,
+        goal: str,
+        image: UploadedImage | None,
+        refiner_llm: MultimodalLLM,
+    ) -> list[WebGroundSnippet]:
         query = await asyncio.to_thread(
             refine_search_query, refiner_llm, goal, image
         )
@@ -733,6 +747,64 @@ class TutorialSession:
             )
         )
         return snippets
+
+    async def _ground_multimodal_with_events(
+        self,
+        goal: str,
+        image: UploadedImage,
+    ) -> list[WebGroundSnippet]:
+        """Hand the raw goal + screenshot to the enrichment layer.
+
+        The enrichment layer identifies the environment, decomposes the
+        goal into varying facets, and fans out a multi-query search whose
+        results aggregate into one snippet set. We emit the joined query
+        list on the events so the UI shows what was actually searched.
+        """
+        assert isinstance(self.web_ground, EnrichmentSnippetsProducer)
+        producer = self.web_ground
+        await self.emit(WebSearchStartedEvent(query=goal))
+        started_at = time.perf_counter()
+        try:
+            result = await asyncio.to_thread(
+                producer.ground_multimodal, goal, image
+            )
+        except Exception:
+            logger.exception(
+                "[web_ground] multimodal failed",
+                extra={"session_id": self.session_id, "goal_chars": len(goal)},
+            )
+            elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            await self.emit(
+                WebSearchCompletedEvent(
+                    query=goal, source_count=0, sources=[], elapsed_ms=elapsed_ms,
+                )
+            )
+            return []
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        display_query = " | ".join(result.queries_used) or goal
+        logger.info(
+            "[web_ground] multimodal completed",
+            extra={
+                "session_id": self.session_id,
+                "queries_used": result.queries_used,
+                "application": result.application,
+                "environment": result.environment,
+                "goal_facets": result.goal_facets,
+                "snippet_count": len(result.snippets),
+                "elapsed_ms": elapsed_ms,
+            },
+        )
+        await self.emit(
+            WebSearchCompletedEvent(
+                query=display_query,
+                source_count=len(result.snippets),
+                sources=[
+                    WebSearchSource(title=s.title, url=s.url) for s in result.snippets
+                ],
+                elapsed_ms=elapsed_ms,
+            )
+        )
+        return result.snippets
 
     # -------- Strict gate: verify next step before re-engaging planner --------
 

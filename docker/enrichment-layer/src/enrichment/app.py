@@ -4,9 +4,10 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from enrichment.multimodal_queries import generate_multimodal_query_plan
 from enrichment.pipeline import run_enrichment, run_quick_guide
 from enrichment.snippets import DEFAULT_NUM_SOURCES, Snippet, run_snippet_pipeline
 from enrichment.storage import (
@@ -50,30 +51,61 @@ async def query(body: QueryRequest) -> JobAck:
     return JobAck(job_id=job_id, status="pending")
 
 
-class SnippetsRequest(BaseModel):
-    query: str
-    application: str | None = None
-    goal: str | None = None
-    num_sources: int = DEFAULT_NUM_SOURCES
-
-
 class SnippetsResponse(BaseModel):
     snippets: list[Snippet]
     source_count: int
     elapsed_ms: float
+    queries_used: list[str]
+    application: str | None = None
+    environment: str | None = None
+    goal_facets: list[str] = []
 
 
 @app.post("/snippets", response_model=SnippetsResponse)
-async def snippets(body: SnippetsRequest) -> SnippetsResponse:
-    query = body.query.strip()
-    if not query:
+async def snippets(
+    query: str = Form(...),
+    application: str | None = Form(None),
+    goal: str | None = Form(None),
+    num_sources: int = Form(DEFAULT_NUM_SOURCES),
+    image: UploadFile | None = File(None),
+) -> SnippetsResponse:
+    raw_request = query.strip()
+    if not raw_request:
         raise HTTPException(422, "query must be non-empty")
+
+    plan_application = application
+    plan_environment: str | None = None
+    plan_facets: list[str] = []
+
+    if image is not None:
+        image_bytes = await image.read()
+        if not image_bytes:
+            raise HTTPException(400, "image upload was empty")
+        try:
+            plan = await asyncio.to_thread(
+                generate_multimodal_query_plan,
+                raw_request,
+                image_bytes=image_bytes,
+                image_mime=image.content_type or None,
+            )
+        except Exception as exc:
+            logger.exception("multimodal query planning failed")
+            raise HTTPException(
+                503, f"multimodal query planning failed: {type(exc).__name__}"
+            ) from exc
+        queries = plan.queries or [raw_request]
+        plan_application = application or plan.application or None
+        plan_environment = plan.environment or None
+        plan_facets = plan.goal_facets
+    else:
+        queries = [raw_request]
+
     try:
         result = await run_snippet_pipeline(
-            query=query,
-            application=body.application,
-            goal=body.goal,
-            num_sources=body.num_sources,
+            queries=queries,
+            application=plan_application,
+            goal=goal,
+            num_sources=num_sources,
         )
     except Exception as exc:
         logger.exception("snippets pipeline failed")
@@ -82,6 +114,10 @@ async def snippets(body: SnippetsRequest) -> SnippetsResponse:
         snippets=result.snippets,
         source_count=result.source_count,
         elapsed_ms=result.elapsed_ms,
+        queries_used=queries,
+        application=plan_application,
+        environment=plan_environment,
+        goal_facets=plan_facets,
     )
 
 

@@ -1,9 +1,14 @@
 """Hot-path snippet pipeline.
 
-Synchronous Tavily-shaped grounding: take a pre-refined query, fan out
-search + fetch + extract, summarize the top candidate pages in parallel,
-and return short snippets. No persistence, no per-page DraftPlan parse,
-no aggregate stage — those live in the slow /query path.
+Synchronous Tavily-shaped grounding: take 1+ pre-refined queries, fan
+out search + fetch + extract, summarize the top candidate pages in
+parallel, and return short snippets. No persistence, no per-page
+DraftPlan parse, no aggregate stage — those live in the slow /query
+path.
+
+When multiple queries are supplied (the multimodal path), URL dedup
+runs across the merged hit list so the aggregator sees coverage across
+facets rather than the same page surfacing from each query.
 """
 from __future__ import annotations
 
@@ -42,22 +47,27 @@ class SnippetResult:
 
 
 async def run_snippet_pipeline(
-    query: str,
+    queries: list[str],
     application: str | None,
     goal: str | None,
     num_sources: int = DEFAULT_NUM_SOURCES,
 ) -> SnippetResult:
     start = time.perf_counter()
     num_sources = max(1, min(num_sources, 10))
+    queries = [q.strip() for q in queries if q and q.strip()]
+    if not queries:
+        return SnippetResult(snippets=[], source_count=0, elapsed_ms=0.0)
 
-    hits = await fan_out_search([query])
+    hits = await fan_out_search(queries)
     urls: list[str] = []
     seen: set[str] = set()
     for h in hits:
         if h.url and h.url not in seen:
             seen.add(h.url)
             urls.append(h.url)
-    urls = urls[: num_sources * FETCH_OVERSAMPLE]
+    # Scale the URL budget with the number of queries so each facet has
+    # a fair shot at contributing a candidate page.
+    urls = urls[: num_sources * FETCH_OVERSAMPLE * max(1, len(queries))]
 
     fetches = await fan_out_fetch(urls)
     extractions = [
@@ -65,8 +75,6 @@ async def run_snippet_pipeline(
         for f in fetches
     ]
 
-    # Rank with the same heuristics the slow path uses. If the query was
-    # generic and nothing passes the gate, fall back to the longest pages.
     candidates = [e for e in extractions if is_parse_candidate(e)]
     if not candidates:
         candidates = sorted(extractions, key=lambda e: e.text_length, reverse=True)

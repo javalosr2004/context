@@ -4,15 +4,29 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
+from enrichment.cache import (
+    all_stats as cache_all_stats,
+    l1_partition_for_image,
+    l1_plan,
+    l2_partition_for_context,
+    l2_snippets,
+    l2_text_for_queries,
+)
+from enrichment.cache.grounding_cache import (
+    reset_request_cache_state,
+    snapshot_request_cache_state,
+)
 from enrichment.extract import extract
 from enrichment.fetch import fan_out_fetch
-from enrichment.models import ExtractedPage
+from enrichment.models import ExtractedPage, MultimodalQueryPlan
 from enrichment.multimodal_queries import generate_multimodal_query_plan
 from enrichment.pipeline import run_enrichment, run_quick_guide
-from enrichment.snippets import DEFAULT_NUM_SOURCES, Snippet, run_snippet_pipeline
+from enrichment.snippets import (
+    DEFAULT_NUM_SOURCES, Snippet, SnippetResult, run_snippet_pipeline,
+)
 from enrichment.storage import (
     create_job, get_aggregate_plan, get_aggregate_plans, get_job,
     get_quick_guide, init_db, reap_orphan_jobs, update_job,
@@ -69,31 +83,80 @@ class SnippetsResponse(BaseModel):
     snippets_by_query: dict[str, list[Snippet]] = {}
 
 
-@app.post("/snippets", response_model=SnippetsResponse)
-async def snippets(
+class PlanQueriesResponse(BaseModel):
+    application: str | None = None
+    environment: str | None = None
+    goal_facets: list[str] = []
+    queries: list[str]
+    cache_hit: bool = False
+
+
+def _apply_cache_headers(response: Response) -> None:
+    """Set X-Cache-L{1..5} based on this request's recorded hits/misses."""
+    state = snapshot_request_cache_state()
+    for layer in ("L1", "L2", "L3", "L4", "L5"):
+        bucket = state.get(layer)
+        if not bucket:
+            continue
+        value = "hit" if bucket.get("hit", 0) > 0 else "miss"
+        response.headers[f"X-Cache-{layer}"] = value
+
+
+@app.post("/plan_queries", response_model=PlanQueriesResponse)
+async def plan_queries(
+    response: Response,
     query: str = Form(...),
     application: str | None = Form(None),
-    goal: str | None = Form(None),
-    num_sources: int = Form(DEFAULT_NUM_SOURCES),
     image: UploadFile | None = File(None),
-) -> SnippetsResponse:
+) -> PlanQueriesResponse:
+    reset_request_cache_state()
     raw_request = query.strip()
     if not raw_request:
         raise HTTPException(422, "query must be non-empty")
 
-    plan_application = application
-    plan_environment: str | None = None
-    plan_facets: list[str] = []
-
+    image_bytes: bytes | None = None
     if image is not None:
         image_bytes = await image.read()
         if not image_bytes:
             raise HTTPException(400, "image upload was empty")
+
+    out = await _plan_queries(raw_request, application, image_bytes, image)
+    _apply_cache_headers(response)
+    return out
+
+
+async def _plan_queries(
+    raw_request: str,
+    application: str | None,
+    image_bytes: bytes | None,
+    image: UploadFile | None,
+) -> PlanQueriesResponse:
+    partition = l1_partition_for_image(image_bytes)
+    cached = await asyncio.to_thread(l1_plan.get, partition, raw_request)
+    if cached is not None:
+        plan_app = application or cached.get("application") or None
+        return PlanQueriesResponse(
+            application=plan_app,
+            environment=cached.get("environment") or None,
+            goal_facets=list(cached.get("goal_facets") or []),
+            queries=list(cached.get("queries") or [raw_request]),
+            cache_hit=True,
+        )
+
+    if image_bytes is None:
+        # No-image path: fall back to single-query plan with no LLM call.
+        # Match the legacy /snippets shape: empty goal_facets, empty env.
+        plan = MultimodalQueryPlan(
+            application=application or "",
+            environment="",
+            goal_facets=[],
+            queries=[raw_request],
+        )
+    else:
         logger.info(
-            "multimodal /snippets image received: %d bytes, mime=%r, "
-            "header=%r",
+            "multimodal /plan_queries image: %d bytes, mime=%r, header=%r",
             len(image_bytes),
-            image.content_type,
+            image.content_type if image else None,
             image_bytes[:16].hex(),
         )
         try:
@@ -101,11 +164,10 @@ async def snippets(
                 generate_multimodal_query_plan,
                 raw_request,
                 image_bytes=image_bytes,
-                image_mime=image.content_type or None,
+                image_mime=(image.content_type if image else None),
             )
         except Exception as exc:
             logger.exception("multimodal query planning failed")
-            # Persist the failing bytes so we can inspect what arrived.
             try:
                 from pathlib import Path
                 dump_dir = Path("/tmp/enrichment_failures")
@@ -119,33 +181,159 @@ async def snippets(
             raise HTTPException(
                 503, f"multimodal query planning failed: {type(exc).__name__}"
             ) from exc
-        queries = plan.queries or [raw_request]
-        plan_application = application or plan.application or None
-        plan_environment = plan.environment or None
-        plan_facets = plan.goal_facets
-    else:
-        queries = [raw_request]
+
+    plan_app = application or plan.application or None
+    queries = plan.queries or [raw_request]
+    payload = {
+        "application": plan.application,
+        "environment": plan.environment,
+        "goal_facets": list(plan.goal_facets),
+        "queries": list(queries),
+    }
+    # Populate L1 in the background — the embedding call is non-trivial
+    # but doesn't affect the response.
+    asyncio.create_task(asyncio.to_thread(l1_plan.put, partition, raw_request, payload))
+    return PlanQueriesResponse(
+        application=plan_app,
+        environment=plan.environment or None,
+        goal_facets=list(plan.goal_facets),
+        queries=list(queries),
+        cache_hit=False,
+    )
+
+
+class SnippetsForRequest(BaseModel):
+    queries: list[str]
+    application: str | None = None
+    environment: str | None = None
+    goal: str | None = None
+    num_sources: int = DEFAULT_NUM_SOURCES
+
+
+class SnippetsForResponse(BaseModel):
+    snippets: list[Snippet]
+    source_count: int
+    elapsed_ms: float
+    snippets_by_query: dict[str, list[Snippet]] = {}
+    cache_hit: bool = False
+
+
+@app.post("/snippets_for", response_model=SnippetsForResponse)
+async def snippets_for(
+    body: SnippetsForRequest, response: Response,
+) -> SnippetsForResponse:
+    reset_request_cache_state()
+    if not body.queries:
+        raise HTTPException(422, "queries must be non-empty")
+    out = await _snippets_for(body)
+    _apply_cache_headers(response)
+    return out
+
+
+async def _snippets_for(body: SnippetsForRequest) -> SnippetsForResponse:
+    queries = [q.strip() for q in body.queries if q and q.strip()]
+    if not queries:
+        return SnippetsForResponse(snippets=[], source_count=0, elapsed_ms=0.0)
+
+    partition = l2_partition_for_context(body.application, body.environment)
+    text = l2_text_for_queries(queries)
+    cached = await asyncio.to_thread(l2_snippets.get, partition, text)
+    if cached is not None:
+        return SnippetsForResponse(
+            snippets=[Snippet(**s) for s in cached.get("snippets", [])],
+            source_count=cached.get("source_count", 0),
+            elapsed_ms=0.0,
+            snippets_by_query={
+                q: [Snippet(**s) for s in v]
+                for q, v in (cached.get("snippets_by_query") or {}).items()
+            },
+            cache_hit=True,
+        )
 
     try:
         result = await run_snippet_pipeline(
             queries=queries,
-            application=plan_application,
-            goal=goal,
-            num_sources=num_sources,
+            application=body.application,
+            goal=body.goal,
+            num_sources=body.num_sources,
         )
     except Exception as exc:
         logger.exception("snippets pipeline failed")
         raise HTTPException(503, f"snippets pipeline failed: {type(exc).__name__}") from exc
-    return SnippetsResponse(
+
+    payload = _serialize_snippet_result(result)
+    asyncio.create_task(asyncio.to_thread(l2_snippets.put, partition, text, payload))
+    return SnippetsForResponse(
         snippets=result.snippets,
         source_count=result.source_count,
         elapsed_ms=result.elapsed_ms,
-        queries_used=queries,
-        application=plan_application,
-        environment=plan_environment,
-        goal_facets=plan_facets,
         snippets_by_query=result.snippets_by_query or {},
+        cache_hit=False,
     )
+
+
+def _serialize_snippet_result(result: SnippetResult) -> dict:
+    return {
+        "snippets": [s.model_dump() for s in result.snippets],
+        "source_count": result.source_count,
+        "snippets_by_query": {
+            q: [s.model_dump() for s in v]
+            for q, v in (result.snippets_by_query or {}).items()
+        },
+    }
+
+
+@app.post("/snippets", response_model=SnippetsResponse)
+async def snippets(
+    response: Response,
+    query: str = Form(...),
+    application: str | None = Form(None),
+    goal: str | None = Form(None),
+    num_sources: int = Form(DEFAULT_NUM_SOURCES),
+    image: UploadFile | None = File(None),
+) -> SnippetsResponse:
+    """Backward-compatible wrapper: plan_queries -> snippets_for."""
+    reset_request_cache_state()
+    raw_request = query.strip()
+    if not raw_request:
+        raise HTTPException(422, "query must be non-empty")
+
+    image_bytes: bytes | None = None
+    if image is not None:
+        image_bytes = await image.read()
+        if not image_bytes:
+            raise HTTPException(400, "image upload was empty")
+
+    plan = await _plan_queries(raw_request, application, image_bytes, image)
+
+    sf = await _snippets_for(
+        SnippetsForRequest(
+            queries=plan.queries or [raw_request],
+            application=plan.application,
+            environment=plan.environment,
+            goal=goal,
+            num_sources=num_sources,
+        )
+    )
+
+    out = SnippetsResponse(
+        snippets=sf.snippets,
+        source_count=sf.source_count,
+        elapsed_ms=sf.elapsed_ms,
+        queries_used=plan.queries or [raw_request],
+        application=plan.application,
+        environment=plan.environment,
+        goal_facets=plan.goal_facets,
+        snippets_by_query=sf.snippets_by_query or {},
+    )
+    _apply_cache_headers(response)
+    return out
+
+
+@app.get("/cache/stats")
+def cache_stats() -> dict:
+    """Per-layer hit/miss/eviction/size for tuning TTLs."""
+    return cache_all_stats()
 
 
 # ---- /extract & /summarize: cache-friendly building blocks ----------------

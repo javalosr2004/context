@@ -196,80 +196,28 @@ class TestGroundEdgeCases:
 
 
 # ---- ground_multimodal ----------------------------------------------------
+#
+# The wrapper no longer populates per-query cache from the multimodal
+# response — the enrichment-layer owns the L1 + L2 caches for that path
+# now. The remaining behavioral contract is "delegate to inner without
+# touching the local caches."
 
 class TestMultimodal:
-    def test_per_query_cache_populated_from_snippets_by_query(self) -> None:
+    def test_multimodal_delegates_to_inner_without_cache_writes(self) -> None:
         emb = ManualEmbeddings()
-        for q in ["q1", "q2", "q1-paraphrase"]:
-            emb.stage(q, _unit(0.0))
-        # Stage distinct vectors per query so partition keying still works
-        emb.stage("q1", _unit(0.0))
-        emb.stage("q2", _unit(math.pi / 2))           # orthogonal to q1
-        emb.stage("q1-paraphrase", _unit(0.05))        # close to q1
-
         s1 = _snip("https://q1-page")
-        s2 = _snip("https://q2-page")
         multi = MultimodalGroundResult(
-            snippets=[s1, s2],
-            queries_used=["q1", "q2"],
-            application="Google Colab", environment="macOS",
-            goal_facets=[],
-            snippets_by_query={"q1": [s1], "q2": [s2]},
-        )
-        inner = StubInner(multimodal_response=multi)
-        wrapper = _make_wrapper(embeddings=emb, inner=inner)
-        wrapper.ground_multimodal("deploy this", _image())
-
-        # A follow-up single-query ground should hit cache directly.
-        # BUT — the wrapper's single-query ground uses partition=unknown,
-        # while multimodal populated under partition=google-colab:macos.
-        # That's a documented behavior: paraphrased follow-ups within
-        # the same session reuse the multimodal context only via the
-        # multimodal call. Make sure that nuance is asserted.
-        assert inner.multimodal_calls == [("deploy this", 5)]
-
-    def test_empty_snippets_by_query_falls_back_to_coarse_population(self) -> None:
-        emb = ManualEmbeddings()
-        emb.stage("q1", _unit(0.0))
-        emb.stage("q2", _unit(math.pi / 2))
-        snippets = [_snip("https://shared")]
-        multi = MultimodalGroundResult(
-            snippets=snippets,
-            queries_used=["q1", "q2"],
-            application=None, environment=None, goal_facets=[],
-            snippets_by_query={},  # older server, no provenance
-        )
-        inner = StubInner(multimodal_response=multi)
-        wrapper = _make_wrapper(embeddings=emb, inner=inner)
-        # Should not raise; coarse fallback writes both queries.
-        wrapper.ground_multimodal("anything", _image())
-
-    def test_query_with_no_snippets_records_negative_cache(self) -> None:
-        emb = ManualEmbeddings()
-        emb.stage("good-q", _unit(0.0))
-        emb.stage("bad-q", _unit(math.pi / 2))
-        good = _snip("https://good")
-        multi = MultimodalGroundResult(
-            snippets=[good],
-            queries_used=["good-q", "bad-q"],
+            snippets=[s1], queries_used=["q1"],
             application="App", environment="OS", goal_facets=[],
-            snippets_by_query={"good-q": [good], "bad-q": []},
+            snippets_by_query={"q1": [s1]},
         )
         inner = StubInner(multimodal_response=multi)
-        clock = FakeClock()
-        neg = NegativeCache(embeddings=emb, clock=clock)
-        wrapper = CachedEnrichmentSnippetsProducer(
-            inner=inner,
-            query_cache=QueryCache(embeddings=emb, clock=clock),
-            negative_cache=neg,
-        )
-        wrapper.ground_multimodal("anything", _image())
-        from backend.grounding_cache import AppPartition
-        part = AppPartition.from_enrichment("App", "OS")
-        assert neg.is_known_miss(part, "bad-q", session_id="t") is True
-        assert neg.is_known_miss(part, "good-q", session_id="t") is False
+        wrapper = _make_wrapper(embeddings=emb, inner=inner)
+        out = wrapper.ground_multimodal("deploy this", _image())
+        assert inner.multimodal_calls == [("deploy this", 5)]
+        assert out.snippets == [s1]
 
-    def test_multimodal_with_no_queries_used_skips_cache_population(self) -> None:
+    def test_multimodal_with_no_queries_used_returns_empty(self) -> None:
         emb = ManualEmbeddings()
         multi = MultimodalGroundResult(
             snippets=[], queries_used=[],

@@ -19,9 +19,11 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+from enrichment.cache import l4_page, l5_summary
 from enrichment.config import settings
 from enrichment.extract import extract
 from enrichment.fetch import fan_out_fetch
+from enrichment.models import ExtractedPage
 from enrichment.parse import is_parse_candidate
 from enrichment.search import fan_out_search
 from enrichment.summarize import summarize_page_for_goal
@@ -83,11 +85,13 @@ async def run_snippet_pipeline(
     # a fair shot at contributing a candidate page.
     urls = urls[: num_sources * FETCH_OVERSAMPLE * max(1, len(queries))]
 
-    fetches = await fan_out_fetch(urls)
-    extractions = [
-        extract(f, application or "", goal or "")
-        for f in fetches
-    ]
+    extractions, missing_urls = _l4_split(urls, application or "", goal or "")
+    if missing_urls:
+        fetches = await fan_out_fetch(missing_urls)
+        for f in fetches:
+            page = extract(f, application or "", goal or "")
+            _l4_put(f.url, page)
+            extractions.append(page)
 
     candidates = [e for e in extractions if is_parse_candidate(e)]
     if not candidates:
@@ -102,10 +106,16 @@ async def run_snippet_pipeline(
     sem = asyncio.Semaphore(settings.fetch_concurrency)
 
     async def one(page):
+        cached = l5_summary.get(page.content_hash, goal, application)
+        if cached is not None:
+            return page, cached
         async with sem:
-            return page, await asyncio.to_thread(
+            content = await asyncio.to_thread(
                 summarize_page_for_goal, page, application, goal,
             )
+        if content:
+            l5_summary.put(page.content_hash, goal, application, content)
+        return page, content
 
     summarized = await asyncio.gather(
         *(one(p) for p in candidates), return_exceptions=True,
@@ -131,4 +141,57 @@ async def run_snippet_pipeline(
         source_count=len(snippets),
         elapsed_ms=elapsed_ms,
         snippets_by_query=snippets_by_query,
+    )
+
+
+# ---- L4 (per-URL fetch+extract cache) helpers --------------------------
+#
+# Cached value is the "page-pure" subset of ExtractedPage: structural
+# features that don't depend on the caller's app/goal. On retrieval we
+# recompute `application_term_present` and `goal_term_present` against
+# the current call's app/goal so `is_parse_candidate` still gates
+# correctly per request.
+
+_PAGE_CORE_FIELDS = (
+    "url", "content_hash", "http_status", "title", "text",
+    "text_length", "ordered_list_items", "imperative_verb_density",
+    "image_count",
+)
+
+
+def _l4_split(
+    urls: list[str], application: str, goal: str,
+) -> tuple[list[ExtractedPage], list[str]]:
+    hits: list[ExtractedPage] = []
+    missing: list[str] = []
+    for url in urls:
+        cached = None
+        try:
+            cached = l4_page.get(url)
+        except Exception:
+            cached = None
+        if cached:
+            hits.append(_hydrate_page(cached, application, goal))
+        else:
+            missing.append(url)
+    return hits, missing
+
+
+def _l4_put(url: str, page: ExtractedPage) -> None:
+    try:
+        l4_page.put(url, {k: getattr(page, k) for k in _PAGE_CORE_FIELDS})
+    except Exception:
+        pass
+
+
+def _hydrate_page(core: dict, application: str, goal: str) -> ExtractedPage:
+    text_lower = (core.get("text") or "").lower()
+    return ExtractedPage(
+        **{k: core.get(k) for k in _PAGE_CORE_FIELDS},
+        application_term_present=(
+            bool(application) and application.lower() in text_lower
+        ),
+        goal_term_present=any(
+            tok in text_lower for tok in (goal or "").lower().split() if len(tok) > 3
+        ),
     )

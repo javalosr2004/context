@@ -257,10 +257,25 @@ When to call tutorial_request_screen:
 - Call it without narration — do not announce "let me check your
   screen"; just call the tool.
 
-Never invent UI elements, labels, menu items, or layout details that
-are not visible in the attached screen or stated by the user. If you
-need a specific target and cannot see it, either request a screen or
-describe the target generically so the user can match it.
+Two different things you must never do:
+  1. Fabricate UI that does not exist in this product — invented
+     buttons, made-up menu names, hallucinated keyboard shortcuts. If
+     you are not confident a control exists, do not assert it.
+  2. State as visible something that the current screen does not show
+     (no "as you can see," "in the highlighted area," etc. about
+     elements that aren't actually on this screen).
+
+You SHOULD name canonical, well-known UI labels even when they are
+not on the current screen. "Add Emoji", "System Settings", "Sign in
+with Apple", "the Tools menu" — these are the right targets for
+off-screen steps in a flow you know. Bring the canonical label and
+mark confidence honestly; falling back to "the customization menu"
+or "the settings area" makes the step worse, not safer. A user who
+sees "click Add Emoji" can match it; a user who sees "click the
+customization menu" has to guess which of three menus you meant.
+
+If you genuinely do not know the label and cannot see it, call
+tutorial_request_screen and wait. Do not pad a vague step.
 
 When the next step is a user choice (no deterministic target):
 - If the user must make a FREE choice — which video to watch, which
@@ -378,41 +393,88 @@ overlay. Just answer, or just act.
 """.strip()
 
 
-TUTORIAL_TOOL_STREAM_PLANNER_SEARCH_OVERRIDE = """
-Searching the web (when available). If the web_search tool is offered,
-you may call it on the FIRST turn when the goal references specific
-apps, APIs, or workflows you need procedural knowledge about (e.g.
-"set up Stripe webhook", "configure GitHub Actions matrix"). Search at
-most once per turn. Do NOT search before tutorial_ask_user if the goal
-is ambiguous — clarify first, then search with a sharper query. Do NOT
-search when the screen already shows everything you need.
+TUTORIAL_TOOL_STREAM_WEB_SEARCH_TOOL_LINE = """
+  5. web_search(query) — search the open web. Use this to lock in the
+     exact UI labels and menu paths you will cite in your plan when
+     the goal references a specific app's controls. Results fold back
+     into your context automatically; you do not need to consume them
+     yourself. See "Searching the web" below for when to call it.
+""".rstrip()
+
+
+TUTORIAL_TOOL_STREAM_WEB_SEARCH_POLICY = """
+Searching the web:
+- PREFER to call web_search on your FIRST turn whenever the goal
+  references a specific app's menu path, settings page, or labeled
+  control. Examples: "create an emoji in Slack" (which submenu?),
+  "set up a Stripe webhook" (which dashboard section?), "enable
+  Two-Factor in GitHub" (which Settings tab?). The current screen
+  almost never shows the menu path you are about to navigate, so do
+  NOT treat a visible app as a reason to skip search.
+- The point is to LOCK IN exact UI labels — "Add Emoji" beats "the
+  customization menu", "Tools & settings" beats "the workspace
+  settings". Vendors rename controls constantly; your training data
+  is stale.
+- Search at most once per turn.
+
+When NOT to search:
+- The goal is fully platform-agnostic and the screen has the target
+  ("close this window", "click the highlighted button").
+- The user already answered the question via tutorial_ask_user and
+  the answer IS the label.
+- Mid-flow turns (turn 1+). By then you have ground truth from
+  screens; search again only if a step fails because a label
+  changed.
+
+Ordering vs. tutorial_ask_user:
+- Ambiguity beats curiosity. If the goal admits multiple workflows
+  (Slack vs. Discord, admin route vs. user route, web vs. desktop),
+  call tutorial_ask_user FIRST. After the answer arrives, search
+  with a sharper query.
 """.strip()
+
+
+_TOOLS_COUNT_ANCHOR = "with exactly four tools:"
+_TOOL_FOUR_END_ANCHOR = (
+    "See \"Clarifying the goal\" below for when this is warranted.\n"
+)
+_BODY_INSERT_ANCHOR = "You may also answer the user in plain text"
 
 
 def tool_stream_system_prompt(
     *, capped_head: bool, planner_search: bool = False
 ) -> str:
-    """Pick the planner system prompt for the active A/B mode.
+    """Assemble the planner system prompt for the active A/B mode.
 
-    When ``capped_head`` is True, the planner emits only the next 1–5
-    detailed steps per turn (STEP_TOOLS_ENABLED=on). Otherwise the
-    planner emits the full remaining plan each turn (today's default).
+    ``capped_head`` controls plan-length contract: True emits the next
+    1–5 detailed steps per turn (STEP_TOOLS_ENABLED=on); False emits
+    the full remaining plan each turn.
 
-    When ``planner_search`` is True, the planner has a native web_search
-    tool available (GROUNDING_STRATEGY=planner) and gets the extra
-    guidance block prepended.
-
-    Override blocks prepend the base prompt so single-source-of-truth
-    tooling/role text doesn't drift between A/B arms.
+    ``planner_search`` controls grounding strategy: True means a native
+    web_search tool is offered to the planner (GROUNDING_STRATEGY=
+    planner). We splice the fifth tool into the tool list and the
+    search policy into the body so the "exactly N tools" anchor stays
+    correct — a paragraph prepended on top of a hard-coded "four
+    tools" list loses to the list.
     """
-    prefix_blocks: list[str] = []
+    prompt = TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
     if planner_search:
-        prefix_blocks.append(TUTORIAL_TOOL_STREAM_PLANNER_SEARCH_OVERRIDE)
+        prompt = prompt.replace(
+            _TOOLS_COUNT_ANCHOR, "with exactly five tools:"
+        )
+        prompt = prompt.replace(
+            _TOOL_FOUR_END_ANCHOR,
+            _TOOL_FOUR_END_ANCHOR + TUTORIAL_TOOL_STREAM_WEB_SEARCH_TOOL_LINE + "\n",
+        )
+        prompt = prompt.replace(
+            _BODY_INSERT_ANCHOR,
+            TUTORIAL_TOOL_STREAM_WEB_SEARCH_POLICY
+            + "\n\n"
+            + _BODY_INSERT_ANCHOR,
+        )
     if capped_head:
-        prefix_blocks.append(TUTORIAL_TOOL_STREAM_CAPPED_HEAD_OVERRIDE)
-    if not prefix_blocks:
-        return TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
-    return "\n\n".join(prefix_blocks + [TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT])
+        prompt = TUTORIAL_TOOL_STREAM_CAPPED_HEAD_OVERRIDE + "\n\n" + prompt
+    return prompt
 
 USER_MESSAGE_INTENT_SYSTEM_PROMPT = """
 You are a routing classifier inside a macOS tutorial system.

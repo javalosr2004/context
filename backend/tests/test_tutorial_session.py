@@ -584,6 +584,109 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_capped_head_regrows_instead_of_completing(self) -> None:
+        """In STEP_TOOLS_ENABLED=on mode, exhausting the head should
+        loop back to the planner instead of dropping into the 'no more
+        steps' completion proposal — that's the whole point of the
+        capped-head A/B."""
+        events: list[Any] = []
+        # Plan 1: one step. After walking it, capped-head mode should
+        # call the planner again rather than propose completion.
+        # Plan 2: another step. After walking it, the planner asks for
+        # completion explicitly (the legitimate end).
+        first_plan = update_plan_call(click_item(human_text="First."))
+        second_plan = update_plan_call(click_item(human_text="Second."))
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=first_plan)],
+                [LLMToolCallEvent(tool_call=second_plan)],
+                [LLMToolCallEvent(tool_call=REQUEST_COMPLETION_CALL)],
+            ]
+        )
+        fast_llm = _FixedTextLLM('{"verdict":"on_track","evidence":"ok"}')
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+            step_tools_mode="capped_head",
+        )
+
+        await session.handle_user_message("go")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        # Without the capped-head branch, here the backend would propose
+        # completion ("no more steps to suggest") and require the user
+        # to reject. Instead, the planner is called and step_002 lands.
+        await wait_until(lambda: session.awaiting_step_id == "step_002")
+        await session.handle_step_started("step_002", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_002", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        # Now the planner calls tutorial_request_completion. THIS
+        # proposal is legitimate (LLM-sourced, not backend fallback).
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        proposals = [
+            e for e in events if isinstance(e, CompletionProposedEvent)
+        ]
+        # No spurious "no more steps to suggest" proposal anywhere.
+        for proposal in proposals:
+            self.assertNotIn("no more steps to suggest", proposal.reason)
+        self.assertEqual(
+            session.completed_step_ids, ["step_001", "step_002"]
+        )
+
+    async def test_full_plan_mode_unchanged_completion_path(self) -> None:
+        """Default mode (full_plan) keeps today's behavior: empty tail
+        after at least one walked step proposes completion."""
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=update_plan_call(click_item()))],
+                # Second planner call: emits nothing useful (text only).
+                [LLMTextDelta(text="done")],
+            ]
+        )
+        fast_llm = _FixedTextLLM('{"verdict":"on_track","evidence":"ok"}')
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+            # Default mode left explicit for clarity.
+            step_tools_mode="full_plan",
+        )
+
+        await session.handle_user_message("go")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        proposals = [
+            e for e in events if isinstance(e, CompletionProposedEvent)
+        ]
+        # In full_plan mode this proposal IS expected.
+        self.assertTrue(
+            any("no more steps to suggest" in p.reason for p in proposals)
+        )
+
     async def test_legacy_cancel_verification_clears_task(self) -> None:
         # _cancel_verification is still wired from input handlers as a
         # defensive no-op. Verify it cleans up a manually-spawned task.

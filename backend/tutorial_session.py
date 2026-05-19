@@ -28,6 +28,7 @@ import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 
 from backend.images import UploadedImage, downscale_for_verifier
 from backend.instruction_verifier import VerifierVerdict, classify_screen
@@ -35,6 +36,7 @@ from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEve
 from backend.enrichment_client import EnrichmentSnippetsProducer
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
+    tool_stream_system_prompt,
     generate_draft_plan,
     refine_search_query,
 )
@@ -176,6 +178,18 @@ class TutorialSession:
     web_ground: WebGroundProducer = field(default_factory=NullWebGroundProducer)
     # Last gate (verifier) elapsed_ms, consumed by the next turn summary.
     _last_gate_elapsed_ms: float | None = None
+    # A/B test (STEP_TOOLS_ENABLED): "full_plan" (today's default,
+    # planner emits the entire remaining plan each turn) vs
+    # "capped_head" (planner emits the next 1–5 detailed steps and the
+    # outer loop replans rather than proposing completion on head
+    # exhaustion). See backend/tutorial_guide.tool_stream_system_prompt.
+    step_tools_mode: Literal["full_plan", "capped_head"] = "full_plan"
+    # Bound for the capped_head replan-on-exhaustion loop: how many
+    # times in a row may the outer loop regrow the head without any
+    # newly-walked step before falling through to a completion proposal.
+    _capped_head_empty_grows: int = 0
+    _planner_calls: int = 0
+    _planner_elapsed_ms_total: float = 0.0
     status: str = "created"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -397,8 +411,27 @@ class TutorialSession:
         await self._cancel_current_task()
         await self._cancel_draft_task()
         await self._cancel_verification()
+        self._emit_mode_summary()
 
     # -------- Top-level session coroutine --------
+
+    def _emit_mode_summary(self) -> None:
+        """One-line A/B comparison log emitted at session end. Pair with
+        backend.tutorial_session_store closure to ensure it fires on all
+        exit paths (normal completion, abandonment, crash)."""
+        logger.info(
+            "[session] mode_summary",
+            extra={
+                "session_id": self.session_id,
+                "mode": self.step_tools_mode,
+                "total_planner_calls": self._planner_calls,
+                "total_planner_elapsed_ms": round(
+                    self._planner_elapsed_ms_total, 2
+                ),
+                "steps_walked": len(self.completed_step_ids),
+                "plan_steps_final": len(self.plan_steps),
+            },
+        )
 
     async def _run_session(self, refresh_screen: bool = False) -> None:
         try:
@@ -427,6 +460,25 @@ class TutorialSession:
                 if not unwalked:
                     if not any_steps_walked:
                         return
+                    # capped_head mode: head exhaustion is the expected
+                    # signal to regrow the tactical head, NOT to end the
+                    # tutorial. The planner is responsible for calling
+                    # tutorial_request_completion when the goal is
+                    # actually reached. Loop back to the planner unless
+                    # we've grown the head without progress too many
+                    # times in a row (defensive against an infinite loop
+                    # where the planner keeps emitting nothing useful).
+                    if self.step_tools_mode == "capped_head":
+                        self._capped_head_empty_grows += 1
+                        if self._capped_head_empty_grows <= 2:
+                            logger.info(
+                                "[session] capped_head regrowing tactical head",
+                                extra={
+                                    "session_id": self.session_id,
+                                    "grow_attempts": self._capped_head_empty_grows,
+                                },
+                            )
+                            continue
                     confirmed = await self._propose_completion(
                         "The planner has no more steps to suggest.",
                         "backend",
@@ -443,6 +495,9 @@ class TutorialSession:
                     for sid in self.completed_step_ids
                     if sid not in walk_started_completed
                 ]
+                if newly_completed:
+                    # Real progress — reset the capped-head regrowth guard.
+                    self._capped_head_empty_grows = 0
                 needs_fresh_screen = replan_requested or self._completed_changed_screen(
                     newly_completed
                 )
@@ -525,6 +580,8 @@ class TutorialSession:
                 llm_stream_elapsed_ms = round(
                     (time.perf_counter() - llm_started_at) * 1000, 2
                 )
+                self._planner_calls += 1
+                self._planner_elapsed_ms_total += llm_stream_elapsed_ms
             logger.info(
                 "[session] agent_loop turn",
                 extra={
@@ -766,7 +823,9 @@ class TutorialSession:
 
     def _build_llm_request(self) -> LLMRequest:
         request = LLMRequest(
-            system_prompt=TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
+            system_prompt=tool_stream_system_prompt(
+                capped_head=self.step_tools_mode == "capped_head"
+            ),
             user_text=render_history(
                 goal=self.goal or "",
                 history=self.history,

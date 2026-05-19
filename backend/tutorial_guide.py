@@ -75,6 +75,34 @@ Use confirmation when confidence is low, the target is ambiguous, or the
 screen may not match the expected state.
 """.strip()
 
+TUTORIAL_TOOL_STREAM_CAPPED_HEAD_OVERRIDE = """
+A/B mode override (STEP_TOOLS_ENABLED=on): the rules below replace any
+contradictory guidance further down about plan length.
+
+Plan length contract:
+- Each tutorial_update_plan call emits ONE list of 1 to 5 detailed
+  steps — the next 1–5 moves you can see clearly from the current
+  screen. You may emit fewer when only a few next moves are clear;
+  never more than 5.
+- This is still ONE tool call per turn. Do not emit multiple
+  tutorial_update_plan calls in a single response.
+- The head you emit is NOT the whole plan to the goal; it is the
+  immediate tactical window. The backend will call you again when the
+  walk reaches the end of your head, and you will emit the next 1–5
+  steps from whatever screen the user is on then.
+- Because the head is small, you do not need long confidence decay.
+  Use confidence to flag genuine uncertainty within the head (a step
+  whose target may not appear as expected), not to mark distance from
+  the cursor.
+- Do not call tutorial_request_completion just because your head ran
+  out. Only call it when the goal is visibly reached.
+
+Everything else (tools, refines_current, abandon_awaiting,
+user_choice semantics, stall handling, never inventing UI) is
+unchanged.
+""".strip()
+
+
 TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT = """
 You are Context, a macOS teaching assistant.
 
@@ -314,6 +342,26 @@ Do not narrate your reasoning. Do not announce what you are about to
 do. Do not refer to yourself as a planner, generator, tutorial, or
 overlay. Just answer, or just act.
 """.strip()
+
+
+def tool_stream_system_prompt(*, capped_head: bool) -> str:
+    """Pick the planner system prompt for the active A/B mode.
+
+    When ``capped_head`` is True, the planner emits only the next 1–5
+    detailed steps per turn (STEP_TOOLS_ENABLED=on). Otherwise the
+    planner emits the full remaining plan each turn (today's default).
+
+    The capped-head variant prepends an override block; the base prompt
+    is reused verbatim so single-source-of-truth tooling/role text
+    doesn't drift between the two arms of the test.
+    """
+    if not capped_head:
+        return TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
+    return (
+        TUTORIAL_TOOL_STREAM_CAPPED_HEAD_OVERRIDE
+        + "\n\n"
+        + TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
+    )
 
 USER_MESSAGE_INTENT_SYSTEM_PROMPT = """
 You are a routing classifier inside a macOS tutorial system.

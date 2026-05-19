@@ -62,6 +62,13 @@ class ExtraFieldsFormatter(logging.Formatter):
         return f"{base} | {formatted_extras}"
 
 
+def _step_tools_enabled_from_env() -> bool:
+    """Read the STEP_TOOLS_ENABLED A/B flag. Accepts the usual truthy
+    strings; anything else (including unset) is False."""
+    raw = os.environ.get("STEP_TOOLS_ENABLED", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def configure_logging() -> None:
     level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -325,6 +332,7 @@ def get_tutorial_session_store(
             fast_llm=fast_llm,
             verifier_llm=verifier_llm,
             web_ground=web_ground_producer_from_environment(),
+            step_tools_enabled=_step_tools_enabled_from_env(),
         )
         connection.app.state.tutorial_session_store = store
     return store

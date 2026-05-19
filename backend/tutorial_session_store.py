@@ -39,12 +39,14 @@ class TutorialSessionStore:
         web_ground: WebGroundProducer | None = None,
         fast_llm: MultimodalLLM | None = None,
         verifier_llm: MultimodalLLM | None = None,
+        step_tools_enabled: bool = False,
     ) -> None:
         self._llm = llm
         self._fast_llm = fast_llm or llm
         self._verifier_llm = verifier_llm or self._fast_llm
         self._session_id_factory = session_id_factory or (lambda: str(uuid4()))
         self._web_ground = web_ground or NullWebGroundProducer()
+        self._step_tools_enabled = step_tools_enabled
         self._reserved: set[str] = set()
         self._live: dict[str, TutorialSession] = {}
 
@@ -78,6 +80,9 @@ class TutorialSessionStore:
             verifier_llm=self._verifier_llm,
             emit=emit,
             web_ground=self._web_ground,
+            step_tools_mode=(
+                "capped_head" if self._step_tools_enabled else "full_plan"
+            ),
         )
         self._live[session_id] = session
         return session

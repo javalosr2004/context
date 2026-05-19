@@ -584,65 +584,6 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def test_rejected_merge_retries_planner_not_completion(self) -> None:
-        """Regression: a planner that emits abandon_awaiting=true with no
-        live awaiting step used to drop us into a 'planner has no more
-        steps' completion proposal. It should retry the planner instead."""
-        events: list[Any] = []
-        bad_call = TutorialToolCall(
-            name="tutorial_update_plan",
-            arguments=json.dumps(
-                {
-                    "plan_reasoning": "rewriting from scratch",
-                    "abandon_awaiting": True,
-                    "plan": [click_item()],
-                }
-            ),
-        )
-        llm = ScriptedLLM(
-            [
-                # First planner turn: emits an invalid plan call (rejected
-                # by merge — no live awaiting step to abandon).
-                [LLMToolCallEvent(tool_call=bad_call)],
-                # Second planner turn (the retry): valid plan.
-                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
-                # Final cleanup pass after the walk completes.
-                [LLMTextDelta(text="done")],
-            ]
-        )
-        fast_llm = _FixedTextLLM(
-            '{"verdict":"on_track","evidence":"ok"}'
-        )
-        session = TutorialSession(
-            session_id="s1",
-            llm=llm,
-            fast_llm=fast_llm,
-            emit=await collect_events(events),
-        )
-
-        await session.handle_user_message("go")
-        await send_next_requested_screen(session, events)
-        # The first planner call's update_plan was rejected by merge.
-        # The retry produced a valid plan whose first step is step_001.
-        await wait_until(lambda: session.awaiting_step_id == "step_001")
-        await session.handle_step_started("step_001", action_index=0)
-        await wait_until(lambda: session.status == "awaiting_confirmation")
-        await session.handle_user_confirmation(
-            "step_001", action_index=0, confirmed=True, note=None
-        )
-        await send_next_requested_screen(session, events)
-        await wait_until(
-            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
-        )
-        # Without the retry, the rejected merge would have dropped us
-        # straight into a completion proposal with zero walked steps.
-        # The retry produced a usable plan and the step actually ran.
-        self.assertEqual(session.completed_step_ids, ["step_001"])
-        # Two planner calls happened: the rejected one and the retry.
-        # (A third happens after step_001 completes; that one yields no
-        # plan and is the legitimate "no more steps" path.)
-        self.assertGreaterEqual(len(llm.requests), 2)
-
     async def test_legacy_cancel_verification_clears_task(self) -> None:
         # _cancel_verification is still wired from input handlers as a
         # defensive no-op. Verify it cleans up a manually-spawned task.

@@ -175,12 +175,6 @@ class TutorialSession:
     web_ground: WebGroundProducer = field(default_factory=NullWebGroundProducer)
     # Last gate (verifier) elapsed_ms, consumed by the next turn summary.
     _last_gate_elapsed_ms: float | None = None
-    # Set when an update_plan tool call was structurally rejected by
-    # plan_merge (e.g. abandon_awaiting=true with no live awaiting step).
-    # The outer loop retries the planner rather than falling through to
-    # the "no more steps" completion proposal, bounded by _plan_retry_count.
-    _plan_update_rejected: bool = False
-    _plan_retry_count: int = 0
     status: str = "created"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -430,24 +424,6 @@ class TutorialSession:
                     continue
                 unwalked = self._unwalked_steps()
                 if not unwalked:
-                    # If the planner emitted an update_plan that failed
-                    # structural validation (e.g. abandon_awaiting=true
-                    # with no live awaiting step), retry the planner
-                    # instead of declaring completion. The rejection
-                    # reason is already in history for the next call.
-                    if self._plan_update_rejected and self._plan_retry_count < 2:
-                        self._plan_retry_count += 1
-                        self._plan_update_rejected = False
-                        logger.info(
-                            "[session] retrying planner after rejected merge",
-                            extra={
-                                "session_id": self.session_id,
-                                "retry": self._plan_retry_count,
-                            },
-                        )
-                        continue
-                    self._plan_update_rejected = False
-                    self._plan_retry_count = 0
                     if not any_steps_walked:
                         return
                     confirmed = await self._propose_completion(
@@ -1286,17 +1262,11 @@ class TutorialSession:
             self.history.append(
                 HistoryEntry(
                     role="tool",
-                    content=(
-                        f"{call.name} rejected: {error} "
-                        "Re-issue tutorial_update_plan with a valid plan."
-                    ),
+                    content=f"{call.name} rejected: {error}",
                 )
             )
-            self._plan_update_rejected = True
             return
 
-        self._plan_update_rejected = False
-        self._plan_retry_count = 0
         self.plan_steps = result.plan_steps
         self.step_counter = result.step_counter
 

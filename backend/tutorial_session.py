@@ -25,6 +25,7 @@ import base64
 import json
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -52,6 +53,8 @@ from backend.tutorial_schema import DraftPlan, TutorialAction, TutorialPlan, Tut
 from backend.web_ground import NullWebGroundProducer, WebGroundProducer, WebGroundSnippet
 from backend.tutorial_session_events import (
     AgentTurnEvent,
+    AssistantQuestion,
+    AssistantQuestionEvent,
     AwaitingConfirmationEvent,
     CompletionProposedEvent,
     DraftPlanReadyEvent,
@@ -79,15 +82,18 @@ from backend.plan_merge import (
     merge_plan_tail,
 )
 from backend.tutorial_tools import (
+    ASK_USER_TOOL_NAME,
     REQUEST_COMPLETION_TOOL_NAME,
     REQUEST_SCREEN_TOOL_NAME,
     UPDATE_PLAN_TOOL_NAME,
     TutorialToolCall,
     TutorialToolCallError,
     candidates_from_arguments,
+    is_ask_user_call,
     is_request_completion_call,
     is_request_screen_call,
     is_update_plan_call,
+    parse_ask_user_arguments,
     parse_request_completion_reason,
     parse_request_screen_reason,
     parse_update_plan_arguments,
@@ -155,6 +161,14 @@ class TutorialSession:
     pending_completion_response: (
         asyncio.Future[tuple[bool, str | None]] | None
     ) = None
+    # Turn-0 clarifying-question flow. ``tutorial_ask_user`` is valid
+    # only on the very first agent turn of a goal; once we commit to a
+    # plan (or successfully ask once) the gate flips closed and any
+    # later ask_user call is rejected as a tool-role message.
+    pending_question_batch_id: str | None = None
+    pending_question_ids: tuple[str, ...] | None = None
+    pending_question_response: asyncio.Future[dict[str, str]] | None = None
+    turn_zero_consumed: bool = False
     pending_step_starts: set[tuple[str, int]] = field(default_factory=set)
     pending_step_confirmations: dict[tuple[str, int], tuple[bool, str]] = field(
         default_factory=dict
@@ -261,6 +275,10 @@ class TutorialSession:
         self.prev_active_step_id = None
         self.last_action_kind = None
         self.screen_is_stale = False
+        self.turn_zero_consumed = False
+        self.pending_question_batch_id = None
+        self.pending_question_ids = None
+        self.pending_question_response = None
         self.history.append(HistoryEntry(role="user", content=text))
 
     async def handle_user_screen(
@@ -354,6 +372,73 @@ class TutorialSession:
         cleaned_note = (note or "").strip() or None
         if not future.done():
             future.set_result((confirmed, cleaned_note))
+
+    async def handle_user_answer(
+        self,
+        batch_id: str,
+        answers: list[tuple[str, str]],
+    ) -> None:
+        """Resolve a pending AssistantQuestionEvent batch.
+
+        ``answers`` is a list of (question_id, text) pairs. Every
+        question_id from the in-flight batch must be present exactly
+        once; missing or extra ids drop the response so the overlay can
+        retry. Empty strings are also rejected.
+        """
+        future = self.pending_question_response
+        expected_ids = self.pending_question_ids
+        expected_batch = self.pending_question_batch_id
+        logger.info(
+            "[session] user_answer",
+            extra={
+                "session_id": self.session_id,
+                "batch_id": batch_id,
+                "answer_count": len(answers),
+                "expected_batch_id": expected_batch,
+                "expected_question_ids": list(expected_ids or ()),
+                "had_pending": future is not None,
+            },
+        )
+        if future is None or expected_ids is None or expected_batch is None:
+            return
+        if batch_id != expected_batch:
+            logger.warning(
+                "[session] user_answer batch_id mismatch; dropping",
+                extra={
+                    "session_id": self.session_id,
+                    "batch_id": batch_id,
+                    "expected_batch_id": expected_batch,
+                },
+            )
+            return
+        cleaned: dict[str, str] = {}
+        for qid, text in answers:
+            stripped = (text or "").strip()
+            if not stripped:
+                logger.warning(
+                    "[session] user_answer blank text; dropping batch",
+                    extra={"session_id": self.session_id, "question_id": qid},
+                )
+                return
+            if qid in cleaned:
+                logger.warning(
+                    "[session] user_answer duplicate question_id; dropping batch",
+                    extra={"session_id": self.session_id, "question_id": qid},
+                )
+                return
+            cleaned[qid] = stripped
+        if set(cleaned.keys()) != set(expected_ids):
+            logger.warning(
+                "[session] user_answer question_ids do not match batch; dropping",
+                extra={
+                    "session_id": self.session_id,
+                    "got_ids": sorted(cleaned.keys()),
+                    "expected_ids": sorted(expected_ids),
+                },
+            )
+            return
+        if not future.done():
+            future.set_result(cleaned)
 
     async def handle_user_confirmation(
         self,
@@ -686,12 +771,17 @@ class TutorialSession:
                 (c for c in tool_calls if is_request_completion_call(c)),
                 None,
             )
+            ask_user_call = next(
+                (c for c in tool_calls if is_ask_user_call(c)),
+                None,
+            )
             unknown_calls = [
                 c
                 for c in tool_calls
                 if not is_update_plan_call(c)
                 and not is_request_screen_call(c)
                 and not is_request_completion_call(c)
+                and not is_ask_user_call(c)
             ]
             for call in unknown_calls:
                 self.history.append(
@@ -700,11 +790,79 @@ class TutorialSession:
                         content=(
                             f"{call.name} rejected: unknown tool. Available "
                             f"tools are {UPDATE_PLAN_TOOL_NAME}, "
-                            f"{REQUEST_SCREEN_TOOL_NAME}, and "
-                            f"{REQUEST_COMPLETION_TOOL_NAME}."
+                            f"{REQUEST_SCREEN_TOOL_NAME}, "
+                            f"{REQUEST_COMPLETION_TOOL_NAME}, and "
+                            f"{ASK_USER_TOOL_NAME}."
                         ),
                     )
                 )
+
+            # tutorial_ask_user is a turn-0 gate: it must be the sole
+            # tool call, and it cannot appear after the planner has
+            # already committed (turn_zero_consumed=True). When rejected,
+            # we drop it and let the rest of the turn proceed normally.
+            if ask_user_call is not None:
+                other_calls_present = (
+                    bool(update_plan_calls)
+                    or request_screen_call is not None
+                    or request_completion_call is not None
+                )
+                if self.turn_zero_consumed:
+                    self.history.append(
+                        HistoryEntry(
+                            role="tool",
+                            content=(
+                                f"{ASK_USER_TOOL_NAME} rejected: valid only "
+                                "on the first turn, before any "
+                                f"{UPDATE_PLAN_TOOL_NAME}. Proceed with "
+                                "your plan using the information you have."
+                            ),
+                        )
+                    )
+                    ask_user_call = None
+                elif other_calls_present:
+                    self.history.append(
+                        HistoryEntry(
+                            role="tool",
+                            content=(
+                                f"{ASK_USER_TOOL_NAME} rejected: must be the "
+                                "sole tool call in its turn. Since you "
+                                "also called another tool, that signals "
+                                "you had enough context to plan. The "
+                                "ask_user call was dropped; other tools "
+                                "are being processed."
+                            ),
+                        )
+                    )
+                    ask_user_call = None
+
+            if ask_user_call is not None:
+                try:
+                    await self._execute_ask_user_call(ask_user_call)
+                except TutorialToolCallError as error:
+                    logger.warning(
+                        "[session] invalid ask_user call",
+                        extra={
+                            "session_id": self.session_id,
+                            "code": error.code,
+                            "message": error.message,
+                        },
+                    )
+                    self.history.append(
+                        HistoryEntry(
+                            role="tool",
+                            content=(
+                                f"{ASK_USER_TOOL_NAME} rejected: "
+                                f"{error.message}. Proceed without asking."
+                            ),
+                        )
+                    )
+                _log_turn_summary()
+                # Either the question was answered (history now has the
+                # Q&A) or the call was rejected with a tool note. Either
+                # way the gate is closed for this goal.
+                self.turn_zero_consumed = True
+                continue
 
             # Only the most recent update_plan in a turn is honored; earlier
             # ones would be immediately overwritten and just confuse history.
@@ -726,6 +884,9 @@ class TutorialSession:
                     await self._execute_plan_update_call(update_plan_calls[-1])
                 finally:
                     merge_elapsed_ms = (time.perf_counter() - merge_started_at) * 1000.0
+                # Once the planner has emitted any plan, the turn-0
+                # clarifying-question gate is closed for this goal.
+                self.turn_zero_consumed = True
 
             if request_screen_call is not None:
                 try:
@@ -1710,6 +1871,78 @@ class TutorialSession:
         self.history.append(HistoryEntry(role="user", content=history_note))
         return False
 
+    async def _execute_ask_user_call(self, call: TutorialToolCall) -> None:
+        """Emit a clarifying-question batch and block until the user replies.
+
+        On resolution, the question prompts and the user's answers are
+        appended to ``self.history`` as a single assistant/user pair so
+        the next planner turn sees them as natural dialogue context.
+        """
+        arguments = parse_ask_user_arguments(call)  # may raise; caller handles
+        batch_id = uuid.uuid4().hex
+        question_ids = tuple(q.question_id for q in arguments.questions)
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, str]] = loop.create_future()
+        self.pending_question_batch_id = batch_id
+        self.pending_question_ids = question_ids
+        self.pending_question_response = future
+
+        await self.emit(
+            AssistantQuestionEvent(
+                batch_id=batch_id,
+                reason=arguments.reason,
+                questions=[
+                    AssistantQuestion(
+                        question_id=q.question_id,
+                        prompt=q.question,
+                        response_mode=q.response_mode,
+                        options=list(q.options),
+                        allows_custom_answer=True,
+                    )
+                    for q in arguments.questions
+                ],
+            )
+        )
+        self.status = "needs_answer"
+        await self.emit(StatusChangedEvent(status="needs_answer", label="Waiting for you"))
+        logger.info(
+            "[session] ask_user awaiting",
+            extra={
+                "session_id": self.session_id,
+                "batch_id": batch_id,
+                "question_ids": list(question_ids),
+                "reason": arguments.reason,
+            },
+        )
+
+        try:
+            answers = await future
+        finally:
+            self.pending_question_batch_id = None
+            self.pending_question_ids = None
+            self.pending_question_response = None
+
+        prompt_lines = [f"I need to clarify {len(arguments.questions)} thing(s) before planning:"]
+        for index, q in enumerate(arguments.questions, start=1):
+            prompt_lines.append(f"  {index}. {q.question}")
+        answer_lines = []
+        for index, q in enumerate(arguments.questions, start=1):
+            answer_lines.append(f"  {index}. {answers[q.question_id]}")
+        self.history.append(
+            HistoryEntry(role="assistant", content="\n".join(prompt_lines))
+        )
+        self.history.append(
+            HistoryEntry(role="user", content="\n".join(answer_lines))
+        )
+        logger.info(
+            "[session] ask_user resolved",
+            extra={
+                "session_id": self.session_id,
+                "batch_id": batch_id,
+                "answer_chars_total": sum(len(v) for v in answers.values()),
+            },
+        )
     async def _execute_screen_request(self, call: TutorialToolCall) -> None:
         try:
             reason = parse_request_screen_reason(call)

@@ -18,7 +18,15 @@ import json
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from backend.plan_merge import TailCandidate
 from backend.tutorial_schema import (
@@ -34,10 +42,12 @@ from backend.tutorial_schema import (
 UPDATE_PLAN_TOOL_NAME = "tutorial_update_plan"
 REQUEST_SCREEN_TOOL_NAME = "tutorial_request_screen"
 REQUEST_COMPLETION_TOOL_NAME = "tutorial_request_completion"
+ASK_USER_TOOL_NAME = "tutorial_ask_user"
 TUTORIAL_TOOL_NAMES = frozenset({
     UPDATE_PLAN_TOOL_NAME,
     REQUEST_SCREEN_TOOL_NAME,
     REQUEST_COMPLETION_TOOL_NAME,
+    ASK_USER_TOOL_NAME,
 })
 
 INVALID_TOOL_CALL = "invalid_tool_call"
@@ -294,11 +304,89 @@ class TutorialRequestCompletionArguments(_StrictModel):
     )
 
 
+class AskUserQuestion(_StrictModel):
+    question_id: str = Field(
+        min_length=1,
+        description=(
+            "Short kebab-case slug unique within this call. The user's "
+            "answer comes back keyed by this id. Examples: 'email-client', "
+            "'sharing-scope'."
+        ),
+    )
+    question: str = Field(
+        min_length=1,
+        description=(
+            "One concrete question, <= 20 words, plain language. Avoid "
+            "jargon and yes/no framing when an options choice would be "
+            "clearer."
+        ),
+    )
+    response_mode: Literal["options", "free_text"] = Field(
+        description=(
+            "'options' (preferred): present 2-4 suggested answers; the "
+            "user may still write their own. 'free_text': no suggestions, "
+            "only a text field. Default to 'options' unless the answer "
+            "space is genuinely open-ended (a name, a URL, a freeform "
+            "query)."
+        ),
+    )
+    options: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "2-4 short suggestions (<= 6 words each, mutually exclusive) "
+            "when response_mode='options'. Must be empty when "
+            "response_mode='free_text'. The user can always supply their "
+            "own answer either way; these are suggestions, not an "
+            "exclusive set."
+        ),
+    )
+
+
+class TutorialAskUserArguments(_StrictModel):
+    reason: str = Field(
+        min_length=1,
+        description=(
+            "One sentence: what about the goal is ambiguous and why these "
+            "answers change the plan. Logged and shown as a subline above "
+            "the question stack."
+        ),
+    )
+    questions: list[AskUserQuestion] = Field(
+        min_length=1,
+        max_length=4,
+        description=(
+            "1-4 independent clarifying questions to ask in a single "
+            "batch. Bundle related decisions instead of chaining multiple "
+            "ask_user calls -- you only get one shot at the user before "
+            "planning. Each question must have a unique question_id."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> "TutorialAskUserArguments":
+        seen: set[str] = set()
+        for q in self.questions:
+            if q.question_id in seen:
+                raise ValueError(f"Duplicate question_id: {q.question_id!r}")
+            seen.add(q.question_id)
+            if q.response_mode == "options" and len(q.options) < 2:
+                raise ValueError(
+                    f"{q.question_id}: response_mode='options' requires 2-4 options."
+                )
+            if q.response_mode == "free_text" and q.options:
+                raise ValueError(
+                    f"{q.question_id}: response_mode='free_text' must omit options."
+                )
+        return self
+
+
 class _ToolCallPayload(_StrictModel):
     name: Literal[
         "tutorial_update_plan",
         "tutorial_request_screen",
         "tutorial_request_completion",
+        "tutorial_ask_user",
     ]
     arguments: dict[str, Any]
 
@@ -310,6 +398,7 @@ class _ToolCallList(_StrictModel):
 _tool_call_list_adapter = TypeAdapter(_ToolCallList)
 _update_plan_adapter = TypeAdapter(TutorialUpdatePlanArguments)
 _request_completion_adapter = TypeAdapter(TutorialRequestCompletionArguments)
+_ask_user_adapter = TypeAdapter(TutorialAskUserArguments)
 
 
 # ---------------- Schema export (for LLM clients) ----------------
@@ -354,6 +443,23 @@ def openai_tutorial_tool_definitions() -> list[dict[str, Any]]:
                 "is met. Do not use this as a way to abandon a stuck plan."
             ),
             model=TutorialRequestCompletionArguments,
+        ),
+        _build_openai_tool(
+            name=ASK_USER_TOOL_NAME,
+            description=(
+                "Ask the user 1-4 clarifying questions BEFORE planning when "
+                "their stated goal is genuinely ambiguous and multiple "
+                "reasonable workflows fit. Valid ONLY on the first turn, "
+                "before any tutorial_update_plan. Bundle independent "
+                "questions into a single call (up to 4) rather than "
+                "chaining ask_user calls -- every call costs a human "
+                "round-trip. Prefer response_mode='options' with 2-4 "
+                "mutually exclusive suggestions; the user can always "
+                "supply their own answer. Do not use this to confirm "
+                "details you can verify on screen or to ask permission to "
+                "start."
+            ),
+            model=TutorialAskUserArguments,
         ),
     ]
 
@@ -427,6 +533,25 @@ def is_update_plan_call(call: TutorialToolCall) -> bool:
 
 def is_request_completion_call(call: TutorialToolCall) -> bool:
     return call.name == REQUEST_COMPLETION_TOOL_NAME
+
+
+def is_ask_user_call(call: TutorialToolCall) -> bool:
+    return call.name == ASK_USER_TOOL_NAME
+
+
+def parse_ask_user_arguments(call: TutorialToolCall) -> TutorialAskUserArguments:
+    if call.name != ASK_USER_TOOL_NAME:
+        raise TutorialToolCallError(
+            INVALID_TOOL_CALL,
+            f"Expected {ASK_USER_TOOL_NAME}, got {call.name!r}.",
+        )
+    try:
+        return _ask_user_adapter.validate_json(call.arguments)
+    except ValidationError as error:
+        raise TutorialToolCallError(
+            INVALID_TOOL_ARGUMENTS,
+            f"Invalid arguments for {call.name}: {error}",
+        ) from error
 
 
 def parse_request_completion_reason(call: TutorialToolCall) -> str:

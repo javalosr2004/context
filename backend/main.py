@@ -32,6 +32,7 @@ from backend.tutorial_session_events import (
     ServerSessionEvent,
     SessionReadyEvent,
     StepStartedEvent,
+    UserAnswerEvent,
     TutorialSessionResponse,
     UserCompletionResponseEvent,
     UserConfirmationEvent,
@@ -284,6 +285,12 @@ async def dispatch_client_event(session, event) -> None:  # type: ignore[no-unty
         await session.handle_user_completion_response(
             event.confirmed,
             event.note,
+        )
+        return
+    if isinstance(event, UserAnswerEvent):
+        await session.handle_user_answer(
+            event.batch_id,
+            [(answer.question_id, answer.text) for answer in event.answers],
         )
         return
     if isinstance(event, UserStepAnnotationEvent):

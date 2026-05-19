@@ -38,10 +38,22 @@ class UserMessageEvent(TutorialSessionEventModel):
     uploaded_images: list[ScreenSnapshot] = Field(default_factory=list)
 
 
-class UserAnswerEvent(TutorialSessionEventModel):
-    type: Literal["user_answer"]
+class UserAnswer(TutorialSessionEventModel):
     question_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
+
+
+class UserAnswerEvent(TutorialSessionEventModel):
+    """User's reply to an AssistantQuestionEvent batch.
+
+    Every question_id from the batch must appear exactly once in
+    ``answers`` for the backend to accept the response. The overlay is
+    responsible for collecting all answers before submitting.
+    """
+
+    type: Literal["user_answer"]
+    batch_id: str = Field(min_length=1)
+    answers: list[UserAnswer] = Field(min_length=1)
 
 
 class StepStartedEvent(TutorialSessionEventModel):
@@ -140,10 +152,29 @@ class StatusChangedEvent(TutorialSessionEventModel):
     label: str
 
 
+class AssistantQuestion(TutorialSessionEventModel):
+    question_id: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    response_mode: Literal["options", "free_text"]
+    options: list[str] = Field(default_factory=list)
+    # Always true in v1 — the overlay always exposes an "Other..." field
+    # alongside any suggested options. Kept on the wire so the Swift side
+    # can branch on it later without a protocol change.
+    allows_custom_answer: bool = True
+
+
 class AssistantQuestionEvent(TutorialSessionEventModel):
+    """A batch of 1-4 clarifying questions the planner needs answered
+    before it commits to a plan.
+
+    The overlay renders all questions at once and waits to collect every
+    answer before sending a UserAnswerEvent keyed by ``batch_id``.
+    """
+
     type: Literal["assistant_question"] = "assistant_question"
-    question_id: str
-    prompt: str
+    batch_id: str
+    reason: str
+    questions: list[AssistantQuestion]
 
 
 class DraftPlanReadyEvent(TutorialSessionEventModel):

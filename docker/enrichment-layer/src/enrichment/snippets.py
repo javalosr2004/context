@@ -44,6 +44,11 @@ class SnippetResult:
     snippets: list[Snippet]
     source_count: int
     elapsed_ms: float
+    # Provenance: which input query each snippet's source URL surfaced
+    # from. A URL discovered by multiple queries appears under each. The
+    # backend uses this to populate its per-query cache from a single
+    # multimodal /snippets call.
+    snippets_by_query: dict[str, list[Snippet]] | None = None
 
 
 async def run_snippet_pipeline(
@@ -56,15 +61,24 @@ async def run_snippet_pipeline(
     num_sources = max(1, min(num_sources, 10))
     queries = [q.strip() for q in queries if q and q.strip()]
     if not queries:
-        return SnippetResult(snippets=[], source_count=0, elapsed_ms=0.0)
+        return SnippetResult(
+            snippets=[], source_count=0, elapsed_ms=0.0,
+            snippets_by_query={},
+        )
 
     hits = await fan_out_search(queries)
     urls: list[str] = []
     seen: set[str] = set()
+    url_to_queries: dict[str, list[str]] = {}
     for h in hits:
-        if h.url and h.url not in seen:
+        if not h.url:
+            continue
+        if h.url not in seen:
             seen.add(h.url)
             urls.append(h.url)
+            url_to_queries[h.url] = []
+        if h.query not in url_to_queries[h.url]:
+            url_to_queries[h.url].append(h.query)
     # Scale the URL budget with the number of queries so each facet has
     # a fair shot at contributing a candidate page.
     urls = urls[: num_sources * FETCH_OVERSAMPLE * max(1, len(queries))]
@@ -98,6 +112,7 @@ async def run_snippet_pipeline(
     )
 
     snippets: list[Snippet] = []
+    snippets_by_query: dict[str, list[Snippet]] = {q: [] for q in queries}
     for entry in summarized:
         if isinstance(entry, BaseException):
             logger.warning("snippet summarization raised: %s", entry)
@@ -105,13 +120,15 @@ async def run_snippet_pipeline(
         page, content = entry
         if not content:
             continue
-        snippets.append(
-            Snippet(title=page.title or "", url=page.url, content=content)
-        )
+        snippet = Snippet(title=page.title or "", url=page.url, content=content)
+        snippets.append(snippet)
+        for q in url_to_queries.get(page.url, []):
+            snippets_by_query.setdefault(q, []).append(snippet)
 
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     return SnippetResult(
         snippets=snippets,
         source_count=len(snippets),
         elapsed_ms=elapsed_ms,
+        snippets_by_query=snippets_by_query,
     )

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -36,6 +36,13 @@ class MultimodalGroundResult:
     application: str | None
     environment: str | None
     goal_facets: list[str]
+    # Per-query provenance, when the upstream provides it. Populated by
+    # the split enrichment-layer (``/snippets`` returns
+    # ``snippets_by_query``). Empty dict if the server is older — the
+    # cache wrapper has a coarse fallback in that case.
+    snippets_by_query: dict[str, list[WebGroundSnippet]] = field(
+        default_factory=dict
+    )
 
 
 class EnrichmentSnippetsProducer:
@@ -187,6 +194,7 @@ class EnrichmentSnippetsProducer:
             application=_as_optional_str(body.get("application")),
             environment=_as_optional_str(body.get("environment")),
             goal_facets=_as_str_list(body.get("goal_facets")),
+            snippets_by_query=_parse_snippets_by_query(body.get("snippets_by_query")),
         )
 
     def _post_form(
@@ -257,3 +265,19 @@ def _as_str_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [v.strip() for v in value if isinstance(v, str) and v.strip()]
+
+
+def _parse_snippets_by_query(
+    value: object,
+) -> dict[str, list[WebGroundSnippet]]:
+    """Parse the per-query provenance map from a /snippets response.
+    Missing or malformed → empty dict (cache wrapper falls back coarsely)."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, list[WebGroundSnippet]] = {}
+    for query, raw_list in value.items():
+        if not isinstance(query, str) or not isinstance(raw_list, list):
+            continue
+        snippets = parse_enrichment_results({"snippets": raw_list})
+        out[query] = snippets
+    return out

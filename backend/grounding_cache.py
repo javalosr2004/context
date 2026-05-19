@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Generic, Protocol, TypeVar
+from typing import Any, Generic, Protocol, TypeVar
 
 from backend.embeddings_client import EmbeddingsClient, cosine
 
@@ -119,8 +119,11 @@ class CacheStats:
 DEFAULT_QUERY_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_QUERY_SIMILARITY_THRESHOLD = 0.88
 DEFAULT_MAX_QUERY_ENTRIES = 2048
+DEFAULT_NEGATIVE_TTL_SECONDS = 10 * 60
+DEFAULT_NEGATIVE_MAX_ENTRIES = 512
 KEY_PREVIEW_MAX_LEN = 60
 NEAR_MISS_MARGIN = 0.05  # log a near_miss when within this much of threshold
+_NEGATIVE_SENTINEL = ["__miss__"]
 
 
 class QueryCache:
@@ -146,6 +149,7 @@ class QueryCache:
         ttl_seconds: float = DEFAULT_QUERY_TTL_SECONDS,
         similarity_threshold: float = DEFAULT_QUERY_SIMILARITY_THRESHOLD,
         max_entries: int = DEFAULT_MAX_QUERY_ENTRIES,
+        layer_name: str | None = None,
     ) -> None:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
@@ -159,9 +163,10 @@ class QueryCache:
         self._ttl = ttl_seconds
         self._threshold = similarity_threshold
         self._max_entries = max_entries
+        self._layer_name = layer_name or self.LAYER_NAME
         # MRU at end. Brute-force scan is fine at this scale; swap for an
         # ANN index when the entry count justifies the dependency.
-        self._entries: list[_Entry[list[str]]] = []
+        self._entries: list[_Entry[list[Any]]] = []
 
     # ---- Public API --------------------------------------------------------
 
@@ -171,7 +176,7 @@ class QueryCache:
         query: str,
         *,
         session_id: str,
-    ) -> list[str] | None:
+    ) -> list[Any] | None:
         normalized = query.strip()
         if not normalized:
             self._log_miss(partition, normalized, session_id, elapsed_ms=0.0,
@@ -182,12 +187,12 @@ class QueryCache:
         embedding = self._embed(normalized, session_id=session_id)
         if embedding is None:
             elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
-            self._stats.layer(self.LAYER_NAME).errors += 1
-            self._stats.layer(self.LAYER_NAME).misses += 1
+            self._stats.layer(self._layer_name).errors += 1
+            self._stats.layer(self._layer_name).misses += 1
             logger.warning(
-                "[cache] query error",
+                f"[cache] {self._layer_name} error",
                 extra={
-                    "layer": self.LAYER_NAME, "event": "error",
+                    "layer": self._layer_name, "event": "error",
                     "session_id": session_id, "partition": partition.slug(),
                     "key_preview": _preview(normalized),
                     "reason": "embedder_failed",
@@ -200,7 +205,7 @@ class QueryCache:
         now = self._clock.now()
         self._evict_expired(now)
 
-        candidates: list[tuple[_Entry[list[str]], float]] = []
+        candidates: list[tuple[_Entry[list[Any]], float]] = []
         for entry in self._entries:
             if entry.partition != partition:
                 continue
@@ -219,11 +224,11 @@ class QueryCache:
 
         if best_sim >= self._threshold:
             self._touch(best_entry)
-            self._stats.layer(self.LAYER_NAME).hits += 1
+            self._stats.layer(self._layer_name).hits += 1
             logger.info(
-                "[cache] query hit",
+                f"[cache] {self._layer_name} hit",
                 extra={
-                    "layer": self.LAYER_NAME, "event": "hit",
+                    "layer": self._layer_name, "event": "hit",
                     "session_id": session_id, "partition": partition.slug(),
                     "key_preview": _preview(normalized),
                     "matched_key_preview": best_entry.key_preview,
@@ -240,11 +245,11 @@ class QueryCache:
         # Below threshold. Log near-miss at DEBUG with top candidates so
         # threshold tuning can happen from logs alone.
         if best_sim >= self._threshold - NEAR_MISS_MARGIN:
-            self._stats.layer(self.LAYER_NAME).near_misses += 1
+            self._stats.layer(self._layer_name).near_misses += 1
             logger.debug(
-                "[cache] query near_miss",
+                f"[cache] {self._layer_name} near_miss",
                 extra={
-                    "layer": self.LAYER_NAME, "event": "near_miss",
+                    "layer": self._layer_name, "event": "near_miss",
                     "session_id": session_id, "partition": partition.slug(),
                     "key_preview": _preview(normalized),
                     "top_candidates": [
@@ -264,7 +269,7 @@ class QueryCache:
         self,
         partition: AppPartition,
         query: str,
-        urls: list[str],
+        urls: list[Any],
         *,
         session_id: str,
         upstream_ms: float | None = None,
@@ -279,7 +284,7 @@ class QueryCache:
         now = self._clock.now()
         self._evict_expired(now)
 
-        entry: _Entry[list[str]] = _Entry(
+        entry: _Entry[list[Any]] = _Entry(
             partition=partition,
             key_preview=_preview(normalized),
             embedding=embedding,
@@ -288,16 +293,16 @@ class QueryCache:
             ttl_seconds=self._ttl,
         )
         self._entries.append(entry)
-        self._stats.layer(self.LAYER_NAME).stores += 1
+        self._stats.layer(self._layer_name).stores += 1
         if upstream_ms is not None:
             self._stats.layer(
-                self.LAYER_NAME
+                self._layer_name
             ).upstream_ms_saved_estimate += upstream_ms  # estimate for next hit
 
         logger.info(
-            "[cache] query store",
+            f"[cache] {self._layer_name} store",
             extra={
-                "layer": self.LAYER_NAME, "event": "store",
+                "layer": self._layer_name, "event": "store",
                 "session_id": session_id, "partition": partition.slug(),
                 "key_preview": entry.key_preview,
                 "url_count": len(urls),
@@ -307,11 +312,11 @@ class QueryCache:
 
         if len(self._entries) > self._max_entries:
             evicted = self._entries.pop(0)  # LRU (oldest accessed)
-            self._stats.layer(self.LAYER_NAME).evictions += 1
+            self._stats.layer(self._layer_name).evictions += 1
             logger.info(
-                "[cache] query evict",
+                f"[cache] {self._layer_name} evict",
                 extra={
-                    "layer": self.LAYER_NAME, "event": "evict",
+                    "layer": self._layer_name, "event": "evict",
                     "session_id": session_id,
                     "partition": evicted.partition.slug(),
                     "key_preview": evicted.key_preview,
@@ -322,11 +327,11 @@ class QueryCache:
             )
 
     def emit_session_summary(self, *, session_id: str) -> None:
-        layer = self._stats.layer(self.LAYER_NAME)
+        layer = self._stats.layer(self._layer_name)
         logger.info(
             "[cache] session_summary",
             extra={
-                "layer": self.LAYER_NAME, "event": "session_summary",
+                "layer": self._layer_name, "event": "session_summary",
                 "session_id": session_id,
                 "hits": layer.hits, "misses": layer.misses,
                 "near_misses": layer.near_misses,
@@ -346,9 +351,9 @@ class QueryCache:
             vectors = self._embeddings.embed_batch([text])
         except Exception:
             logger.exception(
-                "[cache] query embedder_raised",
+                f"[cache] {self._layer_name} embedder_raised",
                 extra={
-                    "layer": self.LAYER_NAME, "session_id": session_id,
+                    "layer": self._layer_name, "session_id": session_id,
                     "key_preview": _preview(text),
                 },
             )
@@ -358,16 +363,16 @@ class QueryCache:
         return tuple(vectors[0])
 
     def _evict_expired(self, now: float) -> None:
-        fresh: list[_Entry[list[str]]] = []
+        fresh: list[_Entry[list[Any]]] = []
         for entry in self._entries:
             if entry.is_fresh(now):
                 fresh.append(entry)
             else:
-                self._stats.layer(self.LAYER_NAME).evictions += 1
+                self._stats.layer(self._layer_name).evictions += 1
                 logger.info(
-                    "[cache] query evict",
+                    f"[cache] {self._layer_name} evict",
                     extra={
-                        "layer": self.LAYER_NAME, "event": "evict",
+                        "layer": self._layer_name, "event": "evict",
                         "partition": entry.partition.slug(),
                         "key_preview": entry.key_preview,
                         "entry_age_seconds": round(now - entry.stored_at, 2),
@@ -376,7 +381,7 @@ class QueryCache:
                 )
         self._entries = fresh
 
-    def _touch(self, entry: _Entry[list[str]]) -> None:
+    def _touch(self, entry: _Entry[list[Any]]) -> None:
         try:
             self._entries.remove(entry)
         except ValueError:
@@ -393,9 +398,9 @@ class QueryCache:
         reason: str,
         best_similarity: float | None = None,
     ) -> None:
-        self._stats.layer(self.LAYER_NAME).misses += 1
+        self._stats.layer(self._layer_name).misses += 1
         extra = {
-            "layer": self.LAYER_NAME, "event": "miss",
+            "layer": self._layer_name, "event": "miss",
             "session_id": session_id, "partition": partition.slug(),
             "key_preview": _preview(query),
             "reason": reason,
@@ -405,7 +410,7 @@ class QueryCache:
         if best_similarity is not None:
             extra["best_similarity"] = best_similarity
             extra["threshold"] = self._threshold
-        logger.info("[cache] query miss", extra=extra)
+        logger.info(f"[cache] {self._layer_name} miss", extra=extra)
 
 
 def _preview(text: str) -> str:
@@ -413,3 +418,64 @@ def _preview(text: str) -> str:
     if len(cleaned) <= KEY_PREVIEW_MAX_LEN:
         return cleaned
     return cleaned[: KEY_PREVIEW_MAX_LEN - 1] + "…"
+
+
+# ---- Negative cache --------------------------------------------------------
+
+class NegativeCache:
+    """Short-TTL memo of "we tried this and got nothing useful."
+
+    Wraps a ``QueryCache`` with a short default TTL and a fixed sentinel
+    so a known-miss is distinguishable from "never tried." Without this,
+    a flaky or genuinely empty query would replay its full upstream walk
+    on every retry within the user's session.
+
+    Same partition + semantic-key semantics as the positive cache, so a
+    paraphrased retry of a known-miss query also short-circuits.
+    """
+
+    LAYER_NAME = "negative"
+
+    def __init__(
+        self,
+        *,
+        embeddings: EmbeddingsClient,
+        clock: Clock | None = None,
+        stats: CacheStats | None = None,
+        ttl_seconds: float = DEFAULT_NEGATIVE_TTL_SECONDS,
+        similarity_threshold: float = DEFAULT_QUERY_SIMILARITY_THRESHOLD,
+        max_entries: int = DEFAULT_NEGATIVE_MAX_ENTRIES,
+    ) -> None:
+        self._inner = QueryCache(
+            embeddings=embeddings,
+            clock=clock,
+            stats=stats,
+            ttl_seconds=ttl_seconds,
+            similarity_threshold=similarity_threshold,
+            max_entries=max_entries,
+            layer_name=self.LAYER_NAME,
+        )
+
+    def is_known_miss(
+        self, partition: AppPartition, query: str, *, session_id: str
+    ) -> bool:
+        return self._inner.get(partition, query, session_id=session_id) is not None
+
+    def record_miss(
+        self,
+        partition: AppPartition,
+        query: str,
+        *,
+        session_id: str,
+        upstream_ms: float | None = None,
+    ) -> None:
+        self._inner.put(
+            partition,
+            query,
+            list(_NEGATIVE_SENTINEL),
+            session_id=session_id,
+            upstream_ms=upstream_ms,
+        )
+
+    def emit_session_summary(self, *, session_id: str) -> None:
+        self._inner.emit_session_summary(session_id=session_id)

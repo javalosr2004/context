@@ -10,6 +10,7 @@ from backend.grounding_cache import (
     CacheStats,
     DEFAULT_QUERY_SIMILARITY_THRESHOLD,
     NEAR_MISS_MARGIN,
+    NegativeCache,
     QueryCache,
     _preview,
     _slugify,
@@ -363,3 +364,52 @@ class TestQueryCacheLogging:
 class TestNearMissMarginSanity:
     def test_near_miss_margin_is_positive_and_small(self) -> None:
         assert 0 < NEAR_MISS_MARGIN < 0.2
+
+
+# ---- NegativeCache --------------------------------------------------------
+
+class TestNegativeCache:
+    def test_unrecorded_query_is_not_known_miss(self) -> None:
+        cache = NegativeCache(embeddings=StubEmbeddings(), clock=FakeClock())
+        assert cache.is_known_miss(_partition(), "q", session_id="s1") is False
+
+    def test_recorded_query_is_known_miss(self) -> None:
+        cache = NegativeCache(embeddings=StubEmbeddings(), clock=FakeClock())
+        cache.record_miss(_partition(), "q", session_id="s1")
+        assert cache.is_known_miss(_partition(), "q", session_id="s1") is True
+
+    def test_paraphrased_query_also_short_circuits(self) -> None:
+        emb = ManualEmbeddings()
+        emb.stage("recorded", _unit(0.0))
+        emb.stage("paraphrase", _unit(0.1))  # cos ≈ 0.995
+        cache = NegativeCache(embeddings=emb, clock=FakeClock(),
+                              similarity_threshold=0.88)
+        cache.record_miss(_partition(), "recorded", session_id="s1")
+        assert cache.is_known_miss(_partition(), "paraphrase", session_id="s1") is True
+
+    def test_negative_entry_expires_under_short_ttl(self) -> None:
+        clock = FakeClock(t=0.0)
+        cache = NegativeCache(embeddings=StubEmbeddings(), clock=clock,
+                              ttl_seconds=60)
+        cache.record_miss(_partition(), "q", session_id="s1")
+        clock.advance(120)
+        assert cache.is_known_miss(_partition(), "q", session_id="s1") is False
+
+    def test_partition_isolation_on_negative_cache(self) -> None:
+        cache = NegativeCache(embeddings=StubEmbeddings(), clock=FakeClock())
+        cache.record_miss(_partition("Colab"), "q", session_id="s1")
+        assert cache.is_known_miss(_partition("VS Code"), "q", session_id="s1") is False
+
+    def test_negative_cache_logs_under_negative_layer(self, caplog) -> None:
+        cache = NegativeCache(embeddings=StubEmbeddings(), clock=FakeClock())
+        with caplog.at_level(logging.INFO, logger="backend.grounding_cache"):
+            cache.record_miss(_partition(), "q", session_id="s1")
+            cache.is_known_miss(_partition(), "q", session_id="s1")
+        layers_seen = {getattr(r, "layer", None) for r in caplog.records}
+        assert layers_seen == {"negative"}
+
+    def test_failing_embedder_treats_as_not_known_miss(self) -> None:
+        cache = NegativeCache(embeddings=FailingEmbeddings(raise_exc=True),
+                              clock=FakeClock())
+        cache.record_miss(_partition(), "q", session_id="s1")  # silently drops
+        assert cache.is_known_miss(_partition(), "q", session_id="s1") is False

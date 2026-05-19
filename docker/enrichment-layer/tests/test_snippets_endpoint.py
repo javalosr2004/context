@@ -151,9 +151,173 @@ def test_snippets_endpoint_uses_multimodal_planner_when_image_attached(
         "export selected frame as PNG",
         "batch export frames",
     ]
+    # snippets_by_query exposes per-query provenance so callers can
+    # populate a per-query cache from one multimodal call.
+    sbq = body["snippets_by_query"]
+    assert set(sbq.keys()) == set(body["queries_used"])
+    surfaced_urls = {s["url"] for snips in sbq.values() for s in snips}
+    returned_urls = {s["url"] for s in body["snippets"]}
+    assert surfaced_urls == returned_urls
     assert captured["raw_request"] == "export this"
     assert captured["image_bytes_len"] > 0
     assert captured["image_mime"] == "image/png"
+
+
+# ---- /extract -------------------------------------------------------------
+
+def test_extract_endpoint_returns_page_text(monkeypatch, isolated_data_dir):
+    async def fake_fetch(urls):
+        return [
+            FetchResult(
+                url=urls[0], final_url=urls[0], http_status=200,
+                html=FAKE_HTML, content_hash="hash-extract",
+            )
+        ]
+
+    monkeypatch.setattr(app_mod, "fan_out_fetch", fake_fetch)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/extract",
+            json={"url": "https://example.com/figma-export"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["url"] == "https://example.com/figma-export"
+    assert body["final_url"] == body["url"]
+    assert body["http_status"] == 200
+    assert "Figma" in body["title"]
+    assert "Select your frame" in body["text"]
+    assert body["content_hash"] == "hash-extract"
+
+
+def test_extract_endpoint_rejects_blank_url(isolated_data_dir):
+    with TestClient(app) as client:
+        resp = client.post("/extract", json={"url": "   "})
+    assert resp.status_code == 422
+
+
+def test_extract_endpoint_502_when_fetch_returns_nothing(
+    monkeypatch, isolated_data_dir,
+):
+    async def fake_fetch(urls):
+        return []
+
+    monkeypatch.setattr(app_mod, "fan_out_fetch", fake_fetch)
+    with TestClient(app) as client:
+        resp = client.post("/extract", json={"url": "https://example.com"})
+    assert resp.status_code == 502
+
+
+# ---- /summarize -----------------------------------------------------------
+
+def test_summarize_endpoint_returns_snippet(monkeypatch, isolated_data_dir):
+    captured: dict[str, object] = {}
+
+    def fake_summarize(page, application, goal, max_chars=300):
+        captured["page_url"] = page.url
+        captured["page_title"] = page.title
+        captured["text_chars"] = len(page.text)
+        captured["application"] = application
+        captured["goal"] = goal
+        captured["max_chars"] = max_chars
+        return "short snippet for the user"
+
+    monkeypatch.setattr(app_mod, "summarize_page_for_goal", fake_summarize)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/summarize",
+            json={
+                "url": "https://example.com/p",
+                "title": "Page Title",
+                "text": "step 1, step 2, step 3 with enough body to summarize",
+                "query": "how to do step 2",
+                "application": "Figma",
+                "max_chars": 200,
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["snippet"] == "short snippet for the user"
+    assert body["url"] == "https://example.com/p"
+    assert captured["page_url"] == "https://example.com/p"
+    assert captured["page_title"] == "Page Title"
+    assert captured["application"] == "Figma"
+    # When no goal is provided, the query is used as the goal — this is
+    # exactly why summaries are NOT cache-shared across queries.
+    assert captured["goal"] == "how to do step 2"
+    assert captured["max_chars"] == 200
+
+
+def test_summarize_uses_explicit_goal_over_query_when_provided(
+    monkeypatch, isolated_data_dir,
+):
+    captured: dict[str, object] = {}
+
+    def fake_summarize(page, application, goal, max_chars=300):
+        captured["goal"] = goal
+        return "ok"
+
+    monkeypatch.setattr(app_mod, "summarize_page_for_goal", fake_summarize)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/summarize",
+            json={
+                "url": "https://x", "text": "body text here",
+                "query": "paraphrased query",
+                "goal": "canonical goal",
+            },
+        )
+    assert resp.status_code == 200
+    assert captured["goal"] == "canonical goal"
+
+
+def test_summarize_rejects_blank_text(isolated_data_dir):
+    with TestClient(app) as client:
+        resp = client.post(
+            "/summarize",
+            json={"url": "https://x", "text": "  ", "query": "q"},
+        )
+    assert resp.status_code == 422
+
+
+def test_summarize_rejects_blank_query(isolated_data_dir):
+    with TestClient(app) as client:
+        resp = client.post(
+            "/summarize",
+            json={"url": "https://x", "text": "ok", "query": "  "},
+        )
+    assert resp.status_code == 422
+
+
+def test_summarize_returns_503_on_summarizer_error(
+    monkeypatch, isolated_data_dir,
+):
+    def boom(*args, **kwargs):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(app_mod, "summarize_page_for_goal", boom)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/summarize",
+            json={"url": "https://x", "text": "body", "query": "q"},
+        )
+    assert resp.status_code == 503
+
+
+def test_summarize_returns_null_snippet_when_summarizer_returns_none(
+    monkeypatch, isolated_data_dir,
+):
+    monkeypatch.setattr(
+        app_mod, "summarize_page_for_goal",
+        lambda *_a, **_k: None,
+    )
+    with TestClient(app) as client:
+        resp = client.post(
+            "/summarize",
+            json={"url": "https://x", "text": "body", "query": "q"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["snippet"] is None
 
 
 def test_snippets_endpoint_returns_503_when_multimodal_planner_fails(

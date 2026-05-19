@@ -12,10 +12,30 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
+RELOAD=0
+for arg in "$@"; do
+  case "${arg}" in
+    --reload)
+      RELOAD=1
+      ;;
+    *)
+      echo "Unknown argument: ${arg}" >&2
+      exit 2
+      ;;
+  esac
+done
+
 cd "${REPO_ROOT}"
 
-exec uv run --project backend uvicorn backend.main:app \
-  --host "${HOST:-127.0.0.1}" \
-  --port "${PORT:-8000}" \
-  --reload \
-  --env-file "${ENV_FILE}"
+if [[ "${RELOAD}" -eq 1 ]]; then
+  exec uv run --project backend uvicorn backend.main:app \
+    --host "${HOST:-127.0.0.1}" \
+    --port "${PORT:-8000}" \
+    --reload \
+    --env-file "${ENV_FILE}"
+else
+  exec uv run --project backend uvicorn backend.main:app \
+    --host "${HOST:-127.0.0.1}" \
+    --port "${PORT:-8000}" \
+    --env-file "${ENV_FILE}"
+fi

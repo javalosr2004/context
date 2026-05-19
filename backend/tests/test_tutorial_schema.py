@@ -246,6 +246,128 @@ class TutorialSchemaTests(unittest.TestCase):
         self.assertNotIn("'default'", schema_text)
 
 
+class TutorialPlanNormalizationTests(unittest.TestCase):
+    def test_drops_click_when_followed_by_type_on_same_target(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Type the URL into the address bar.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "Address bar", "role": "text field"},
+      "requires_confirmation": false
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "Address bar", "role": "text field"},
+      "text": "https://example.com",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        actions = plan.steps[0].actions
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].type, "type")
+
+    def test_preserves_click_when_type_targets_a_different_element(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Open new repo flow.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "New", "role": "button"},
+      "requires_confirmation": true
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "Repo name"},
+      "text": "demo",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        self.assertEqual(len(plan.steps[0].actions), 2)
+
+    def test_preserves_click_when_an_action_intervenes_before_type(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Focus, wait, then type.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "Address bar"},
+      "requires_confirmation": false
+    },
+    {
+      "type": "wait",
+      "duration_ms": 250,
+      "requires_confirmation": false
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "Address bar"},
+      "text": "hi",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        self.assertEqual(len(plan.steps[0].actions), 3)
+
+    def test_target_equality_ignores_whitespace_and_case(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Type into the address bar.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "  Address Bar  "},
+      "requires_confirmation": false
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "address bar"},
+      "text": "hi",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        self.assertEqual(len(plan.steps[0].actions), 1)
+        self.assertEqual(plan.steps[0].actions[0].type, "type")
+
+
 def valid_click_step_json() -> str:
     return """
 {

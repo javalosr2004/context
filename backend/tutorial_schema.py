@@ -237,6 +237,7 @@ def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
     try:
         plan = TutorialPlan.model_validate_json(raw_json)
         validate_tutorial_plan_semantics(plan)
+        normalize_tutorial_plan(plan)
         return plan
     except (ValidationError, ValueError) as error:
         raise TutorialPlanValidationError(
@@ -309,3 +310,55 @@ def require_target(action: TutorialAction) -> None:
 
 def has_text(value: str | None) -> bool:
     return value is not None and bool(value.strip())
+
+
+def normalize_tutorial_plan(plan: TutorialPlan) -> TutorialPlan:
+    """Apply deterministic post-processing to a validated plan in-place.
+
+    Currently collapses a `click` action that is immediately followed within
+    the same step by a `type` action on the same target: the click is
+    redundant since clicking to type *is* the typing gesture, and emitting
+    both shows the user two highlights on the same UI region.
+    """
+    for step in plan.steps:
+        step.actions = _collapse_click_then_type_same_target(step.actions)
+    return plan
+
+
+def _collapse_click_then_type_same_target(
+    actions: list[TutorialAction],
+) -> list[TutorialAction]:
+    result: list[TutorialAction] = []
+    index = 0
+    while index < len(actions):
+        current = actions[index]
+        following = actions[index + 1] if index + 1 < len(actions) else None
+        if (
+            current.type == "click"
+            and following is not None
+            and following.type == "type"
+            and current.target is not None
+            and following.target is not None
+            and _targets_equal(current.target, following.target)
+        ):
+            index += 1  # drop the click; emit the type on the next iteration
+            continue
+        result.append(current)
+        index += 1
+    return result
+
+
+def _targets_equal(left: ActionTarget, right: ActionTarget) -> bool:
+    return (
+        left.kind == right.kind
+        and _normalized(left.label) == _normalized(right.label)
+        and _normalized(left.role) == _normalized(right.role)
+        and _normalized(left.description) == _normalized(right.description)
+    )
+
+
+def _normalized(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip().lower()
+    return stripped if stripped else None

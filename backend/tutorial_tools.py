@@ -26,6 +26,7 @@ from backend.tutorial_schema import (
     TutorialAction,
     TutorialPlan,
     TutorialStep,
+    normalize_tutorial_plan,
     remove_gemini_unsupported_schema_keys,
 )
 
@@ -462,9 +463,10 @@ def _infer_scroll_direction(text: str) -> Literal["up", "down", "left", "right"]
 
 
 def plan_from_steps(goal: str, steps: list[TutorialStep]) -> TutorialPlan:
-    return TutorialPlan(
+    plan = TutorialPlan(
         schema_version="tutorial_plan.v1",
         goal=goal,
         summary="Follow the streamed tutorial actions.",
         steps=steps,
     )
+    return normalize_tutorial_plan(plan)

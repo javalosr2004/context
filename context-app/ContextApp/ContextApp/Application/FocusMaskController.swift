@@ -7,7 +7,7 @@ final class FocusMaskController {
     private let interactiveWindowsProvider: () -> [NSWindow]
     private let layout: FocusMaskLayout
     private let onExit: () -> Void
-    private let onInsideClick: () -> Void
+    private let onInsideClick: () -> Bool
     private let onOutsideClick: () -> Void
     private let screenProvider: () -> NSScreen?
 
@@ -23,7 +23,7 @@ final class FocusMaskController {
         screenProvider: @escaping () -> NSScreen?,
         interactiveWindowsProvider: @escaping () -> [NSWindow] = { [] },
         onExit: @escaping () -> Void,
-        onInsideClick: @escaping () -> Void = {},
+        onInsideClick: @escaping () -> Bool = { true },
         onOutsideClick: @escaping () -> Void = {}
     ) {
         self.clickClassifier = clickClassifier
@@ -131,8 +131,8 @@ final class FocusMaskController {
         case .ignoredControl, nil:
             return
         case .insideCutout:
-            hide()
-            onInsideClick()
+            let shouldDismiss = onInsideClick()
+            if shouldDismiss { hide() }
         case .outsideCutout:
             hide()
             onOutsideClick()

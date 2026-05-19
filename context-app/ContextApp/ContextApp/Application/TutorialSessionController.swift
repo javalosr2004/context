@@ -164,6 +164,10 @@ final class TutorialSessionController: ObservableObject {
     }
 
     private func confirmedActionIsType(stepID: String, actionIndex: Int) -> Bool {
+        actionIsType(stepID: stepID, actionIndex: actionIndex)
+    }
+
+    func actionIsType(stepID: String, actionIndex: Int) -> Bool {
         guard let step = latestStep(withID: stepID),
               actionIndex >= 0, actionIndex < step.actions.count else { return false }
         if case .type = step.actions[actionIndex] { return true }

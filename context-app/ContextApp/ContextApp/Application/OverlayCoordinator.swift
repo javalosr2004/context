@@ -67,12 +67,18 @@ final class OverlayCoordinator {
                 self?.screenGroundingController?.clearCache()
                 self?.stabilityWatcher.cancel()
             },
-            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak clipboardPopoverController, screenProvider] in
-                bboxPanel?.orderOut(nil)
-                clipboardPopoverController?.hide()
+            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak clipboardPopoverController, screenProvider] () -> Bool in
                 guard let sessionController = sessionControllerRef,
                       let stepID = sessionController.currentStepID,
-                      let actionIndex = sessionController.currentActionIndex else { return }
+                      let actionIndex = sessionController.currentActionIndex else { return true }
+                // For type actions, inside-click is the user focusing the field
+                // before typing — not a "done" signal. Keep the mask up; advance
+                // is driven by the explicit advance button in the chat popup.
+                if sessionController.actionIsType(stepID: stepID, actionIndex: actionIndex) {
+                    return false
+                }
+                bboxPanel?.orderOut(nil)
+                clipboardPopoverController?.hide()
                 Task { @MainActor in
                     if let screen = screenProvider(), let self {
                         self.stabilityIndicator?.show()
@@ -96,6 +102,7 @@ final class OverlayCoordinator {
                         screen: stableScreen
                     )
                 }
+                return true
             },
             onOutsideClick: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
                 bboxPanel?.orderOut(nil)

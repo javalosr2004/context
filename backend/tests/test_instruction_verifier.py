@@ -42,15 +42,22 @@ class _StubLLM:
 
 class ParseVerdictTests(unittest.TestCase):
     def test_yes_verdict(self) -> None:
-        v = parse_verdict('{"verdict": "yes", "reason": "looks right"}')
-        self.assertEqual(v, VerifierVerdict(ok=True, reason="looks right"))
+        v = parse_verdict('{"verdict": "yes", "evidence": "Private badge in header"}')
+        self.assertEqual(v, VerifierVerdict(ok=True, reason="Private badge in header"))
 
     def test_no_verdict(self) -> None:
-        v = parse_verdict('{"verdict": "no", "reason": "wrong app"}')
+        v = parse_verdict('{"verdict": "no", "evidence": "wrong app"}')
         self.assertEqual(v, VerifierVerdict(ok=False, reason="wrong app"))
 
+    def test_unsure_verdict_rejects(self) -> None:
+        v = parse_verdict(
+            '{"verdict": "unsure", "evidence": "no Private label found"}'
+        )
+        self.assertFalse(v.ok)
+        self.assertEqual(v.reason, "unsure: no Private label found")
+
     def test_unknown_verdict_fails_open(self) -> None:
-        v = parse_verdict('{"verdict": "maybe", "reason": "shrug"}')
+        v = parse_verdict('{"verdict": "maybe", "evidence": "shrug"}')
         self.assertTrue(v.ok)
 
     def test_unparseable_fails_open(self) -> None:
@@ -59,12 +66,17 @@ class ParseVerdictTests(unittest.TestCase):
         self.assertEqual(v.reason, "verifier_unparseable")
 
     def test_strips_code_fence(self) -> None:
-        v = parse_verdict('```json\n{"verdict":"no","reason":"x"}\n```')
+        v = parse_verdict('```json\n{"verdict":"no","evidence":"x"}\n```')
         self.assertEqual(v, VerifierVerdict(ok=False, reason="x"))
 
-    def test_missing_reason_gets_default(self) -> None:
+    def test_legacy_reason_field_accepted(self) -> None:
+        # Backward compat: older outputs may still use 'reason'.
+        v = parse_verdict('{"verdict": "no", "reason": "wrong window"}')
+        self.assertEqual(v, VerifierVerdict(ok=False, reason="wrong window"))
+
+    def test_missing_evidence_gets_default(self) -> None:
         v = parse_verdict('{"verdict": "no"}')
-        self.assertEqual(v.reason, "no reason given")
+        self.assertEqual(v.reason, "no evidence given")
 
 
 class BuildRequestTests(unittest.TestCase):

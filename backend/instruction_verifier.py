@@ -24,11 +24,16 @@ logger = logging.getLogger(__name__)
 
 VERIFIER_SYSTEM_PROMPT = (
     "You verify whether a screenshot shows the expected state for the "
-    "next step of a tutorial. Answer strictly in JSON with two fields: "
-    "verdict ('yes' if the screen is plausibly the right starting state "
-    "for the instruction, 'no' only if it clearly is not — wrong app, "
-    "wrong window, or missing required UI) and reason (one short "
-    "sentence). Do not include any text outside the JSON object."
+    "next step of a tutorial. You must ground every verdict in specific "
+    "visual evidence — name the exact UI element, quote the exact text, "
+    "or describe the exact region you observed. Do NOT accept the screen "
+    "just because it looks like the right page or app; that is not "
+    "evidence. If you cannot point to concrete evidence, answer 'unsure' "
+    "or 'no'.\n\n"
+    "Answer strictly in JSON with two fields: verdict (one of 'yes', "
+    "'no', 'unsure') and evidence (one short sentence quoting or naming "
+    "the specific element you observed, or describing what is missing). "
+    "Do not include any text outside the JSON object."
 )
 
 
@@ -40,10 +45,15 @@ class VerifierVerdict:
 
 def build_request(instruction: str, screen: UploadedImage) -> LLMRequest:
     user_text = (
-        f"Expected instruction: {instruction}\n\n"
-        "Is the attached screenshot a plausible starting state for this "
-        'instruction? Respond with JSON: {"verdict": "yes"|"no", '
-        '"reason": "..."}'
+        f"Expected state after the previous action: {instruction}\n\n"
+        "Look at the screenshot and find SPECIFIC visual evidence that "
+        "this state has been reached — a labeled button, a status badge, "
+        "a page title, a URL bar, a confirmation message. Quote or name "
+        "the exact element. If you can only say 'looks like the right "
+        "page' without pointing to a concrete element, the correct "
+        "verdict is 'unsure', not 'yes'.\n\n"
+        'Respond with JSON: {"verdict": "yes"|"no"|"unsure", '
+        '"evidence": "..."}'
     )
     return LLMRequest(
         system_prompt=VERIFIER_SYSTEM_PROMPT,
@@ -67,10 +77,19 @@ def parse_verdict(raw: str) -> VerifierVerdict:
     if not isinstance(payload, dict):
         return VerifierVerdict(ok=True, reason="verifier_unparseable")
     verdict = str(payload.get("verdict", "")).strip().lower()
-    reason = str(payload.get("reason", "")).strip() or "no reason given"
+    evidence = (
+        str(payload.get("evidence", "")).strip()
+        or str(payload.get("reason", "")).strip()
+        or "no evidence given"
+    )
     if verdict == "no":
-        return VerifierVerdict(ok=False, reason=reason)
-    return VerifierVerdict(ok=True, reason=reason)
+        return VerifierVerdict(ok=False, reason=evidence)
+    if verdict == "unsure":
+        # No concrete evidence → treat as rejection so we replan rather
+        # than rubber-stamp. The replan note carries the evidence string
+        # so the planner sees what was missing.
+        return VerifierVerdict(ok=False, reason=f"unsure: {evidence}")
+    return VerifierVerdict(ok=True, reason=evidence)
 
 
 def classify_screen(

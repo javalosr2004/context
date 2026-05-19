@@ -79,6 +79,8 @@
 		AD0000000000000000000003 /* EdgeTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000013 /* EdgeTabView.swift */; };
 		AD0000000000000000000004 /* EdgeTabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000014 /* EdgeTabController.swift */; };
 		AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000015 /* EdgeTabAnchorTests.swift */; };
+		B00000000000000000000001 /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* Schema.swift */; };
+		B00000000000000000000002 /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* Permissions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -167,6 +169,8 @@
 		AD0000000000000000000013 /* EdgeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabView.swift; sourceTree = "<group>"; };
 		AD0000000000000000000014 /* EdgeTabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabController.swift; sourceTree = "<group>"; };
 		AD0000000000000000000015 /* EdgeTabAnchorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchorTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000011 /* Schema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schema.swift; sourceTree = "<group>"; };
+		B00000000000000000000012 /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -298,8 +302,18 @@
 				AD0000000000000000000014 /* EdgeTabController.swift */,
 				AE0000000000000000000013 /* DevSettingsWindowController.swift */,
 				AF0000000000000000000011 /* ClipboardPopoverController.swift */,
+				B00000000000000000000020 /* Recording */,
 			);
 			path = Application;
+			sourceTree = "<group>";
+		};
+		B00000000000000000000020 /* Recording */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000011 /* Schema.swift */,
+				B00000000000000000000012 /* Permissions.swift */,
+			);
+			path = Recording;
 			sourceTree = "<group>";
 		};
 		A10000000000000000000011 /* Presentation */ = {
@@ -522,6 +536,8 @@
 				AE0000000000000000000002 /* DevSettingsView.swift in Sources */,
 				AE0000000000000000000003 /* DevSettingsWindowController.swift in Sources */,
 				AF0000000000000000000001 /* ClipboardPopoverController.swift in Sources */,
+				B00000000000000000000001 /* Schema.swift in Sources */,
+				B00000000000000000000002 /* Permissions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

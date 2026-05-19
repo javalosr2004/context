@@ -31,5 +31,21 @@ services:
       enrichment-layer:
         condition: service_healthy
 
+  recording-enrichment:
+    build:
+      context: ./docker/recording-enrichment
+    ports:
+      - "7100:8000"
+    volumes:
+      - recording_enrichment_data:/data
+    environment:
+      - DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
 volumes:
   enrichment_data:
+  recording_enrichment_data:

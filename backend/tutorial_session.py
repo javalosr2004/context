@@ -29,7 +29,10 @@ import uuid
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from backend.llm_recording import LLMCallSink
 
 from backend.embeddings_client import (
     EXPECTED_SCREEN_SIMILARITY_THRESHOLD,
@@ -239,6 +242,25 @@ class TutorialSession:
     status: str = "created"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # Optional eval sink: when set, every LLM call this session makes is
+    # captured via RecordingLLM and forwarded here. Wired through by the
+    # WS handler so the SessionEventLog can persist prompts/responses.
+    llm_call_sink: "LLMCallSink | None" = None
+
+    def __post_init__(self) -> None:
+        if self.llm_call_sink is None:
+            return
+        from backend.llm_recording import RecordingLLM
+        sink = self.llm_call_sink
+        self.llm = RecordingLLM(self.llm, agent="planner", sink=sink)
+        if self.fast_llm is not None:
+            self.fast_llm = RecordingLLM(
+                self.fast_llm, agent="draft_planner", sink=sink
+            )
+        if self.verifier_llm is not None:
+            self.verifier_llm = RecordingLLM(
+                self.verifier_llm, agent="verifier", sink=sink
+            )
 
     # -------- Public entry points (driven by the WS handler) --------
 
@@ -1158,7 +1180,8 @@ class TutorialSession:
                 query=query,
                 source_count=len(snippets),
                 sources=[
-                    WebSearchSource(title=s.title, url=s.url) for s in snippets
+                    WebSearchSource(title=s.title, url=s.url, content=s.content)
+                    for s in snippets
                 ],
                 elapsed_ms=elapsed_ms,
             )
@@ -1216,7 +1239,8 @@ class TutorialSession:
                 query=display_query,
                 source_count=len(result.snippets),
                 sources=[
-                    WebSearchSource(title=s.title, url=s.url) for s in result.snippets
+                    WebSearchSource(title=s.title, url=s.url, content=s.content)
+                    for s in result.snippets
                 ],
                 elapsed_ms=elapsed_ms,
             )
@@ -1369,7 +1393,11 @@ class TutorialSession:
         )
         await self.emit(
             InstructionVerifiedEvent(
-                step_id=step.step_id, ok=verdict.ok, reason=verdict.reason
+                step_id=step.step_id,
+                ok=verdict.ok,
+                reason=verdict.reason,
+                verdict=verdict.verdict,
+                screen_summary=verdict.screen_summary or None,
             )
         )
         return verdict

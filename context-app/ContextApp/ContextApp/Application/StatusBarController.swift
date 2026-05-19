@@ -2,6 +2,8 @@ import AppKit
 
 @MainActor
 final class StatusBarController {
+    private static let evalModeDefaultsKey = "eval_mode_enabled"
+
     private let endpointStore: GroundingEndpointStore
     private let onShowOverlay: () -> Void
     private let onTestBbox: () -> Void
@@ -64,6 +66,14 @@ final class StatusBarController {
         }))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(CallbackMenuItem(title: "Test green bbox", actionHandler: onTestBbox))
+        menu.addItem(NSMenuItem.separator())
+        let evalItem = CallbackMenuItem(
+            title: "Eval Mode: \(isEvalModeEnabled() ? "On" : "Off")",
+            actionHandler: { [weak self] in self?.toggleEvalMode() }
+        )
+        evalItem.toolTip = "When on, the overlay shows ✓/✗ buttons next to each step so you can label runs for eval extraction."
+        evalItem.state = isEvalModeEnabled() ? .on : .off
+        menu.addItem(evalItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(CallbackMenuItem(title: "Quit Context", actionHandler: quitApplication))
         statusItem.menu = menu
@@ -160,6 +170,16 @@ final class StatusBarController {
     private func showOverlay() {
         NSApp.activate(ignoringOtherApps: true)
         onShowOverlay()
+    }
+
+    private func isEvalModeEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: StatusBarController.evalModeDefaultsKey)
+    }
+
+    private func toggleEvalMode() {
+        let next = !isEvalModeEnabled()
+        UserDefaults.standard.set(next, forKey: StatusBarController.evalModeDefaultsKey)
+        rebuildMenu()
     }
 
     private func quitApplication() {

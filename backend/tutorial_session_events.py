@@ -233,6 +233,11 @@ class ScreenRequestedEvent(TutorialSessionEventModel):
 class WebSearchSource(TutorialSessionEventModel):
     title: str
     url: str
+    # Full snippet text the planner actually ingested. Stored on the wire
+    # so the grounding-faithfulness judge can score whether downstream
+    # claims are supported by what was retrieved. May be empty for native
+    # provider search where snippet content isn't exposed to us.
+    content: str = ""
 
 
 class WebSearchStartedEvent(TutorialSessionEventModel):
@@ -304,6 +309,41 @@ class InstructionVerifiedEvent(TutorialSessionEventModel):
     step_id: str
     ok: bool
     reason: str | None = None
+    # Full verifier output kept on the wire so eval fixtures can score the
+    # 4-way verdict, not just the coarse ok bool. See instruction_verifier.py.
+    verdict: Literal["on_track", "blocked", "diverged", "unsure"] | None = None
+    screen_summary: str | None = None
+
+
+class LLMToolCallSummary(TutorialSessionEventModel):
+    name: str
+    arguments_chars: int = Field(ge=0)
+
+
+class LLMCallEvent(TutorialSessionEventModel):
+    """One LLM round-trip the session made. Full prompt/response are
+    stored as a sidecar JSON file at ``llm_calls/{call_id}.json``; this
+    event carries only the metadata + a ref so the JSONL stays grep-able.
+
+    ``agent`` is the role the LLM played for this call (``planner``,
+    ``verifier``, ``draft_planner``, ``query_refiner``, ``enricher``).
+    Splitting by role is what lets eval extractors emit per-agent
+    fixtures without re-parsing the trace.
+    """
+
+    type: Literal["llm_call"] = "llm_call"
+    call_id: str
+    agent: str
+    model: str = ""
+    elapsed_ms: float = Field(ge=0)
+    image_count: int = Field(ge=0, default=0)
+    prompt_system_chars: int = Field(ge=0, default=0)
+    prompt_user_chars: int = Field(ge=0, default=0)
+    response_text_chars: int = Field(ge=0, default=0)
+    tool_calls: list[LLMToolCallSummary] = Field(default_factory=list)
+    ok: bool = True
+    error: str | None = None
+    payload_ref: str = ""  # relative path inside the session dir
 
 
 class ErrorEvent(TutorialSessionEventModel):
@@ -336,5 +376,6 @@ ServerSessionEvent = (
     | CompletionProposedEvent
     | InstructionVerificationStartedEvent
     | InstructionVerifiedEvent
+    | LLMCallEvent
     | ErrorEvent
 )

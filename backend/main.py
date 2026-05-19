@@ -232,7 +232,9 @@ def create_app() -> FastAPI:
                 await send_server_event(websocket, event)
 
         try:
-            session = sessions.attach(session_id, emit)
+            session = sessions.attach(
+                session_id, emit, llm_call_sink=event_log.write_llm_call
+            )
         except TutorialSessionError as error:
             await send_server_event(
                 websocket,

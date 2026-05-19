@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from backend.embeddings_client import EmbeddingsClient, NullEmbeddingsClient
 from backend.llm import MultimodalLLM
+from backend.llm_recording import LLMCallSink
 from backend.tutorial_session import EventSink, TutorialSession
 from backend.web_ground import NullWebGroundProducer, WebGroundProducer
 from backend.tutorial_session_events import (
@@ -71,7 +72,12 @@ class TutorialSessionStore:
             f"Tutorial session does not exist: {session_id}",
         )
 
-    def attach(self, session_id: str, emit: EventSink) -> TutorialSession:
+    def attach(
+        self,
+        session_id: str,
+        emit: EventSink,
+        llm_call_sink: LLMCallSink | None = None,
+    ) -> TutorialSession:
         if session_id not in self._reserved and session_id not in self._live:
             raise TutorialSessionError(
                 SESSION_NOT_FOUND,
@@ -90,6 +96,7 @@ class TutorialSessionStore:
                 "capped_head" if self._step_tools_enabled else "full_plan"
             ),
             grounding_strategy=self._grounding_strategy,
+            llm_call_sink=llm_call_sink,
         )
         self._live[session_id] = session
         return session

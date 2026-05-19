@@ -371,19 +371,24 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan_ready, [])
 
 
-class InstructionVerificationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_no_verdict_triggers_replan_and_truncates_plan(self) -> None:
+TWO_STEP_PLAN_CALL = update_plan_call(
+    click_item(human_text="Click A.", description="Button A."),
+    click_item(human_text="Click B.", description="Button B."),
+)
+
+
+class StrictGateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gate_accepts_skips_planner_between_steps(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM(
             [
-                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
-                # After verifier-driven replan, agent finishes with text.
-                [LLMTextDelta(text="Replanning.")],
+                [LLMToolCallEvent(tool_call=TWO_STEP_PLAN_CALL)],
+                # Only one more agent_loop call expected — the final
+                # cleanup pass after step_002 with nothing unwalked.
+                [LLMTextDelta(text="All done.")],
             ]
         )
-        fast_llm = _FixedTextLLM(
-            '{"verdict":"no","reason":"wrong app in foreground"}'
-        )
+        fast_llm = _FixedTextLLM('{"verdict":"yes","reason":"on track"}')
         session = TutorialSession(
             session_id="s1",
             llm=llm,
@@ -391,36 +396,47 @@ class InstructionVerificationTests(unittest.IsolatedAsyncioTestCase):
             emit=await collect_events(events),
         )
 
-        await session.handle_user_message("Click New.")
+        await session.handle_user_message("Walk me through it.")
         await send_next_requested_screen(session, events)
-        # After plan emission, _await_step kicks off verification.
-        # The "no" verdict should drop the plan tail without any user input.
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        # Outer loop fires fresh screen after the screen-changing click.
+        await send_next_requested_screen(session, events)
+        # Gate verifies step_002, accepts, skips planner — walk continues.
+        await wait_until(lambda: session.awaiting_step_id == "step_002")
+        await session.handle_step_started("step_002", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_002", action_index=0, confirmed=True, note=None
+        )
         await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
+        # 2 planner calls: initial plan + post-step_002 cleanup.
+        # No planner call was made between step_001 and step_002 — the
+        # gate skipped it. (Without the gate this would be 3.)
+        self.assertEqual(len(llm.requests), 2)
         verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
-        self.assertTrue(verified)
-        self.assertFalse(verified[0].ok)
-        # Plan tail dropped because verification rejected it before user acted.
-        self.assertEqual(session.plan_steps, [])
-        # Replan note made it into the history.
-        self.assertTrue(
-            any(
-                "Screen verification failed" in entry.content
-                for entry in session.history
-                if entry.role == "user"
-            )
+        self.assertTrue(verified and verified[0].ok)
+        self.assertEqual(
+            session.completed_step_ids, ["step_001", "step_002"]
         )
 
-    async def test_yes_verdict_does_not_disturb_walk(self) -> None:
+    async def test_gate_rejects_truncates_tail_and_replans(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM(
             [
-                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
-                [LLMTextDelta(text="Done.")],
+                [LLMToolCallEvent(tool_call=TWO_STEP_PLAN_CALL)],
+                # After gate rejects, planner re-runs with replan note;
+                # we just emit text to end the session cleanly.
+                [LLMTextDelta(text="Replanning.")],
             ]
         )
-        fast_llm = _FixedTextLLM('{"verdict":"yes","reason":"matches"}')
+        fast_llm = _FixedTextLLM('{"verdict":"no","reason":"wrong screen"}')
         session = TutorialSession(
             session_id="s1",
             llm=llm,
@@ -428,7 +444,7 @@ class InstructionVerificationTests(unittest.IsolatedAsyncioTestCase):
             emit=await collect_events(events),
         )
 
-        await session.handle_user_message("Click New.")
+        await session.handle_user_message("Walk me through it.")
         await send_next_requested_screen(session, events)
         await wait_until(lambda: session.awaiting_step_id == "step_001")
         await session.handle_step_started("step_001", action_index=0)
@@ -439,14 +455,24 @@ class InstructionVerificationTests(unittest.IsolatedAsyncioTestCase):
         await send_next_requested_screen(session, events)
         await wait_for_idle(session)
 
+        # Plan tail trimmed to completed prefix after gate rejection.
+        self.assertEqual(
+            [s.step_id for s in session.plan_steps], ["step_001"]
+        )
         verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
-        self.assertTrue(verified and verified[0].ok)
-        self.assertEqual(session.completed_step_ids, ["step_001"])
+        self.assertTrue(verified)
+        self.assertFalse(verified[-1].ok)
+        self.assertTrue(
+            any(
+                "Screen verification failed for step_002" in entry.content
+                for entry in session.history
+                if entry.role == "user"
+            )
+        )
 
-    async def test_user_input_cancels_in_flight_verifier(self) -> None:
-        # Direct unit test of _cancel_verification on a pending asyncio task.
-        # Avoids spinning up the full session to keep the test process from
-        # stranding a blocked executor thread.
+    async def test_legacy_cancel_verification_clears_task(self) -> None:
+        # _cancel_verification is still wired from input handlers as a
+        # defensive no-op. Verify it cleans up a manually-spawned task.
         async def never() -> None:
             await asyncio.sleep(60)
 

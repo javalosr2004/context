@@ -367,7 +367,7 @@ class TutorialSession:
                 self._kick_off_draft_plan()
             any_steps_walked = False
             while True:
-                await self._run_agent_loop()
+                await self._plan_or_gate()
                 unwalked = self._unwalked_steps()
                 if not unwalked:
                     if any_steps_walked:
@@ -734,7 +734,126 @@ class TutorialSession:
         )
         return snippets
 
-    # -------- Instruction-entry screen verification --------
+    # -------- Strict gate: verify next step before re-engaging planner --------
+
+    async def _plan_or_gate(self) -> None:
+        """Decide whether to run the planner this iteration.
+
+        Strict-gate semantics: on iterations where an existing plan still
+        has unwalked steps and we have a screen, run the verifier on the
+        next unwalked step. "Yes" → skip the planner entirely and let the
+        walk advance. "No" (or no plan yet / no screen) → run the planner.
+        On "no" the plan tail is truncated to the completed prefix so the
+        planner regenerates from scratch.
+        """
+        unwalked = self._unwalked_steps()
+        if not self.plan_steps or not unwalked or self.latest_screen is None:
+            logger.info(
+                "[session] gate skipped; running planner",
+                extra={
+                    "session_id": self.session_id,
+                    "reason": (
+                        "no_plan" if not self.plan_steps
+                        else "no_unwalked" if not unwalked
+                        else "no_screen"
+                    ),
+                },
+            )
+            await self._run_agent_loop()
+            return
+        next_step = unwalked[0]
+        verdict = await self._verify_step_blocking(next_step)
+        if verdict.ok:
+            logger.info(
+                "[session] gate accepted; skipping planner",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": next_step.step_id,
+                    "reason": verdict.reason,
+                },
+            )
+            return
+        logger.info(
+            "[session] gate rejected; truncating tail and replanning",
+            extra={
+                "session_id": self.session_id,
+                "step_id": next_step.step_id,
+                "reason": verdict.reason,
+            },
+        )
+        note = (
+            f"Screen verification failed for {next_step.step_id}: "
+            f"{verdict.reason}. Re-plan from the current screen."
+        )
+        self.history.append(HistoryEntry(role="user", content=note))
+        completed = set(self.completed_step_ids)
+        self.plan_steps = [s for s in self.plan_steps if s.step_id in completed]
+        self.prev_active_step_id = None
+        await self._run_agent_loop()
+
+    async def _verify_step_blocking(self, step: TutorialStep) -> VerifierVerdict:
+        """Synchronous gate verification: emit start/verdict events, log,
+        return the verdict. Fail-open on errors via classify_screen."""
+        screen = self.latest_screen
+        if screen is None:
+            return VerifierVerdict(ok=True, reason="no_screen")
+        verifier_llm = self.fast_llm or self.llm
+        await self.emit(InstructionVerificationStartedEvent(step_id=step.step_id))
+        started_at = time.perf_counter()
+        logger.info(
+            "[verifier] gate start",
+            extra={
+                "session_id": self.session_id,
+                "step_id": step.step_id,
+                "instruction": step.instruction[:120],
+                "screen_bytes": len(screen.data),
+                "screen_captured_at": (
+                    self.screen_captured_at.isoformat()
+                    if self.screen_captured_at else None
+                ),
+                "llm": "fast" if self.fast_llm is not None else "main",
+            },
+        )
+        try:
+            verdict = await asyncio.to_thread(
+                classify_screen, verifier_llm, step.instruction, screen
+            )
+        except asyncio.CancelledError:
+            logger.info(
+                "[verifier] gate cancelled",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": step.step_id,
+                    "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                },
+            )
+            raise
+        except Exception:
+            logger.exception(
+                "[verifier] gate crashed",
+                extra={"session_id": self.session_id, "step_id": step.step_id},
+            )
+            # Fail-open: don't lock the user out on a verifier glitch.
+            return VerifierVerdict(ok=True, reason="gate_error")
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        logger.info(
+            "[verifier] gate verdict",
+            extra={
+                "session_id": self.session_id,
+                "step_id": step.step_id,
+                "ok": verdict.ok,
+                "reason": verdict.reason,
+                "elapsed_ms": elapsed_ms,
+            },
+        )
+        await self.emit(
+            InstructionVerifiedEvent(
+                step_id=step.step_id, ok=verdict.ok, reason=verdict.reason
+            )
+        )
+        return verdict
+
+    # -------- Legacy parallel verifier (kept for cancellation API) --------
 
     def _start_verification(self, step: TutorialStep) -> None:
         """Spawn a per-instruction verification job.
@@ -1154,11 +1273,8 @@ class TutorialSession:
     async def _await_step(self, step: TutorialStep) -> str | None:
         self.awaiting_step_id = step.step_id
         step_index = self._plan_index(step.step_id)
-        # Instruction-level guardrail: kick off a parallel verification
-        # that the current screen plausibly matches this instruction.
-        # A "no" verdict surfaces via pending_verification_replan and is
-        # consumed in _await_action's wait loops.
-        self._start_verification(step)
+        # Verification now runs as a blocking gate in `_plan_or_gate`
+        # before each agent_loop call, not in parallel during the walk.
         try:
             # Re-resolve the live step each iteration; a mid-await
             # refines_current merge may have replaced the actions list while

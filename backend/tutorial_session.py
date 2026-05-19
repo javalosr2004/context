@@ -30,6 +30,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
+from backend.embeddings_client import (
+    EXPECTED_SCREEN_SIMILARITY_THRESHOLD,
+    LOGICAL_ID_SIMILARITY_THRESHOLD,
+    EmbeddingsClient,
+    NullEmbeddingsClient,
+    cosine,
+    step_fingerprint,
+)
 from backend.images import UploadedImage, downscale_for_verifier
 from backend.instruction_verifier import VerifierVerdict, classify_screen
 from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
@@ -129,6 +137,7 @@ class TutorialSession:
     emit: EventSink
     fast_llm: MultimodalLLM | None = None
     verifier_llm: MultimodalLLM | None = None
+    embeddings_client: EmbeddingsClient = field(default_factory=NullEmbeddingsClient)
     goal: str | None = None
     history: list[HistoryEntry] = field(default_factory=list)
     plan_steps: list[TutorialStep] = field(default_factory=list)
@@ -158,6 +167,10 @@ class TutorialSession:
     screen_request_counter: int = 0
     step_counter: int = 0
     attempts_without_progress: dict[str, int] = field(default_factory=dict)
+    # Cache of embeddings for each known logical_id, populated as steps
+    # are merged. Keeps the per-replan embed cost to "only the new
+    # candidates" — we never re-embed a logical step we have seen.
+    logical_step_embeddings: dict[str, list[float]] = field(default_factory=dict)
     prev_active_step_id: str | None = None
     last_action_kind: str | None = None
     screen_is_stale: bool = False
@@ -244,6 +257,7 @@ class TutorialSession:
         self.uploaded_images = list(uploaded_images)
         self.step_counter = 0
         self.attempts_without_progress = {}
+        self.logical_step_embeddings = {}
         self.prev_active_step_id = None
         self.last_action_kind = None
         self.screen_is_stale = False
@@ -1143,6 +1157,7 @@ class TutorialSession:
             return VerifierVerdict(verdict="unsure", reason="gate_error")
         elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
         self._last_gate_elapsed_ms = elapsed_ms
+        verdict = self._maybe_promote_via_expected_summary(step, verdict)
         logger.info(
             "[verifier] gate verdict",
             extra={
@@ -1160,6 +1175,67 @@ class TutorialSession:
             )
         )
         return verdict
+
+    def _maybe_promote_via_expected_summary(
+        self, step: TutorialStep, verdict: VerifierVerdict
+    ) -> VerifierVerdict:
+        """If the step carries an ``expected_screen_summary`` and the
+        verifier reported a matching ``screen_summary``, override a
+        non-``on_track`` verdict to ``on_track``.
+
+        The verifier sometimes flags ``diverged`` or ``unsure`` for
+        screens that are in fact the right state, especially when the
+        instruction phrasing and visible UI label differ. A planner-
+        emitted expectation is the cheapest second opinion we have."""
+        expected = (step.expected_screen_summary or "").strip()
+        actual = verdict.screen_summary.strip()
+        if not expected or not actual:
+            return verdict
+        if verdict.verdict == "on_track":
+            return verdict
+        try:
+            embeddings = self.embeddings_client.embed_batch([expected, actual])
+        except Exception:
+            logger.exception(
+                "[verifier] screen_summary embedding failed",
+                extra={"session_id": self.session_id, "step_id": step.step_id},
+            )
+            return verdict
+        if len(embeddings) != 2:
+            return verdict
+        similarity = cosine(embeddings[0], embeddings[1])
+        if similarity < EXPECTED_SCREEN_SIMILARITY_THRESHOLD:
+            logger.info(
+                "[verifier] expected_screen mismatch — keeping verdict",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": step.step_id,
+                    "verdict": verdict.verdict,
+                    "similarity": round(similarity, 4),
+                    "expected": expected[:120],
+                    "actual": actual[:120],
+                },
+            )
+            return verdict
+        logger.info(
+            "[verifier] expected_screen match — promoting to on_track",
+            extra={
+                "session_id": self.session_id,
+                "step_id": step.step_id,
+                "prior_verdict": verdict.verdict,
+                "similarity": round(similarity, 4),
+                "expected": expected[:120],
+                "actual": actual[:120],
+            },
+        )
+        return VerifierVerdict(
+            verdict="on_track",
+            reason=(
+                f"expected_screen_summary matches (sim={similarity:.2f}); "
+                f"prior verdict was {verdict.verdict}"
+            ),
+            screen_summary=verdict.screen_summary,
+        )
 
     # -------- Legacy parallel verifier (kept for cancellation API) --------
 
@@ -1344,6 +1420,7 @@ class TutorialSession:
 
         self.plan_steps = result.plan_steps
         self.step_counter = result.step_counter
+        self._assign_logical_ids()
 
         plan = plan_from_steps(self._display_goal(), self.plan_steps)
         refined_current = bool(
@@ -1416,6 +1493,78 @@ class TutorialSession:
                 return step.step_id
         return None
 
+    def _assign_logical_ids(self) -> None:
+        """Set ``logical_id`` on any plan step that lacks one.
+
+        Refined steps keep the prior logical_id by virtue of carrying the
+        same ``step_id`` (the merger reused it). New steps with a fresh
+        ``step_id`` are embedded and matched against the cache of all
+        prior logical steps; a hit reuses that logical_id (the planner
+        rephrased the same logical step we already tried), a miss mints
+        a new logical_id equal to the step_id.
+
+        Fail-open: if the embeddings client returns nothing, we fall
+        back to logical_id == step_id, which preserves today's behavior.
+        """
+        # Preserve logical_id on steps that already have one (refined
+        # awaiting steps re-enter with the same step_id and therefore
+        # the same logical_id we set last turn).
+        new_steps: list[TutorialStep] = [
+            step for step in self.plan_steps if step.logical_id is None
+        ]
+        if not new_steps:
+            return
+        fingerprints = [step_fingerprint(step) for step in new_steps]
+        try:
+            embeddings = self.embeddings_client.embed_batch(fingerprints)
+        except Exception:
+            logger.exception(
+                "[session] embeddings call crashed; falling back to step_id",
+                extra={"session_id": self.session_id},
+            )
+            embeddings = []
+
+        for index, step in enumerate(new_steps):
+            embedding = embeddings[index] if index < len(embeddings) else None
+            logical_id = self._resolve_logical_id(step, embedding)
+            step.logical_id = logical_id
+            if embedding is not None and logical_id not in self.logical_step_embeddings:
+                self.logical_step_embeddings[logical_id] = embedding
+
+    def _resolve_logical_id(
+        self, step: TutorialStep, embedding: list[float] | None
+    ) -> str:
+        if embedding is None or not self.logical_step_embeddings:
+            return step.step_id
+        best_id = step.step_id
+        best_sim = LOGICAL_ID_SIMILARITY_THRESHOLD
+        for existing_id, existing_embedding in self.logical_step_embeddings.items():
+            sim = cosine(embedding, existing_embedding)
+            if sim > best_sim:
+                best_sim = sim
+                best_id = existing_id
+        if best_id != step.step_id:
+            attempts = self.attempts_without_progress.get(best_id, 0)
+            logger.info(
+                "[session] logical_id reuse",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": step.step_id,
+                    "logical_id": best_id,
+                    "similarity": round(best_sim, 4),
+                    "attempts_without_progress": attempts,
+                },
+            )
+        return best_id
+
+    def _logical_id_for(self, step_id: str | None) -> str | None:
+        if step_id is None:
+            return None
+        for step in self.plan_steps:
+            if step.step_id == step_id:
+                return step.logical_id or step.step_id
+        return step_id
+
     def _record_screen_progress(self) -> None:
         """Update the stall counter after a fresh screen lands.
 
@@ -1428,12 +1577,14 @@ class TutorialSession:
         if active is None:
             self.prev_active_step_id = None
             return
-        if active == self.prev_active_step_id:
-            self.attempts_without_progress[active] = (
-                self.attempts_without_progress.get(active, 0) + 1
+        active_logical = self._logical_id_for(active) or active
+        prev_logical = self._logical_id_for(self.prev_active_step_id)
+        if active_logical == prev_logical:
+            self.attempts_without_progress[active_logical] = (
+                self.attempts_without_progress.get(active_logical, 0) + 1
             )
         else:
-            self.attempts_without_progress.pop(active, None)
+            self.attempts_without_progress.pop(active_logical, None)
         self.prev_active_step_id = active
 
     def _record_completion_request(self, call: TutorialToolCall) -> None:
@@ -2023,7 +2174,8 @@ def _render_plan_block(
             (s for s in plan_steps if s.step_id == awaiting_step_id), None
         )
         if awaiting_step is not None:
-            attempts = attempts_without_progress.get(awaiting_step_id, 0)
+            attempts_key = awaiting_step.logical_id or awaiting_step_id
+            attempts = attempts_without_progress.get(attempts_key, 0)
             suffix = (
                 f" (attempts_without_progress={attempts})" if attempts else ""
             )
@@ -2048,7 +2200,15 @@ def _render_plan_block(
             )
 
     if awaiting_step_id is not None:
-        attempts = attempts_without_progress.get(awaiting_step_id, 0)
+        awaiting_step = next(
+            (s for s in plan_steps if s.step_id == awaiting_step_id), None
+        )
+        attempts_key = (
+            awaiting_step.logical_id or awaiting_step_id
+            if awaiting_step is not None
+            else awaiting_step_id
+        )
+        attempts = attempts_without_progress.get(attempts_key, 0)
         if attempts >= STALL_ATTEMPT_THRESHOLD:
             lines.append("")
             lines.append(

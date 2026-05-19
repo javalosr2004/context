@@ -4,6 +4,12 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from backend.embeddings_client import (
+    DEFAULT_EMBEDDING_MODEL,
+    EmbeddingsClient,
+    NullEmbeddingsClient,
+    OpenAIEmbeddingsClient,
+)
 from backend.gemini_client import GeminiClient
 from backend.holo_chat_client import HoloChatClient
 from backend.llm import MultimodalLLM
@@ -84,6 +90,21 @@ class LLMProvider:
                 verbosity=None,
             )
         return self.create_fast_llm()
+
+    def create_embeddings_client(self) -> EmbeddingsClient:
+        """Optional dependency used for ``logical_id`` resolution and the
+        pre-verifier expected-screen shortcut. Returns a no-op client
+        when no OpenAI key is configured — features that use embeddings
+        gracefully degrade rather than fail the session."""
+        if not self.environment.get("OPENAI_API_KEY"):
+            return NullEmbeddingsClient()
+        model = (
+            self.environment.get("OPENAI_EMBEDDING_MODEL")
+            or DEFAULT_EMBEDDING_MODEL
+        )
+        return OpenAIEmbeddingsClient(
+            api_key=self._required("OPENAI_API_KEY"), model=model
+        )
 
     def _provider_name(self) -> str:
         return (self.environment.get("LLM_PROVIDER") or DEFAULT_LLM_PROVIDER).lower()

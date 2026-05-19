@@ -16,6 +16,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from backend.conversations import ConversationRepository, InMemoryConversationRepository
 from backend.images import read_uploaded_images
+from backend.embeddings_client import EmbeddingsClient
 from backend.llm import MultimodalLLM
 from backend.llm_provider import LLMProvider, LLMProviderConfigurationError
 from backend.web_ground import web_ground_producer_from_environment
@@ -316,6 +317,13 @@ def get_verifier_llm() -> MultimodalLLM:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
+def get_embeddings_client() -> EmbeddingsClient:
+    try:
+        return LLMProvider.from_environment().create_embeddings_client()
+    except LLMProviderConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 def get_tutorial_guide(
     llm: MultimodalLLM = Depends(get_multimodal_llm),
 ) -> TutorialGuide:
@@ -327,6 +335,7 @@ def get_tutorial_session_store(
     llm: MultimodalLLM = Depends(get_multimodal_llm),
     fast_llm: MultimodalLLM = Depends(get_fast_multimodal_llm),
     verifier_llm: MultimodalLLM = Depends(get_verifier_llm),
+    embeddings_client: EmbeddingsClient = Depends(get_embeddings_client),
 ) -> TutorialSessionStore:
     store = getattr(connection.app.state, "tutorial_session_store", None)
     if store is None:
@@ -334,6 +343,7 @@ def get_tutorial_session_store(
             llm,
             fast_llm=fast_llm,
             verifier_llm=verifier_llm,
+            embeddings_client=embeddings_client,
             web_ground=web_ground_producer_from_environment(),
             step_tools_enabled=_step_tools_enabled_from_env(),
         )

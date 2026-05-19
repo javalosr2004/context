@@ -212,6 +212,19 @@ class PlanItem(_StrictModel):
     )
     human_text: str = Field(min_length=1, description="One concise on-screen instruction.")
     confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_DESCRIPTION)
+    expected_screen_summary: str | None = Field(
+        default=None,
+        description=(
+            "Short phrase (<= 12 words) naming the dominant visible UI "
+            "the user should see when this step is on screen — e.g. "
+            "'GitHub repository Settings page with Danger Zone visible'. "
+            "Used as a cheap cosine-similarity check against the "
+            "verifier's screen_summary to confirm on_track without a "
+            "second full vision call. Concrete and specific to the app "
+            "and route in front of the user; null if you genuinely don't "
+            "know what they'll see."
+        ),
+    )
     actions: list[ActionPayload] = Field(
         min_length=1,
         description=(
@@ -477,6 +490,7 @@ def _step_template_from_item(item: PlanItem) -> TutorialStep:
         instruction=item.human_text,
         actions=actions,
         confidence=item.confidence,
+        expected_screen_summary=item.expected_screen_summary,
     )
 
 

@@ -266,6 +266,16 @@ When the next step is a user choice (no deterministic target):
     GOOD: {"kind": "user_choice", "prompt":
            "Click on the repo you want to open."}
 
+Each plan item also takes an optional `expected_screen_summary` —
+a short phrase (<= 12 words) naming the dominant visible UI the user
+should see when that step is on screen ("GitHub repo Settings page
+with Danger Zone visible", "Signed-in dashboard with feed"). The
+backend cosine-compares this to the verifier's own screen summary as
+a cheap second opinion: when they match, we treat the step as
+on_track even if the verifier hedged. Write one only when you can
+name a specific, concrete app/route — leave null for steps where
+you genuinely don't know what the user will see.
+
 For each plan item, human_text is one concise on-screen instruction
 the user reads on the overlay. Each action's payload carries the
 mechanical detail: agent_description for click/type, copiable_text

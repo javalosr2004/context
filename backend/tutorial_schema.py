@@ -114,6 +114,23 @@ class TutorialStep(TutorialSchemaModel):
         le=1.0,
         description="Model confidence from 0.0 to 1.0.",
     )
+    logical_id: str | None = Field(
+        default=None,
+        description=(
+            "Server-assigned identity that is stable across replans. "
+            "Set by the session via embedding similarity against prior "
+            "steps; planner output never carries this."
+        ),
+    )
+    expected_screen_summary: str | None = Field(
+        default=None,
+        description=(
+            "Optional short phrase (<= 12 words) naming the dominant "
+            "visible UI the user should see when this step is on screen. "
+            "Compared against the verifier's screen_summary via cosine "
+            "similarity to short-circuit the on_track decision."
+        ),
+    )
 
 
 class TutorialPlan(TutorialSchemaModel):

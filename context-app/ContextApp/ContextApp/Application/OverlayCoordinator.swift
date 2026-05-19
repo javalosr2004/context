@@ -49,7 +49,7 @@ final class OverlayCoordinator {
         let edgeTabController = EdgeTabController(
             screenProvider: screenProvider,
             onToggle: { popupController.toggle() },
-            onShiftRightClick: { [weak self] in self?.showDevSettings() }
+            onShowDevSettings: { [weak self] in self?.showDevSettings() }
         )
 
         var sessionControllerRef: TutorialSessionController?

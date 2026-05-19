@@ -3,7 +3,6 @@ import SwiftUI
 
 struct EdgeTabView: View {
     let onClick: () -> Void
-    let onContextMenu: () -> Void
 
     @State private var isHovering = false
     @State private var isPressed = false
@@ -30,11 +29,6 @@ struct EdgeTabView: View {
                         onClick()
                     }
             )
-            .contextMenu {
-                Button("Show Overlay", action: onClick)
-                Divider()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
-            }
     }
 
     private var glyph: some View {

@@ -6,28 +6,30 @@ final class EdgeTabController {
     private let panel: EdgeTabPanel
     private let screenProvider: () -> NSScreen?
     private let onToggle: () -> Void
-    private let onShiftRightClick: () -> Void
+    private let onShowDevSettings: () -> Void
 
     init(
         screenProvider: @escaping () -> NSScreen?,
         onToggle: @escaping () -> Void,
-        onShiftRightClick: @escaping () -> Void
+        onShowDevSettings: @escaping () -> Void
     ) {
         self.screenProvider = screenProvider
         self.onToggle = onToggle
-        self.onShiftRightClick = onShiftRightClick
+        self.onShowDevSettings = onShowDevSettings
         self.panel = EdgeTabPanel(frame: .zero)
     }
 
     func start() {
         installContent()
-        panel.onShiftRightClick = { [weak self] in self?.onShiftRightClick() }
+        panel.onShowOverlay = { [weak self] in self?.onToggle() }
+        panel.onShowDevSettings = { [weak self] in self?.onShowDevSettings() }
         reanchor()
         panel.orderFrontRegardless()
     }
 
     func stop() {
-        panel.onShiftRightClick = nil
+        panel.onShowOverlay = nil
+        panel.onShowDevSettings = nil
         panel.orderOut(nil)
     }
 
@@ -45,8 +47,7 @@ final class EdgeTabController {
 
     private func installContent() {
         panel.contentView = NSHostingView(rootView: EdgeTabView(
-            onClick: { [weak self] in self?.onToggle() },
-            onContextMenu: { [weak self] in self?.onToggle() }
+            onClick: { [weak self] in self?.onToggle() }
         ))
     }
 }

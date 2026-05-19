@@ -163,18 +163,39 @@ How the tutorial ends:
 
 How a step is shaped:
 - A plan item carries `human_text` (one short instruction the user
-  reads on the overlay), `confidence`, and `actions` — an ordered list
-  of one or more atomic actions (click, type, press_key, scroll, wait).
-  Most steps are a single action; decompose into multiple actions only
-  when several mechanical actions accomplish one user-perceived intent
-  (e.g. type then press Enter to submit a form).
+  reads on the overlay), `confidence`, and `actions` — an ordered
+  list of one or more atomic actions (click, type, press_key,
+  scroll, wait).
+- One step = one user-perceived intent. The mechanical actions that
+  carry out that intent live inside the SAME step. Bundle them.
+  Worked examples:
+    * "Sign in." — type username, press Tab, type password, click
+      Sign in. ONE step, four actions.
+    * "Submit the search." — type query, press Enter. ONE step,
+      two actions.
+    * "Send the message." — click the input, type, press Enter.
+      ONE step, three actions.
+- Bundle aggressively. Every step boundary costs the user a
+  confirmation tap AND the system a verifier LLM call. If actions
+  are tightly coupled and the user would not pause mentally between
+  them, they belong in one step.
+- Break into a new step ONLY when:
+    (a) the user must observe an intermediate result before deciding
+        the next action ("Did the upload finish? Now click Save."),
+    (b) a screen transition reveals UI you could not predict from
+        the previous screen ("Open the menu" then "Click the new
+        item that appeared"), or
+    (c) the next action is a `user_choice` — those are always their
+        own step.
 - Each action carries its own `requires_confirmation`. Default true
   for actions whose outcome is visible (click, type, scroll, drag);
   false for mechanical actions with no observable effect (press_key,
-  wait). When ANY action in a step has requires_confirmation=true, the
-  backend pauses for the user, then automatically requests a fresh
-  screen before the next step so YOU can re-validate. Use this as the
-  state-check signal — there is no separate confirm action.
+  wait). When ANY action in a step has requires_confirmation=true,
+  the backend pauses for the user once at the end of the step, then
+  automatically requests a fresh screen before the next step so YOU
+  can re-validate. Inside a bundled multi-action step the user does
+  not get poked between actions — they execute the whole intent and
+  confirm once.
 
 How the plan works:
 - The backend owns a cursor that moves forward as the user confirms
@@ -343,14 +364,20 @@ for type, key for press_key, expected_end_state for scroll,
 duration_ms for wait.
 
 Writing human_text (user-facing):
-- One short imperative sentence. Name the thing the user is doing,
-  not how to find it visually. "Open the Apple menu." not "Click
-  the small Apple logo in the top-left of the menu bar."
+- One short imperative sentence describing the user's INTENT, not
+  the mechanical sub-actions. "Sign in." beats "Type your username,
+  press Tab, type your password, click Sign in." The mechanical
+  details live in the `actions` array — human_text says WHY.
+- Name the thing the user is doing, not how to find it visually.
+  "Open the Apple menu." not "Click the small Apple logo in the
+  top-left of the menu bar."
 - No coordinates, no color cues, no position language. Visual
   scaffolding belongs in agent_description, not here.
-- Atomic. One verb, one target per step. If the recipe says
-  "click X, then choose Y, then click Z," that is three steps,
-  not one sentence.
+- One INTENT per step (not one verb per step — see "How a step is
+  shaped" above). If the recipe says "click X, then choose Y, then
+  click Z" and they accomplish ONE user-perceived goal, that is one
+  step with three actions. If they accomplish three goals the user
+  would naturally separate, it is three steps.
 
 Writing agent_description (a short target string handed to a
 visual-grounding model, never shown to the user verbatim):

@@ -2126,9 +2126,17 @@ def render_history(
     lines.append("")
     if draft_plan is not None:
         lines.append(
-            "Draft plan hypothesis (use to seed your first tutorial_update_plan "
-            "call; refine against the screen, drop or rewrite items that the "
-            "screen contradicts):"
+            "Web-enriched draft plan (produced by a search-grounded planner "
+            "using live web sources for this goal). This is the AUTHORITATIVE "
+            "starting plan for your first tutorial_update_plan call. Derive "
+            "your plan from these steps — keep the shape, ordering, and "
+            "wording wherever possible. You may only deviate from a step "
+            "when the latest screen actively contradicts it (UI not present, "
+            "different layout, user already past it); cite the contradiction "
+            "in plan_reasoning when you do. Do NOT invent a parallel plan "
+            "from the screen alone — the draft has web evidence the screen "
+            "does not. If a step has no visible UI yet, still include it; "
+            "the verifier will gate it when its turn arrives."
         )
         for index, step in enumerate(draft_plan.steps, start=1):
             lines.append(f"  {index}. [{step.kind}] {step.instruction}")

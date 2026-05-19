@@ -29,7 +29,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from backend.images import UploadedImage
+from backend.images import UploadedImage, downscale_for_verifier
 from backend.instruction_verifier import VerifierVerdict, classify_screen
 from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent, MultimodalLLM
 from backend.enrichment_client import EnrichmentSnippetsProducer
@@ -126,6 +126,7 @@ class TutorialSession:
     llm: MultimodalLLM
     emit: EventSink
     fast_llm: MultimodalLLM | None = None
+    verifier_llm: MultimodalLLM | None = None
     goal: str | None = None
     history: list[HistoryEntry] = field(default_factory=list)
     plan_steps: list[TutorialStep] = field(default_factory=list)
@@ -975,6 +976,15 @@ class TutorialSession:
             await self._run_agent_loop()
             return
         next_step = unwalked[0]
+        if next_step.actions and next_step.actions[0].type == "user_choice":
+            logger.info(
+                "[session] gate skipped; next action is user_choice",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": next_step.step_id,
+                },
+            )
+            return
         verdict = await self._verify_step_blocking(next_step)
         if verdict.ok:
             logger.info(
@@ -1020,8 +1030,9 @@ class TutorialSession:
         screen = self.latest_screen
         if screen is None:
             return VerifierVerdict(verdict="unsure", reason="no_screen")
-        verifier_llm = self.fast_llm or self.llm
+        verifier_llm = self.verifier_llm or self.fast_llm or self.llm
         prev_instruction = self._last_completed_instruction()
+        verifier_screen = await asyncio.to_thread(downscale_for_verifier, screen)
         await self.emit(InstructionVerificationStartedEvent(step_id=step.step_id))
         started_at = time.perf_counter()
         logger.info(
@@ -1032,7 +1043,8 @@ class TutorialSession:
                 "instruction": step.instruction[:120],
                 "previous_instruction": (prev_instruction or "")[:120],
                 "goal": (self.goal or "")[:120],
-                "screen_bytes": len(screen.data),
+                "screen_bytes": len(verifier_screen.data),
+                "screen_bytes_original": len(screen.data),
                 "screen_captured_at": (
                     self.screen_captured_at.isoformat()
                     if self.screen_captured_at else None
@@ -1045,7 +1057,7 @@ class TutorialSession:
                 classify_screen,
                 verifier_llm,
                 step.instruction,
-                screen,
+                verifier_screen,
                 self.goal,
                 prev_instruction,
             )
@@ -1115,7 +1127,7 @@ class TutorialSession:
         instruction: str,
         screen: UploadedImage,
     ) -> None:
-        verifier_llm = self.fast_llm or self.llm
+        verifier_llm = self.verifier_llm or self.fast_llm or self.llm
         await self.emit(InstructionVerificationStartedEvent(step_id=step_id))
         started_at = time.perf_counter()
         logger.info(

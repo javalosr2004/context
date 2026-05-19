@@ -21,8 +21,8 @@ class OpenAIClient:
         self,
         api_key: str,
         model: str,
-        reasoning_effort: str = "medium",
-        verbosity: str = "medium",
+        reasoning_effort: str | None = "medium",
+        verbosity: str | None = "medium",
         base_url: str | None = None,
     ) -> None:
         client_options: dict[str, str] = {"api_key": api_key}
@@ -153,17 +153,21 @@ def build_image_content(image: UploadedImage) -> dict[str, Any]:
 
 
 def build_response_params(
-    reasoning_effort: str,
-    verbosity: str,
+    reasoning_effort: str | None,
+    verbosity: str | None,
     enable_search_grounding: bool,
     response_mime_type: str | None,
     response_schema: dict[str, Any] | None,
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {
-        "reasoning": {"effort": reasoning_effort},
-        "text": {"format": build_text_format(response_mime_type, response_schema), "verbosity": verbosity},
+    text: dict[str, Any] = {
+        "format": build_text_format(response_mime_type, response_schema),
     }
+    if verbosity is not None:
+        text["verbosity"] = verbosity
+    params: dict[str, Any] = {"text": text}
+    if reasoning_effort is not None:
+        params["reasoning"] = {"effort": reasoning_effort}
     if tools:
         params["tools"] = tools.copy()
     if enable_search_grounding:

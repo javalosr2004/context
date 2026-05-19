@@ -21,6 +21,7 @@ DEFAULT_OPENAI_REASONING_EFFORT = "low"
 DEFAULT_OPENAI_VERBOSITY = "low"
 DEFAULT_OPENAI_FAST_REASONING_EFFORT = "minimal"
 DEFAULT_OPENAI_FAST_VERBOSITY = "low"
+DEFAULT_OPENAI_VERIFIER_MODEL = "gpt-4.1-mini"
 
 
 class LLMProviderConfigurationError(RuntimeError):
@@ -60,6 +61,29 @@ class LLMProvider:
         if provider == "gemini":
             return self._create_gemini_fast_client()
         return self.create_multimodal_llm()
+
+    def create_verifier_llm(self) -> MultimodalLLM:
+        """A small multimodal client tuned for the per-step gate.
+
+        The verifier does coarse "does this screen match this instruction"
+        classification — gpt-4.1-mini is plenty and 2-4× faster than the
+        fast_llm tier on this account. Always uses OpenAI when an
+        OPENAI_API_KEY is present so the model is consistent regardless of
+        the main provider; falls back to fast_llm otherwise.
+        """
+        if self.environment.get("OPENAI_API_KEY"):
+            api_key = self._required("OPENAI_API_KEY")
+            model = (
+                self.environment.get("OPENAI_VERIFIER_MODEL")
+                or DEFAULT_OPENAI_VERIFIER_MODEL
+            )
+            return OpenAIClient(
+                api_key=api_key,
+                model=model,
+                reasoning_effort=None,
+                verbosity=None,
+            )
+        return self.create_fast_llm()
 
     def _provider_name(self) -> str:
         return (self.environment.get("LLM_PROVIDER") or DEFAULT_LLM_PROVIDER).lower()

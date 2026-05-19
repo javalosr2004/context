@@ -39,7 +39,7 @@ class TutorialSessionStore:
         web_ground: WebGroundProducer | None = None,
         fast_llm: MultimodalLLM | None = None,
         verifier_llm: MultimodalLLM | None = None,
-        step_tools_enabled: bool = False,
+        step_tools_enabled: bool = True,
     ) -> None:
         self._llm = llm
         self._fast_llm = fast_llm or llm

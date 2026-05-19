@@ -183,6 +183,10 @@ class TutorialSession:
     # "capped_head" (planner emits the next 1–5 detailed steps and the
     # outer loop replans rather than proposing completion on head
     # exhaustion). See backend/tutorial_guide.tool_stream_system_prompt.
+    # NB: the dataclass default is "full_plan" so direct construction
+    # (mostly tests) gets the simpler legacy behavior. Production runs
+    # default to "capped_head" via TutorialSessionStore / the
+    # STEP_TOOLS_ENABLED env var (see backend/main.py).
     step_tools_mode: Literal["full_plan", "capped_head"] = "full_plan"
     # Bound for the capped_head replan-on-exhaustion loop: how many
     # times in a row may the outer loop regrow the head without any

@@ -63,9 +63,12 @@ class ExtraFieldsFormatter(logging.Formatter):
 
 
 def _step_tools_enabled_from_env() -> bool:
-    """Read the STEP_TOOLS_ENABLED A/B flag. Accepts the usual truthy
-    strings; anything else (including unset) is False."""
-    raw = os.environ.get("STEP_TOOLS_ENABLED", "")
+    """Read the STEP_TOOLS_ENABLED A/B flag. Defaults to True (capped-head
+    is now the default mode); set the env var to a falsy value to opt
+    back into the full-plan emission mode."""
+    raw = os.environ.get("STEP_TOOLS_ENABLED")
+    if raw is None:
+        return True
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 

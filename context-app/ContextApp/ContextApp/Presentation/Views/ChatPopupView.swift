@@ -153,6 +153,7 @@ struct ChatPopupView: View {
     @State private var stepJSONPreview: StepJSONPreview?
     @State private var instructionDraft = ""
     @State private var isInstructionInputVisible = false
+    @AppStorage("eval_mode_enabled") private var evalModeEnabled: Bool = false
     @State private var isSendingInstruction = false
     @State private var jpegQuality = 70
     @State private var loadingWordIndex = 0
@@ -758,6 +759,15 @@ struct ChatPopupView: View {
                 keyboardHint("⌘K")
             }
 
+            if evalModeEnabled, currentStepForAdvance != nil {
+                evalAnnotationButton(systemName: "checkmark", help: "Mark step correct") {
+                    Task { await sessionController.sendStepAnnotation(verdict: .correct) }
+                }
+                evalAnnotationButton(systemName: "xmark", help: "Mark step off-track") {
+                    Task { await sessionController.sendStepAnnotation(verdict: .offTrack) }
+                }
+            }
+
             Button(action: advanceCurrentStep) {
                 Image(systemName: "arrow.right")
                     .font(.system(size: 12, weight: .semibold))
@@ -779,6 +789,24 @@ struct ChatPopupView: View {
                 .fill(OverlayTheme.separator)
                 .frame(height: 0.5)
         }
+    }
+
+    private func evalAnnotationButton(
+        systemName: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color.white.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .help(help)
     }
 
     private func keyboardHint(_ text: String) -> some View {

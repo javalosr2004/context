@@ -36,8 +36,10 @@ from backend.tutorial_session_events import (
     UserConfirmationEvent,
     UserMessageEvent,
     UserScreenEvent,
+    UserStepAnnotationEvent,
     client_session_event_adapter,
 )
+from backend.session_event_log import SessionEventLog
 from backend.tutorial_session_store import TutorialSessionError, TutorialSessionStore
 
 logger = logging.getLogger(__name__)
@@ -181,8 +183,10 @@ def create_app() -> FastAPI:
             return
 
         send_lock = asyncio.Lock()
+        event_log = SessionEventLog(session_id)
 
         async def emit(event: ServerSessionEvent) -> None:
+            event_log.write("server", event)
             async with send_lock:
                 await send_server_event(websocket, event)
 
@@ -216,6 +220,8 @@ def create_app() -> FastAPI:
                 except ValueError as error:
                     await emit(ErrorEvent(code="invalid_event", message=str(error)))
                     continue
+
+                event_log.write("client", event)
 
                 try:
                     await dispatch_client_event(session, event)
@@ -269,6 +275,10 @@ async def dispatch_client_event(session, event) -> None:  # type: ignore[no-unty
             event.note,
         )
         return
+    if isinstance(event, UserStepAnnotationEvent):
+        # Eval annotations don't drive session state — they're persisted by
+        # the event log sink and extracted into fixtures offline.
+        return
 
 
 def get_conversation_repository() -> ConversationRepository:
@@ -289,6 +299,13 @@ def get_fast_multimodal_llm() -> MultimodalLLM:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
+def get_verifier_llm() -> MultimodalLLM:
+    try:
+        return LLMProvider.from_environment().create_verifier_llm()
+    except LLMProviderConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 def get_tutorial_guide(
     llm: MultimodalLLM = Depends(get_multimodal_llm),
 ) -> TutorialGuide:
@@ -299,12 +316,14 @@ def get_tutorial_session_store(
     connection: HTTPConnection,
     llm: MultimodalLLM = Depends(get_multimodal_llm),
     fast_llm: MultimodalLLM = Depends(get_fast_multimodal_llm),
+    verifier_llm: MultimodalLLM = Depends(get_verifier_llm),
 ) -> TutorialSessionStore:
     store = getattr(connection.app.state, "tutorial_session_store", None)
     if store is None:
         store = TutorialSessionStore(
             llm,
             fast_llm=fast_llm,
+            verifier_llm=verifier_llm,
             web_ground=web_ground_producer_from_environment(),
         )
         connection.app.state.tutorial_session_store = store

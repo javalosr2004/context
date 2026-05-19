@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CryptoKit
 import Dispatch
 import Foundation
 import OSLog
@@ -73,6 +74,9 @@ final class TutorialSessionController: ObservableObject {
     @Published private(set) var webSources: [TutorialSessionWebSource] = []
     @Published private(set) var stepProgress: (stepIndex: Int, totalSteps: Int, actionIndex: Int, totalActions: Int)?
     @Published private(set) var lastPlanDiff: (frozenPrefixLen: Int, newTailLen: Int, refinedCurrent: Bool, totalSteps: Int)?
+    /// SHA-256 of the most recent screen capture's JPEG bytes. Used to join
+    /// eval annotations to the frame the annotator was looking at.
+    @Published private(set) var lastFrameHash: String?
 
     private let capture: ScreenFrameCapture
     private let client: TutorialSessionAPIClient
@@ -588,10 +592,37 @@ final class TutorialSessionController: ObservableObject {
             screenFrame: screen.frame,
             ignoredWindowFrames: ignoredWindowFrames
         )
+        let digest = SHA256.hash(data: screenJPEGData)
+        lastFrameHash = digest.map { String(format: "%02x", $0) }.joined()
         return TutorialSessionScreenSnapshot(
             mimeType: "image/jpeg",
             dataBase64: screenJPEGData.base64EncodedString()
         )
+    }
+
+    func sendStepAnnotation(
+        verdict: StepAnnotationVerdict,
+        note: String? = nil,
+        category: StepAnnotationCategory? = nil,
+        corrections: StepAnnotationCorrections? = nil
+    ) async {
+        guard let stepID = currentStepID else { return }
+        let actionIndex = currentActionIndex ?? 0
+        do {
+            try await sendSessionEvent(
+                .userStepAnnotation(
+                    stepID: stepID,
+                    actionIndex: actionIndex,
+                    frameHash: lastFrameHash,
+                    verdict: verdict,
+                    category: category,
+                    note: note,
+                    corrections: corrections
+                )
+            )
+        } catch {
+            logger.error("sendStepAnnotation failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func captureFrameWithTimeout(on screen: NSScreen) async throws -> CapturedScreenFrame {

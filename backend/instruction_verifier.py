@@ -1,12 +1,19 @@
 """Single-shot screen-vs-instruction classifier for tutorial verification.
 
 When the user advances to a new instruction (the parent of [actions]),
-the session asks a fast multimodal LLM whether the current screen is a
-plausible starting state for the instruction. A "no" verdict triggers
-replan; a "yes" lets the user proceed.
+the session asks a fast multimodal LLM to classify the current screen
+relative to that instruction:
 
-Fail-open: any error or unparseable response returns a "yes" verdict so
-a flaky verifier never locks the user out of the tutorial.
+    on_track  — screen is a plausible starting state; proceed.
+    blocked   — a concrete element (modal, error, sign-in wall) prevents
+                attempting the instruction; replan.
+    diverged  — screen is a coherent app state, but not the one this
+                instruction assumes; the user is somewhere else in the
+                flow (often already past it). Replan.
+    unsure    — verifier can't tell. Fail-open: proceed.
+
+Fail-open: any error or unparseable response yields `unsure` so a flaky
+verifier never locks the user out of the tutorial.
 """
 
 from __future__ import annotations
@@ -15,6 +22,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from typing import Literal
 
 from backend.images import UploadedImage
 from backend.llm import LLMRequest, MultimodalLLM
@@ -23,43 +31,69 @@ from backend.llm import LLMRequest, MultimodalLLM
 logger = logging.getLogger(__name__)
 
 
+Verdict = Literal["on_track", "blocked", "diverged", "unsure"]
+_VALID_VERDICTS: frozenset[str] = frozenset(
+    {"on_track", "blocked", "diverged", "unsure"}
+)
+
+
 VERIFIER_SYSTEM_PROMPT = (
-    "You are a safety check for a tutorial overlay. The user is about to "
-    "attempt the next instruction. Your only job is to detect when the "
-    "screen is CLEARLY INCONSISTENT with that instruction — for example: "
-    "an unrelated application is in focus, an error dialog is blocking "
-    "the UI, the user is on a sign-in wall when the instruction assumes "
-    "they are signed in, or the previous step obviously failed. \n\n"
-    "Default to 'yes'. Only answer 'no' when you can point to a SPECIFIC "
-    "blocking element (name it or quote its text). If the screen merely "
-    "lacks the exact element named in the instruction, that is NOT a "
-    "blocker — the instruction's element may be one click or scroll "
-    "away. Answer 'unsure' only when something looks off but you cannot "
-    "name a concrete blocker.\n\n"
-    "Respond strictly as JSON with two fields: verdict (one of 'yes', "
-    "'no', 'unsure') and evidence (one short sentence naming the "
-    "blocking element for 'no', or what looks plausible for 'yes'). "
-    "Do not include any text outside the JSON object."
+    "You classify whether the user's screen matches the next tutorial "
+    "instruction. Choose exactly one verdict:\n\n"
+    "  on_track  — the screen is a plausible starting state for this "
+    "instruction. The exact target element does NOT need to be visible; "
+    "the user may need to click, scroll, or navigate one hop to reach "
+    "it. This is the default when nothing is clearly wrong.\n"
+    "  blocked   — a specific element prevents attempting the "
+    "instruction: a modal/error dialog, a sign-in wall, an OS permission "
+    "prompt, or visible evidence the previous step failed. Name the "
+    "element.\n"
+    "  diverged  — the screen shows a coherent app state, but it is NOT "
+    "where this instruction assumes the user is. Common cases: the user "
+    "has already completed this step (and likely later ones) — e.g. the "
+    "instruction says 'sign up' but the screen shows a signed-in "
+    "dashboard; the user is in a different app or a different section of "
+    "the flow than the instruction expects. Name what you see vs. what "
+    "the instruction assumes.\n"
+    "  unsure    — you cannot confidently pick one of the above.\n\n"
+    "Bias: prefer on_track. Only pick blocked/diverged when you can "
+    "point to a specific element or contradiction. Respond strictly as "
+    'JSON: {"verdict": "on_track"|"blocked"|"diverged"|"unsure", '
+    '"evidence": "one short sentence"}. No text outside the JSON.'
 )
 
 
 @dataclass(frozen=True)
 class VerifierVerdict:
-    ok: bool
+    verdict: Verdict
     reason: str
 
+    @property
+    def ok(self) -> bool:
+        """True when the gate should let the walk proceed without replan."""
+        return self.verdict in ("on_track", "unsure")
 
-def build_request(instruction: str, screen: UploadedImage) -> LLMRequest:
+
+def build_request(
+    instruction: str,
+    screen: UploadedImage,
+    goal: str | None = None,
+) -> LLMRequest:
+    goal_line = (
+        f"Overall tutorial goal: {goal}\n\n" if goal else ""
+    )
     user_text = (
+        f"{goal_line}"
         f"Next instruction the user will attempt: {instruction}\n\n"
-        "Look at the screenshot. Is there a SPECIFIC blocker that makes "
-        "this instruction impossible to attempt right now — wrong app in "
-        "focus, modal error, sign-in wall, prior step visibly failed? "
-        "Name the blocking element if so. Otherwise answer 'yes' — the "
-        "target element doesn't need to be visible on screen; the user "
-        "may need to click, scroll, or navigate to reach it.\n\n"
-        'Respond with JSON: {"verdict": "yes"|"no"|"unsure", '
-        '"evidence": "..."}'
+        "Classify the screen as on_track, blocked, diverged, or unsure. "
+        "Pick blocked only if a specific element (modal, error, sign-in "
+        "wall, OS prompt) prevents the instruction. Pick diverged only "
+        "if the screen is a coherent state that contradicts where this "
+        "instruction assumes the user is — most often because they've "
+        "already completed it (e.g. instruction says 'sign up' but the "
+        "screen is the signed-in dashboard). Otherwise prefer on_track.\n\n"
+        'Respond with JSON: {"verdict": "on_track"|"blocked"|"diverged"'
+        '|"unsure", "evidence": "..."}'
     )
     return LLMRequest(
         system_prompt=VERIFIER_SYSTEM_PROMPT,
@@ -68,6 +102,19 @@ def build_request(instruction: str, screen: UploadedImage) -> LLMRequest:
         temperature=0,
         response_mime_type="application/json",
     )
+
+
+def _normalize_verdict(raw: str) -> Verdict | None:
+    """Map raw verdict strings (incl. legacy yes/no) to the new enum."""
+    v = raw.strip().lower()
+    if v in _VALID_VERDICTS:
+        return v  # type: ignore[return-value]
+    # Backward-compat for the old yes/no/unsure prompt.
+    if v == "yes":
+        return "on_track"
+    if v == "no":
+        return "blocked"
+    return None
 
 
 def parse_verdict(raw: str) -> VerifierVerdict:
@@ -79,39 +126,37 @@ def parse_verdict(raw: str) -> VerifierVerdict:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        return VerifierVerdict(ok=True, reason="verifier_unparseable")
+        return VerifierVerdict(verdict="unsure", reason="verifier_unparseable")
     if not isinstance(payload, dict):
-        return VerifierVerdict(ok=True, reason="verifier_unparseable")
-    verdict = str(payload.get("verdict", "")).strip().lower()
+        return VerifierVerdict(verdict="unsure", reason="verifier_unparseable")
+    verdict = _normalize_verdict(str(payload.get("verdict", "")))
     evidence = (
         str(payload.get("evidence", "")).strip()
         or str(payload.get("reason", "")).strip()
         or "no evidence given"
     )
-    if verdict == "no":
-        return VerifierVerdict(ok=False, reason=evidence)
-    if verdict == "unsure":
-        # Pass through — a precondition gate shouldn't replan on doubt;
-        # only a confident "no" (a named blocker) interrupts the walk.
-        return VerifierVerdict(ok=True, reason=f"unsure: {evidence}")
-    return VerifierVerdict(ok=True, reason=evidence)
+    if verdict is None:
+        # Unknown label: fail-open as unsure so the walk continues.
+        return VerifierVerdict(verdict="unsure", reason=evidence)
+    return VerifierVerdict(verdict=verdict, reason=evidence)
 
 
 def classify_screen(
     llm: MultimodalLLM,
     instruction: str,
     screen: UploadedImage,
+    goal: str | None = None,
 ) -> VerifierVerdict:
     """Sync, single-shot classification. Caller should run in a thread."""
     started_at = time.perf_counter()
     try:
-        raw = llm.complete_text(build_request(instruction, screen))
+        raw = llm.complete_text(build_request(instruction, screen, goal))
     except Exception:
         logger.exception(
             "[verifier] llm call failed",
             extra={"elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2)},
         )
-        return VerifierVerdict(ok=True, reason="verifier_error")
+        return VerifierVerdict(verdict="unsure", reason="verifier_error")
     llm_elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
     logger.info(
         "[verifier] llm_call",
@@ -127,6 +172,7 @@ def classify_screen(
             "instruction": instruction[:120],
             "raw_chars": len(raw),
             "raw_preview": raw.strip()[:200],
+            "verdict": verdict.verdict,
             "parsed_ok": verdict.ok,
             "parsed_reason": verdict.reason,
         },

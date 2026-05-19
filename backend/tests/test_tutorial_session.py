@@ -578,7 +578,7 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(verified[-1].ok)
         self.assertTrue(
             any(
-                "Screen verification failed for step_002" in entry.content
+                "Screen blocks step step_002" in entry.content
                 for entry in session.history
                 if entry.role == "user"
             )

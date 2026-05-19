@@ -979,13 +979,23 @@ class TutorialSession:
             extra={
                 "session_id": self.session_id,
                 "step_id": next_step.step_id,
+                "verdict": verdict.verdict,
                 "reason": verdict.reason,
             },
         )
-        note = (
-            f"Screen verification failed for {next_step.step_id}: "
-            f"{verdict.reason}. Re-plan from the current screen."
-        )
+        if verdict.verdict == "diverged":
+            note = (
+                f"Screen does not match step {next_step.step_id} "
+                f"({next_step.instruction!r}): {verdict.reason}. The user "
+                "appears to be elsewhere in (or past) this flow. Re-plan "
+                "from the current screen — drop steps the user has already "
+                "completed, and adapt to where they actually are."
+            )
+        else:
+            note = (
+                f"Screen blocks step {next_step.step_id}: "
+                f"{verdict.reason}. Re-plan from the current screen."
+            )
         self.history.append(HistoryEntry(role="user", content=note))
         completed = set(self.completed_step_ids)
         self.plan_steps = [s for s in self.plan_steps if s.step_id in completed]
@@ -997,7 +1007,7 @@ class TutorialSession:
         return the verdict. Fail-open on errors via classify_screen."""
         screen = self.latest_screen
         if screen is None:
-            return VerifierVerdict(ok=True, reason="no_screen")
+            return VerifierVerdict(verdict="unsure", reason="no_screen")
         verifier_llm = self.fast_llm or self.llm
         await self.emit(InstructionVerificationStartedEvent(step_id=step.step_id))
         started_at = time.perf_counter()
@@ -1007,6 +1017,7 @@ class TutorialSession:
                 "session_id": self.session_id,
                 "step_id": step.step_id,
                 "instruction": step.instruction[:120],
+                "goal": (self.goal or "")[:120],
                 "screen_bytes": len(screen.data),
                 "screen_captured_at": (
                     self.screen_captured_at.isoformat()
@@ -1017,7 +1028,11 @@ class TutorialSession:
         )
         try:
             verdict = await asyncio.to_thread(
-                classify_screen, verifier_llm, step.instruction, screen
+                classify_screen,
+                verifier_llm,
+                step.instruction,
+                screen,
+                self.goal,
             )
         except asyncio.CancelledError:
             logger.info(
@@ -1035,7 +1050,7 @@ class TutorialSession:
                 extra={"session_id": self.session_id, "step_id": step.step_id},
             )
             # Fail-open: don't lock the user out on a verifier glitch.
-            return VerifierVerdict(ok=True, reason="gate_error")
+            return VerifierVerdict(verdict="unsure", reason="gate_error")
         elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
         self._last_gate_elapsed_ms = elapsed_ms
         logger.info(
@@ -1043,6 +1058,7 @@ class TutorialSession:
             extra={
                 "session_id": self.session_id,
                 "step_id": step.step_id,
+                "verdict": verdict.verdict,
                 "ok": verdict.ok,
                 "reason": verdict.reason,
                 "elapsed_ms": elapsed_ms,
@@ -1103,7 +1119,7 @@ class TutorialSession:
         )
         try:
             verdict: VerifierVerdict = await asyncio.to_thread(
-                classify_screen, verifier_llm, instruction, screen
+                classify_screen, verifier_llm, instruction, screen, self.goal
             )
         except asyncio.CancelledError:
             logger.info(
@@ -1128,6 +1144,7 @@ class TutorialSession:
             extra={
                 "session_id": self.session_id,
                 "step_id": step_id,
+                "verdict": verdict.verdict,
                 "ok": verdict.ok,
                 "reason": verdict.reason,
                 "elapsed_ms": elapsed_ms,

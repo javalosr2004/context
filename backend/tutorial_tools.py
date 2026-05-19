@@ -109,7 +109,21 @@ class _ActionPayloadBase(_StrictModel):
 
 class ClickAction(_ActionPayloadBase):
     kind: Literal["click"]
-    agent_description: str = Field(min_length=1)
+    agent_description: str = Field(
+        min_length=1,
+        description=(
+            "Short target name handed to a visual-grounding model. Use the "
+            "canonical on-screen label or conventional control name as a "
+            "human would say it: 'Sign up', 'the Apple menu', 'the "
+            "username field', 'the Storage row in System Settings'. 2–8 "
+            "words. Add a small parent-container disambiguator only when "
+            "identity is genuinely ambiguous ('Sign up in the page "
+            "header'). Do NOT describe pixel appearance (color, shape, "
+            "icon glyph), absolute position ('top-right', 'lower-left', "
+            "'above the divider'), or chain multiple spatial clauses — "
+            "the grounder sees the same screen and does the looking."
+        ),
+    )
     requires_confirmation: bool = Field(
         default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
     )
@@ -118,7 +132,21 @@ class ClickAction(_ActionPayloadBase):
 class TypeAction(_ActionPayloadBase):
     kind: Literal["type"]
     copiable_text: str = Field(min_length=1)
-    agent_description: str = Field(min_length=1)
+    agent_description: str = Field(
+        min_length=1,
+        description=(
+            "Short target name handed to a visual-grounding model. Use the "
+            "canonical on-screen label or conventional control name as a "
+            "human would say it: 'Sign up', 'the Apple menu', 'the "
+            "username field', 'the Storage row in System Settings'. 2–8 "
+            "words. Add a small parent-container disambiguator only when "
+            "identity is genuinely ambiguous ('Sign up in the page "
+            "header'). Do NOT describe pixel appearance (color, shape, "
+            "icon glyph), absolute position ('top-right', 'lower-left', "
+            "'above the divider'), or chain multiple spatial clauses — "
+            "the grounder sees the same screen and does the looking."
+        ),
+    )
     requires_confirmation: bool = Field(
         default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
     )

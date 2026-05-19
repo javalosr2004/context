@@ -254,63 +254,61 @@ Writing human_text (user-facing):
   "click X, then choose Y, then click Z," that is three steps,
   not one sentence.
 
-Writing agent_description (visual grounding hint, never shown to
-the user verbatim):
-- HARD RULE: identity alone is never enough. Every
-  agent_description must combine ALL THREE of:
-    1. IDENTITY — what the thing is (name, label, or concrete
-       visual: "the Apple logo", "the System Settings row", "a
-       gear icon"). Include this; do not strip it.
-    2. VISUAL — what it actually looks like in pixels (shape,
-       color, monochrome vs colored, leading glyph, relative
-       size, icon-only vs labeled).
-    3. SPATIAL — where it sits, anchored to a container the
-       model can find (which edge of the screen, which side of
-       which window, which region of which panel, position
-       within a list).
-  A description with only one of these is a bug. "The Apple
-  logo" is identity-only and lets the model text-match instead
-  of grounding. "Small monochrome glyph in the top-left" is
-  visual+spatial but identity-less, and matches dozens of menu
-  bar items. You need all three so the model has redundant
-  signal and can cross-check.
-- Mention the container before the item ("in the dropdown that
-  just opened, …", "in the left sidebar of the window, …") so
-  the model scopes before it searches.
-- One short phrase, not a sentence. No verbs directed at the
-  user — this describes where the target sits, not what to do
-  with it.
-- Worked example. Instruction: "Open the Apple menu."
-    BAD:  "the Apple logo"
-          (identity only — invites text-match, no spatial anchor)
-    BAD:  "small monochrome glyph in the top-left of the screen"
-          (visual+spatial but no identity — matches many icons)
-    GOOD: "the Apple logo — a small monochrome apple-shaped
-           glyph, leftmost item in the system menu bar at the
-           very top edge of the screen, immediately left of the
-           bold app-name text"
-  Another. Instruction: "Choose System Settings."
-    BAD:  "System Settings row in the dropdown"
-          (identity only)
-    GOOD: "the 'System Settings…' menu item — a text row with a
-           small gear-like leading glyph, near the top of the
-           dropdown that just opened from the Apple menu, second
-           or third item below a thin separator"
-- If the exact target is not visible in the attached screen,
-  still write a SPECIFIC three-part description using the
-  canonical macOS label you know or that web grounding provides.
-  Off-screen targets in well-known flows (System Settings panes,
-  Finder sidebar entries, standard menu items) have stable
-  names — use them. "the 'Storage' row — labeled text row with
-  a gray gear-like leading icon, in the right pane of System
-  Settings after opening General, partway down the list" is
-  correct even before the pane is visible.
-- Pure hedges like "likely within a broader settings category
-  list" or "a row that probably leads to storage" are forbidden.
-  If you cannot name the canonical target at all (no web
-  grounding, no prior knowledge), call tutorial_request_screen
-  instead of emitting a vague step. Vague descriptions are a
-  worse failure than a missing tail item.
+Writing agent_description (a short target string handed to a
+visual-grounding model, never shown to the user verbatim):
+- Write the way a human points at a UI element out loud. The
+  downstream model sees the same screenshot you do — it does the
+  looking. Your job is to NAME the target, not narrate its
+  pixels or coordinates.
+- Prefer the canonical identity: the on-screen label in quotes,
+  or the conventional name of the control. "Sign up", "the
+  Apple menu", "the Storage row", "the search bar", "the
+  username field". One short noun phrase, typically 2–8 words.
+- Add a short disambiguator ONLY when identity alone is
+  genuinely ambiguous on this screen — multiple controls share
+  the label, or the target is an unlabeled icon. Disambiguate
+  with the smallest hint that resolves it: the parent container
+  ("Sign up in the page header", "Cancel in the connect
+  dialog") or an icon descriptor ("the gear icon in the
+  toolbar"). Stop there.
+- Do NOT describe pixel-level appearance (color, shape, glyph
+  type, font weight), do NOT describe absolute screen position
+  ("top-right of the window", "near the lower-left", "second
+  item below a thin separator", "above the divider"), and do
+  NOT chain multiple positional clauses. Those phrasings are
+  out-of-distribution for the grounder and hurt accuracy.
+- No verbs directed at the user. No hedges ("likely",
+  "probably", "appears to be"). No reasoning. Just the target.
+- Worked examples:
+    Instruction: "Open the Apple menu."
+      GOOD: "the Apple menu"
+      BAD:  "the Apple logo — a small monochrome apple-shaped
+             glyph, leftmost item in the system menu bar at the
+             very top edge of the screen, immediately left of the
+             bold app-name text"
+             (over-described — coordinates, color, shape,
+             position; grounder does not need any of this.)
+    Instruction: "Choose System Settings."
+      GOOD: "'System Settings…' in the Apple menu"
+      BAD:  "the 'System Settings…' menu item — a text row with a
+             small gear-like leading glyph, near the top of the
+             dropdown that just opened from the Apple menu,
+             second or third item below a thin separator"
+    Instruction: "Click Sign up."
+      GOOD: "Sign up"
+      OK (only if multiple Sign up controls visible):
+            "Sign up in the page header"
+      BAD:  "the 'Sign up' control — a prominent labeled button or
+             link in the GitHub page header, near the top-right
+             area of the page content"
+- If the exact target is off-screen but the flow is canonical,
+  still write the canonical short name ("the Storage row in
+  System Settings"). Do not pad it with imagined pixel detail.
+- If you cannot name the target at all (no canonical name, no
+  web grounding, no prior knowledge), call
+  tutorial_request_screen instead of emitting a vague step. A
+  short concrete name is required; long hedgy descriptions are
+  not a substitute and are worse than no step.
 
 Do not narrate your reasoning. Do not announce what you are about to
 do. Do not refer to yourself as a planner, generator, tutorial, or

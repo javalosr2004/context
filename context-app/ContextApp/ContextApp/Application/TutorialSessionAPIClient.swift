@@ -86,6 +86,7 @@ enum TutorialSessionClientEvent: Codable, Equatable {
     )
     case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
     case userCompletionResponse(confirmed: Bool, note: String?)
+    case userAnswer(batchID: String, answers: [TutorialUserAnswer])
     case userStepAnnotation(
         stepID: String,
         actionIndex: Int,
@@ -110,6 +111,8 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         case verdict
         case category
         case corrections
+        case batchID = "batch_id"
+        case answers
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +153,11 @@ enum TutorialSessionClientEvent: Codable, Equatable {
             self = .userCompletionResponse(
                 confirmed: try container.decode(Bool.self, forKey: .confirmed),
                 note: try container.decodeIfPresent(String.self, forKey: .note)
+            )
+        case "user_answer":
+            self = .userAnswer(
+                batchID: try container.decode(String.self, forKey: .batchID),
+                answers: try container.decode([TutorialUserAnswer].self, forKey: .answers)
             )
         case "user_step_annotation":
             self = .userStepAnnotation(
@@ -199,6 +207,10 @@ enum TutorialSessionClientEvent: Codable, Equatable {
             try container.encode("user_completion_response", forKey: .type)
             try container.encode(confirmed, forKey: .confirmed)
             try container.encodeIfPresent(note, forKey: .note)
+        case .userAnswer(let batchID, let answers):
+            try container.encode("user_answer", forKey: .type)
+            try container.encode(batchID, forKey: .batchID)
+            try container.encode(answers, forKey: .answers)
         case .userStepAnnotation(let stepID, let actionIndex, let frameHash, let verdict, let category, let note, let corrections):
             try container.encode("user_step_annotation", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
@@ -215,6 +227,39 @@ enum TutorialSessionClientEvent: Codable, Equatable {
 struct TutorialSessionWebSource: Codable, Equatable {
     let title: String
     let url: String
+}
+
+enum TutorialAssistantQuestionResponseMode: String, Codable, Equatable {
+    case options
+    case freeText = "free_text"
+}
+
+struct TutorialAssistantQuestion: Codable, Equatable, Identifiable {
+    let questionID: String
+    let prompt: String
+    let responseMode: TutorialAssistantQuestionResponseMode
+    let options: [String]
+    let allowsCustomAnswer: Bool
+
+    var id: String { questionID }
+
+    private enum CodingKeys: String, CodingKey {
+        case questionID = "question_id"
+        case prompt
+        case responseMode = "response_mode"
+        case options
+        case allowsCustomAnswer = "allows_custom_answer"
+    }
+}
+
+struct TutorialUserAnswer: Codable, Equatable {
+    let questionID: String
+    let text: String
+
+    private enum CodingKeys: String, CodingKey {
+        case questionID = "question_id"
+        case text
+    }
 }
 
 enum TutorialSessionServerEvent: Codable, Equatable {
@@ -237,6 +282,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case stepProgress(stepID: String, stepIndex: Int, totalSteps: Int, actionIndex: Int, totalActions: Int)
     case sessionCompleted
     case completionProposed(reason: String, source: String)
+    case assistantQuestion(batchID: String, reason: String, questions: [TutorialAssistantQuestion])
     case instructionVerificationStarted(stepID: String)
     case instructionVerified(stepID: String, ok: Bool, reason: String?)
     case error(code: String, message: String)
@@ -269,6 +315,8 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case stepIndex = "step_index"
         case totalActions = "total_actions"
         case ok
+        case batchID = "batch_id"
+        case questions
     }
 
     init(from decoder: Decoder) throws {
@@ -345,6 +393,12 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .completionProposed(
                 reason: try container.decode(String.self, forKey: .reason),
                 source: try container.decode(String.self, forKey: .source)
+            )
+        case "assistant_question":
+            self = .assistantQuestion(
+                batchID: try container.decode(String.self, forKey: .batchID),
+                reason: try container.decode(String.self, forKey: .reason),
+                questions: try container.decode([TutorialAssistantQuestion].self, forKey: .questions)
             )
         case "instruction_verification_started":
             self = .instructionVerificationStarted(
@@ -441,6 +495,11 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             try container.encode("completion_proposed", forKey: .type)
             try container.encode(reason, forKey: .reason)
             try container.encode(source, forKey: .source)
+        case .assistantQuestion(let batchID, let reason, let questions):
+            try container.encode("assistant_question", forKey: .type)
+            try container.encode(batchID, forKey: .batchID)
+            try container.encode(reason, forKey: .reason)
+            try container.encode(questions, forKey: .questions)
         case .instructionVerificationStarted(let stepID):
             try container.encode("instruction_verification_started", forKey: .type)
             try container.encode(stepID, forKey: .stepID)

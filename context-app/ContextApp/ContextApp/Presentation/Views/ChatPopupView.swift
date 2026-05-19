@@ -243,6 +243,10 @@ struct ChatPopupView: View {
                     )
             }
 
+            if let batch = sessionController.pendingQuestionBatch {
+                questionCard(batch)
+            }
+
             askBar
         }
         .frame(width: 340)
@@ -887,6 +891,18 @@ struct ChatPopupView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private func questionCard(_ batch: PendingQuestionBatch) -> some View {
+        QuestionCardView(
+            batch: batch,
+            onSubmit: { answers in
+                Task { await sessionController.submitQuestionAnswers(answers) }
+            }
         )
         .padding(.horizontal, 12)
         .padding(.top, 10)
@@ -2169,5 +2185,262 @@ private struct DraftPlanPreviewSheet: View {
         }
         .padding(16)
         .frame(width: 452)
+    }
+}
+
+// MARK: - Clarifying question card
+
+/// Renders a turn-0 ``PendingQuestionBatch`` from the planner: 1-4
+/// questions in a vertical stack, each with either a chip-list of
+/// suggested options plus an "Other..." text field, or a single
+/// free-text field. The Send button only enables once every question
+/// has a non-empty answer.
+private struct QuestionCardView: View {
+    let batch: PendingQuestionBatch
+    let onSubmit: ([String: String]) -> Void
+
+    @State private var selectedOption: [String: String] = [:]
+    @State private var customText: [String: String] = [:]
+    @State private var isCustom: [String: Bool] = [:]
+
+    private var answers: [String: String] {
+        var result: [String: String] = [:]
+        for question in batch.questions {
+            let value = currentAnswer(for: question)
+            if !value.isEmpty {
+                result[question.questionID] = value
+            }
+        }
+        return result
+    }
+
+    private var canSubmit: Bool {
+        answers.count == batch.questions.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(batch.questions) { question in
+                    questionBlock(question)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button(action: submit) {
+                    Text(batch.questions.count == 1 ? "Send answer" : "Send answers")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(canSubmit ? OverlayTheme.invertedForeground : OverlayTheme.tertiaryText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(canSubmit ? OverlayTheme.invertedAccent : OverlayTheme.strongerFill)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSubmit)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 11, weight: .medium))
+                Text("Quick question\(batch.questions.count == 1 ? "" : "s")")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.42)
+                    .textCase(.uppercase)
+            }
+            .foregroundStyle(OverlayTheme.tertiaryText)
+
+            Text(batch.reason)
+                .font(.system(size: 12))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func questionBlock(_ question: TutorialAssistantQuestion) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(question.prompt)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            switch question.responseMode {
+            case .options:
+                optionsField(question)
+            case .freeText:
+                freeTextField(question)
+            }
+        }
+    }
+
+    private func optionsField(_ question: TutorialAssistantQuestion) -> some View {
+        let chosen = selectedOption[question.questionID]
+        let isOther = isCustom[question.questionID] ?? false
+
+        return VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 6) {
+                ForEach(question.options, id: \.self) { option in
+                    optionChip(
+                        title: option,
+                        isSelected: !isOther && chosen == option,
+                        action: {
+                            selectedOption[question.questionID] = option
+                            isCustom[question.questionID] = false
+                        }
+                    )
+                }
+                if question.allowsCustomAnswer {
+                    optionChip(
+                        title: "Other…",
+                        isSelected: isOther,
+                        action: {
+                            isCustom[question.questionID] = true
+                            selectedOption[question.questionID] = nil
+                        }
+                    )
+                }
+            }
+
+            if isOther {
+                customTextField(for: question, placeholder: "Type your answer")
+            }
+        }
+    }
+
+    private func freeTextField(_ question: TutorialAssistantQuestion) -> some View {
+        customTextField(for: question, placeholder: "Type your answer")
+    }
+
+    private func customTextField(for question: TutorialAssistantQuestion, placeholder: String) -> some View {
+        TextField(
+            placeholder,
+            text: Binding(
+                get: { customText[question.questionID] ?? "" },
+                set: { customText[question.questionID] = $0 }
+            )
+        )
+        .textFieldStyle(.plain)
+        .font(.system(size: 12.5))
+        .foregroundStyle(OverlayTheme.primaryText)
+        .tint(OverlayTheme.primaryText)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(OverlayTheme.strongerFill)
+        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .onSubmit {
+            if canSubmit { submit() }
+        }
+    }
+
+    private func optionChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isSelected ? OverlayTheme.invertedForeground : OverlayTheme.primaryText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? OverlayTheme.invertedAccent : OverlayTheme.strongerFill)
+                .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous)
+                        .stroke(isSelected ? Color.clear : OverlayTheme.hairline, lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func currentAnswer(for question: TutorialAssistantQuestion) -> String {
+        switch question.responseMode {
+        case .freeText:
+            return (customText[question.questionID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        case .options:
+            if isCustom[question.questionID] ?? false {
+                return (customText[question.questionID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return (selectedOption[question.questionID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func submit() {
+        guard canSubmit else { return }
+        onSubmit(answers)
+    }
+}
+
+/// Minimal flow layout for wrapping option chips. Native ``Layout``
+/// keeps this lightweight; we don't depend on a third-party package.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let rows = layoutRows(subviews: subviews, maxWidth: maxWidth)
+        let height = rows.reduce(CGFloat(0)) { partial, row in
+            partial + row.height + (partial == 0 ? 0 : spacing)
+        }
+        return CGSize(width: maxWidth.isFinite ? maxWidth : rows.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let maxWidth = bounds.width
+        let rows = layoutRows(subviews: subviews, maxWidth: maxWidth)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                let size = subviews[item.index].sizeThatFits(.unspecified)
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: y),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var items: [(index: Int, width: CGFloat)] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func layoutRows(subviews: Subviews, maxWidth: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let projected = current.width + (current.items.isEmpty ? 0 : spacing) + size.width
+            if !current.items.isEmpty && projected > maxWidth {
+                rows.append(current)
+                current = Row()
+            }
+            current.items.append((index, size.width))
+            current.width += (current.items.count == 1 ? 0 : spacing) + size.width
+            current.height = max(current.height, size.height)
+        }
+        if !current.items.isEmpty { rows.append(current) }
+        return rows
     }
 }

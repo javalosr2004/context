@@ -59,6 +59,12 @@ struct PendingCompletionPrompt: Equatable {
     let source: Source
 }
 
+struct PendingQuestionBatch: Equatable {
+    let batchID: String
+    let reason: String
+    let questions: [TutorialAssistantQuestion]
+}
+
 @MainActor
 final class TutorialSessionController: ObservableObject {
     @Published private(set) var awaitingConfirmationStepID: String?
@@ -69,6 +75,7 @@ final class TutorialSessionController: ObservableObject {
     @Published private(set) var messages: [ChatMessage]
     @Published private(set) var pendingContinuePromptStepID: String?
     @Published private(set) var pendingCompletionPrompt: PendingCompletionPrompt?
+    @Published private(set) var pendingQuestionBatch: PendingQuestionBatch?
     @Published private(set) var status: TutorialSessionUIStatus = .ready
     @Published private(set) var agentTurn: (turn: Int, maxTurns: Int)?
     @Published private(set) var webSources: [TutorialSessionWebSource] = []
@@ -152,6 +159,30 @@ final class TutorialSessionController: ObservableObject {
             )
         } catch {
             applyFailure("Could not confirm tutorial completion: \(error.localizedDescription)")
+        }
+    }
+
+    /// Submit answers to a pending clarifying-question batch. Every
+    /// question in ``pendingQuestionBatch`` must have a non-empty entry
+    /// in ``answers``; otherwise the call is dropped to match the
+    /// backend's validation contract.
+    func submitQuestionAnswers(_ answers: [String: String]) async {
+        guard let batch = pendingQuestionBatch else { return }
+        let trimmed: [TutorialUserAnswer] = batch.questions.compactMap { question in
+            let value = answers[question.questionID]?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !value.isEmpty else { return nil }
+            return TutorialUserAnswer(questionID: question.questionID, text: value)
+        }
+        guard trimmed.count == batch.questions.count else { return }
+        pendingQuestionBatch = nil
+        do {
+            status = .planning("Planning with your answers")
+            try await sendSessionEvent(
+                .userAnswer(batchID: batch.batchID, answers: trimmed)
+            )
+        } catch {
+            applyFailure("Could not submit answers: \(error.localizedDescription)")
         }
     }
 
@@ -278,6 +309,7 @@ final class TutorialSessionController: ObservableObject {
         awaitingActionIndex = nil
         pendingContinuePromptStepID = nil
         pendingCompletionPrompt = nil
+        pendingQuestionBatch = nil
         draftPlan = nil
         optimisticallyGroundedSlot = nil
         agentTurn = nil
@@ -470,6 +502,7 @@ final class TutorialSessionController: ObservableObject {
             awaitingActionIndex = nil
             optimisticallyGroundedSlot = nil
             pendingCompletionPrompt = nil
+            pendingQuestionBatch = nil
             appendTutorialText("Tutorial completed.")
             status = .completed
         case .instructionVerificationStarted:
@@ -486,6 +519,12 @@ final class TutorialSessionController: ObservableObject {
                 source: promptSource
             )
             status = .awaitingCompletion
+        case .assistantQuestion(let batchID, let reason, let questions):
+            pendingQuestionBatch = PendingQuestionBatch(
+                batchID: batchID,
+                reason: reason,
+                questions: questions
+            )
         case .error(_, let message):
             applyFailure(message)
         }
@@ -497,6 +536,11 @@ final class TutorialSessionController: ObservableObject {
             status = .ready
         case "planning", "needs_screen":
             status = .planning(label)
+        case "needs_answer":
+            // The question card itself is the UI signal; the underlying
+            // status stays "awaiting" so the composer/advance affordances
+            // do not present as busy spinners.
+            status = .awaitingConfirmation
         case "awaiting_confirmation":
             status = .awaitingConfirmation
         case "awaiting_completion":

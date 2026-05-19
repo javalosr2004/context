@@ -1094,7 +1094,7 @@ struct ChatPopupView: View {
 
     private var loadingText: String {
         switch sessionController.status {
-        case .preparingScreen, .sending:
+        case .preparingScreen, .sending, .verifying:
             return sessionController.status.label
         case .planning(let label):
             if !sessionController.webSources.isEmpty {

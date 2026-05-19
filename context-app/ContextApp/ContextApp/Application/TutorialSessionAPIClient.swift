@@ -180,6 +180,8 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case stepProgress(stepID: String, stepIndex: Int, totalSteps: Int, actionIndex: Int, totalActions: Int)
     case sessionCompleted
     case completionProposed(reason: String, source: String)
+    case instructionVerificationStarted(stepID: String)
+    case instructionVerified(stepID: String, ok: Bool, reason: String?)
     case error(code: String, message: String)
 
     private enum CodingKeys: String, CodingKey {
@@ -209,6 +211,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case totalSteps = "total_steps"
         case stepIndex = "step_index"
         case totalActions = "total_actions"
+        case ok
     }
 
     init(from decoder: Decoder) throws {
@@ -285,6 +288,16 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .completionProposed(
                 reason: try container.decode(String.self, forKey: .reason),
                 source: try container.decode(String.self, forKey: .source)
+            )
+        case "instruction_verification_started":
+            self = .instructionVerificationStarted(
+                stepID: try container.decode(String.self, forKey: .stepID)
+            )
+        case "instruction_verified":
+            self = .instructionVerified(
+                stepID: try container.decode(String.self, forKey: .stepID),
+                ok: try container.decode(Bool.self, forKey: .ok),
+                reason: try container.decodeIfPresent(String.self, forKey: .reason)
             )
         case "error":
             self = .error(
@@ -371,6 +384,14 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             try container.encode("completion_proposed", forKey: .type)
             try container.encode(reason, forKey: .reason)
             try container.encode(source, forKey: .source)
+        case .instructionVerificationStarted(let stepID):
+            try container.encode("instruction_verification_started", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+        case .instructionVerified(let stepID, let ok, let reason):
+            try container.encode("instruction_verified", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+            try container.encode(ok, forKey: .ok)
+            try container.encodeIfPresent(reason, forKey: .reason)
         case .error(let code, let message):
             try container.encode("error", forKey: .type)
             try container.encode(code, forKey: .code)

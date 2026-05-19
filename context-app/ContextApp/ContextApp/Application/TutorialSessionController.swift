@@ -9,6 +9,7 @@ enum TutorialSessionUIStatus: Equatable {
     case preparingScreen
     case sending
     case planning(String)
+    case verifying
     case awaitingConfirmation
     case awaitingCompletion
     case completed
@@ -19,11 +20,13 @@ enum TutorialSessionUIStatus: Equatable {
         case .ready:
             return "Ready"
         case .preparingScreen:
-            return "Preparing screen"
+            return "Capturing screen"
         case .sending:
             return "Sending"
         case .planning(let label):
             return label
+        case .verifying:
+            return "Checking screen"
         case .awaitingConfirmation:
             return "Awaiting confirmation"
         case .awaitingCompletion:
@@ -37,7 +40,7 @@ enum TutorialSessionUIStatus: Equatable {
 
     var isBusy: Bool {
         switch self {
-        case .preparingScreen, .sending, .planning:
+        case .preparingScreen, .sending, .planning, .verifying:
             return true
         case .ready, .awaitingConfirmation, .awaitingCompletion, .completed, .failed:
             return false
@@ -465,6 +468,13 @@ final class TutorialSessionController: ObservableObject {
             pendingCompletionPrompt = nil
             appendTutorialText("Tutorial completed.")
             status = .completed
+        case .instructionVerificationStarted:
+            status = .verifying
+        case .instructionVerified:
+            // Subsequent events (status_changed, step_ready, plan_updated, …)
+            // will move us out of .verifying. No-op here keeps the spinner
+            // honest until the next real signal arrives.
+            break
         case .completionProposed(let reason, let source):
             let promptSource = PendingCompletionPrompt.Source(rawValue: source) ?? .backend
             pendingCompletionPrompt = PendingCompletionPrompt(

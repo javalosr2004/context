@@ -13,6 +13,18 @@ final class ScreenGroundingController {
     private let screenProvider: () -> NSScreen?
     private let tooltipController: TutorialTooltipController?
     private let clipboardPopoverController: ClipboardPopoverController?
+    private var lastGrounding: LastGrounding?
+
+    private struct LastGrounding {
+        let text: String
+        let screenFrame: CGRect
+        let rect: CGRect
+        let bbox: GroundingBoundingBox
+    }
+
+    func clearCache() {
+        lastGrounding = nil
+    }
 
     init(
         bboxController: DebugBboxController,
@@ -39,6 +51,14 @@ final class ScreenGroundingController {
         do {
             guard let screen = screenProvider() else {
                 return "No screen was available for grounding."
+            }
+
+            if let cached = lastGrounding,
+               cached.text == instruction.text,
+               cached.screenFrame == screen.frame {
+                presentGrounding(instruction: instruction, rect: cached.rect)
+                logger.info("Reused cached grounding for text=\"\(instruction.text, privacy: .public)\"")
+                return "Reused cached bounding box: \(Int(cached.bbox.x)), \(Int(cached.bbox.y)), \(Int(cached.bbox.width)), \(Int(cached.bbox.height))"
             }
 
             let client = try GroundingClient.fromEndpointStore(endpointStore)
@@ -78,17 +98,13 @@ final class ScreenGroundingController {
                 "Mapped bbox x=\(bbox.x, privacy: .public) y=\(bbox.y, privacy: .public) width=\(bbox.width, privacy: .public) height=\(bbox.height, privacy: .public) to screen rect \(String(describing: rect), privacy: .public)"
             )
             let overlayStartedAt = DispatchTime.now().uptimeNanoseconds
-            bboxController.show(rect: rect)
-            if let tooltip = instruction.tooltip, !tooltip.isEmpty {
-                tooltipController?.show(beside: rect, message: tooltip)
-            } else {
-                tooltipController?.hide()
-            }
-            if let copiableText = instruction.copiableText, !copiableText.isEmpty {
-                clipboardPopoverController?.show(beside: rect, text: copiableText)
-            } else {
-                clipboardPopoverController?.hide()
-            }
+            presentGrounding(instruction: instruction, rect: rect)
+            lastGrounding = LastGrounding(
+                text: instruction.text,
+                screenFrame: screen.frame,
+                rect: rect,
+                bbox: bbox
+            )
             let overlayEndedAt = DispatchTime.now().uptimeNanoseconds
             let timing = GroundingRoundTripTiming(
                 totalMilliseconds: milliseconds(from: roundTripStartedAt, to: overlayEndedAt),
@@ -107,6 +123,20 @@ final class ScreenGroundingController {
         } catch {
             logger.error("Input instruction failed: \(error.localizedDescription, privacy: .public)")
             return "Input instruction failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func presentGrounding(instruction: GroundingInstruction, rect: CGRect) {
+        bboxController.show(rect: rect)
+        if let tooltip = instruction.tooltip, !tooltip.isEmpty {
+            tooltipController?.show(beside: rect, message: tooltip)
+        } else {
+            tooltipController?.hide()
+        }
+        if let copiableText = instruction.copiableText, !copiableText.isEmpty {
+            clipboardPopoverController?.show(beside: rect, text: copiableText)
+        } else {
+            clipboardPopoverController?.hide()
         }
     }
 

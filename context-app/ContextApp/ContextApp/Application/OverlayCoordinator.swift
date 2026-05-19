@@ -64,6 +64,7 @@ final class OverlayCoordinator {
             onExit: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
                 bboxPanel?.orderOut(nil)
                 clipboardPopoverController?.hide()
+                self?.screenGroundingController?.clearCache()
                 self?.stabilityWatcher.cancel()
             },
             onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak clipboardPopoverController, screenProvider] in
@@ -99,6 +100,7 @@ final class OverlayCoordinator {
             onOutsideClick: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
                 bboxPanel?.orderOut(nil)
                 clipboardPopoverController?.hide()
+                self?.screenGroundingController?.clearCache()
                 self?.stabilityWatcher.cancel()
             }
         )

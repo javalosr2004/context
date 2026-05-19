@@ -7,18 +7,26 @@ struct EdgeTabView: View {
     @State private var isHovering = false
     @State private var isPressed = false
 
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: EdgeTabMetrics.cornerRadius,
+            bottomLeadingRadius: EdgeTabMetrics.cornerRadius,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 0,
+            style: .continuous
+        )
+    }
+
     var body: some View {
-        RoundedRectangle(cornerRadius: EdgeTabMetrics.cornerRadius, style: .continuous)
+        shape
             .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: EdgeTabMetrics.cornerRadius, style: .continuous)
-                    .stroke(OverlayTheme.hairline, lineWidth: 0.5)
-            )
+            .overlay(shape.stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
             .overlay(glyph)
-            .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
-            .scaleEffect(x: isHovering ? 1.12 : 1.0, y: isHovering ? 1.04 : 1.0, anchor: .trailing)
-            .animation(.easeOut(duration: 0.12), value: isHovering)
-            .opacity(isPressed ? 0.75 : 1.0)
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 1)
+            .offset(x: isHovering ? -2 : 0)
+            .scaleEffect(isPressed ? 0.96 : 1.0, anchor: .trailing)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isHovering)
+            .animation(.easeOut(duration: 0.10), value: isPressed)
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .gesture(
@@ -40,10 +48,9 @@ struct EdgeTabView: View {
                     .frame(width: EdgeTabMetrics.glyphSize, height: EdgeTabMetrics.glyphSize)
             } else {
                 Image(systemName: "cursorarrow")
-                    .font(.system(size: EdgeTabMetrics.glyphSize, weight: .semibold))
+                    .font(.system(size: EdgeTabMetrics.glyphSize, weight: .regular))
                     .foregroundStyle(OverlayTheme.primaryText)
             }
         }
-        .opacity(isHovering ? 1.0 : 0.85)
     }
 }

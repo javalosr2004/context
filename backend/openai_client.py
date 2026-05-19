@@ -80,9 +80,17 @@ class OpenAIClient:
 
     def stream_tutorial_events(self, request: LLMRequest) -> Iterator[LLMStreamEvent]:
         tools = openai_tutorial_tool_definitions()
+        tool_names = [tool.get("name") or tool.get("type") for tool in tools]
+        if request.enable_search_grounding:
+            tool_names.append("web_search")
         logger.info(
             "[llm] stream start",
-            extra={"model": self._model, "tool_count": len(tools)},
+            extra={
+                "model": self._model,
+                "tool_count": len(tool_names),
+                "tool_names": tool_names,
+                "enable_search_grounding": request.enable_search_grounding,
+            },
         )
         started_at = time.perf_counter()
         stream = self._client.responses.create(

@@ -375,14 +375,29 @@ def get_tutorial_session_store(
 ) -> TutorialSessionStore:
     store = getattr(connection.app.state, "tutorial_session_store", None)
     if store is None:
+        step_tools_enabled = _step_tools_enabled_from_env()
+        grounding_strategy = _grounding_strategy_from_env()
+        logging.getLogger(__name__).info(
+            "[startup] tutorial_session_store config",
+            extra={
+                "step_tools_enabled": step_tools_enabled,
+                "step_tools_mode": (
+                    "capped_head" if step_tools_enabled else "full_plan"
+                ),
+                "grounding_strategy": grounding_strategy,
+                "llm_provider": (
+                    os.environ.get("LLM_PROVIDER") or "gemini"
+                ).lower(),
+            },
+        )
         store = TutorialSessionStore(
             llm,
             fast_llm=fast_llm,
             verifier_llm=verifier_llm,
             embeddings_client=embeddings_client,
             web_ground=web_ground_producer_from_environment(),
-            step_tools_enabled=_step_tools_enabled_from_env(),
-            grounding_strategy=_grounding_strategy_from_env(),
+            step_tools_enabled=step_tools_enabled,
+            grounding_strategy=grounding_strategy,
         )
         connection.app.state.tutorial_session_store = store
     return store

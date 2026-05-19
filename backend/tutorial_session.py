@@ -687,6 +687,9 @@ class TutorialSession:
                     if self.screen_captured_at else None
                 ),
                 "screen_is_stale": self.screen_is_stale,
+                "grounding_strategy": self.grounding_strategy,
+                "step_tools_mode": self.step_tools_mode,
+                "turn_zero_consumed": self.turn_zero_consumed,
             },
         )
 

@@ -104,6 +104,40 @@ final class KeyTypingSessionizerTests: XCTestCase {
     }
 }
 
+final class KeystrokeLabelerTests: XCTestCase {
+    func testReturnUsesGlyphAndName() {
+        XCTAssertEqual(KeystrokeLabeler.label(keyCode: 36, characters: "\r", modifiers: []), "\u{21A9} return")
+    }
+
+    func testTabAndEscape() {
+        XCTAssertEqual(KeystrokeLabeler.label(keyCode: 48, characters: "\t", modifiers: []), "\u{21E5} tab")
+        XCTAssertEqual(KeystrokeLabeler.label(keyCode: 53, characters: nil, modifiers: []), "esc escape")
+    }
+
+    func testArrowKey() {
+        XCTAssertEqual(KeystrokeLabeler.label(keyCode: 124, characters: nil, modifiers: []), "\u{2192} right arrow")
+    }
+
+    func testCmdShiftLetterShortcut() {
+        let label = KeystrokeLabeler.label(keyCode: 35, characters: "p", modifiers: ["cmd", "shift"])
+        XCTAssertEqual(label, "\u{21E7}\u{2318}P")
+    }
+
+    func testModifierOnlyReturnsPrefix() {
+        XCTAssertEqual(KeystrokeLabeler.label(keyCode: nil, characters: nil, modifiers: ["cmd"]), "\u{2318}")
+    }
+
+    func testUnknownKeycodeFallsBackToCode() {
+        XCTAssertEqual(KeystrokeLabeler.label(keyCode: 999, characters: nil, modifiers: []), "key 999")
+    }
+
+    func testModifierOrderIsStable() {
+        let a = KeystrokeLabeler.label(keyCode: 0, characters: "a", modifiers: ["cmd", "ctrl", "opt", "shift"])
+        let b = KeystrokeLabeler.label(keyCode: 0, characters: "a", modifiers: ["shift", "opt", "ctrl", "cmd"])
+        XCTAssertEqual(a, b)
+    }
+}
+
 final class TypingBurstSchemaTests: XCTestCase {
     func testTypeEventRoundTripsSnakeCase() throws {
         let event = RecordedEvent(

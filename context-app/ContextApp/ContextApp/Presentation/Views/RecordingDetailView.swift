@@ -22,6 +22,72 @@ struct EnrichedRecordingEvent: Identifiable {
     let typedText: String?
     /// Populated for kind == "type": number of backspaces inside the burst.
     let typedBackspaces: Int?
+    /// Populated for kind == "key_down" / "flags": the discrete keystroke.
+    let keyCode: Int?
+    let keyCharacters: String?
+    let keyModifiers: [String]
+}
+
+/// Pure mapping from a discrete keystroke to a glyphed, human-readable label
+/// like `⌘C`, `↩ return`, or `→ right arrow`.
+enum KeystrokeLabeler {
+    static let modifierGlyph: [String: String] = [
+        "cmd": "\u{2318}",   // ⌘
+        "shift": "\u{21E7}", // ⇧
+        "opt": "\u{2325}",   // ⌥
+        "ctrl": "\u{2303}",  // ⌃
+        "fn": "fn ",
+        "caps": "\u{21EA} ", // ⇪
+    ]
+
+    static let specialKey: [Int: (glyph: String, name: String)] = [
+        36:  ("\u{21A9}", "return"),       // ↩
+        76:  ("\u{2324}", "enter"),        // ⌤
+        48:  ("\u{21E5}", "tab"),          // ⇥
+        53:  ("esc", "escape"),
+        51:  ("\u{232B}", "delete"),       // ⌫
+        117: ("\u{2326}", "forward delete"), // ⌦
+        123: ("\u{2190}", "left arrow"),   // ←
+        124: ("\u{2192}", "right arrow"),  // →
+        125: ("\u{2193}", "down arrow"),   // ↓
+        126: ("\u{2191}", "up arrow"),     // ↑
+        115: ("home", "home"),
+        119: ("end", "end"),
+        116: ("pgup", "page up"),
+        121: ("pgdn", "page down"),
+        49:  ("space", "space"),
+        // F1–F12 (subset of common ones)
+        122: ("F1", "F1"), 120: ("F2", "F2"), 99: ("F3", "F3"), 118: ("F4", "F4"),
+        96: ("F5", "F5"), 97: ("F6", "F6"), 98: ("F7", "F7"), 100: ("F8", "F8"),
+        101: ("F9", "F9"), 109: ("F10", "F10"), 103: ("F11", "F11"), 111: ("F12", "F12"),
+    ]
+
+    /// Returns a short label like `⌘⇧P`, `↩ return`, or `→` for the row.
+    /// Falls back to the raw `characters` (uppercased) or `key 42` when the
+    /// keycode isn't in the special table.
+    static func label(keyCode: Int?, characters: String?, modifiers: [String]) -> String {
+        let modPart = modifierPrefix(modifiers)
+        if let code = keyCode, let special = specialKey[code] {
+            return modPart.isEmpty ? "\(special.glyph) \(special.name)" : "\(modPart)\(special.glyph)"
+        }
+        if let chars = characters, !chars.isEmpty {
+            let visible = chars.uppercased()
+            return "\(modPart)\(visible)"
+        }
+        if let code = keyCode {
+            return "\(modPart)key \(code)"
+        }
+        return modPart.isEmpty ? "(unknown)" : modPart
+    }
+
+    private static func modifierPrefix(_ modifiers: [String]) -> String {
+        let order = ["fn", "ctrl", "opt", "shift", "cmd", "caps"]
+        var out = ""
+        for name in order where modifiers.contains(name) {
+            out += modifierGlyph[name] ?? name
+        }
+        return out
+    }
 }
 
 @MainActor
@@ -130,6 +196,7 @@ final class RecordingDetailModel: ObservableObject {
         let descJSON = json["description"] as? [String: Any]
         let metaJSON = json["description_meta"] as? [String: Any]
         let typingJSON = json["typing"] as? [String: Any]
+        let keyJSON = json["key"] as? [String: Any]
         return EnrichedRecordingEvent(
             id: id,
             timestampMs: timestampMs,
@@ -144,7 +211,10 @@ final class RecordingDetailModel: ObservableObject {
             verified: metaJSON?["verified"] as? Bool,
             distancePx: metaJSON?["distance_px"] as? Double,
             typedText: typingJSON?["text"] as? String,
-            typedBackspaces: typingJSON?["backspace_count"] as? Int
+            typedBackspaces: typingJSON?["backspace_count"] as? Int,
+            keyCode: keyJSON?["key_code"] as? Int,
+            keyCharacters: keyJSON?["characters"] as? String,
+            keyModifiers: (keyJSON?["modifiers"] as? [String]) ?? []
         )
     }
 }
@@ -325,6 +395,14 @@ private struct EventRow: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
+                } else if event.kind == "key_down" || event.kind == "flags" {
+                    Text(KeystrokeLabeler.label(
+                        keyCode: event.keyCode,
+                        characters: event.keyCharacters,
+                        modifiers: event.keyModifiers
+                    ))
+                    .font(.body)
+                    .lineLimit(1)
                 } else if let phrase = event.targetPhrase {
                     Text(phrase)
                         .font(.body)
@@ -351,6 +429,8 @@ private struct EventRow: View {
             Image(nsImage: image).resizable().scaledToFit()
         } else if event.kind == "type" {
             Image(systemName: "keyboard").foregroundStyle(.secondary)
+        } else if event.kind == "key_down" || event.kind == "flags" {
+            Image(systemName: "command").foregroundStyle(.secondary)
         } else {
             Image(systemName: "photo").foregroundStyle(.tertiary)
         }

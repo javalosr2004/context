@@ -39,7 +39,7 @@ final class RecordingSchemaTests: XCTestCase {
         )
         let data = try JSONEncoder().encode(manifest)
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertTrue(json.contains("\"schema_version\":1"))
+        XCTAssertTrue(json.contains("\"schema_version\":2"))
         XCTAssertTrue(json.contains("\"scale_factor\":2"))
         XCTAssertTrue(json.contains("\"goal\":{"))
     }

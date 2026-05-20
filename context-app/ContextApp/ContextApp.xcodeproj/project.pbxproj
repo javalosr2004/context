@@ -101,6 +101,8 @@
 		B00000000000000000000032 /* RecordingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042 /* RecordingsWindowController.swift */; };
 		B00000000000000000000033 /* RecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043 /* RecordingController.swift */; };
 		B00000000000000000000034 /* RecordingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000044 /* RecordingDetailView.swift */; };
+		B00000000000000000000050 /* KeyTypingSessionizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* KeyTypingSessionizer.swift */; };
+		B00000000000000000000051 /* KeyTypingSessionizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* KeyTypingSessionizerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -211,6 +213,8 @@
 		B00000000000000000000042 /* RecordingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsWindowController.swift; sourceTree = "<group>"; };
 		B00000000000000000000043 /* RecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingController.swift; sourceTree = "<group>"; };
 		B00000000000000000000044 /* RecordingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDetailView.swift; sourceTree = "<group>"; };
+		B00000000000000000000060 /* KeyTypingSessionizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTypingSessionizer.swift; sourceTree = "<group>"; };
+		B00000000000000000000061 /* KeyTypingSessionizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTypingSessionizerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -276,6 +280,7 @@
 				AD0000000000000000000015 /* EdgeTabAnchorTests.swift */,
 				B00000000000000000000018 /* RecordingSchemaTests.swift */,
 				B0000000000000000000001B /* ScrollSessionizerTests.swift */,
+				B00000000000000000000061 /* KeyTypingSessionizerTests.swift */,
 				B0000000000000000000001C /* CropperTests.swift */,
 				B0000000000000000000001E /* EnrichmentUploaderTests.swift */,
 				B00000000000000000000021 /* SSEParserTests.swift */,
@@ -364,6 +369,7 @@
 				B00000000000000000000016 /* GoalSheetController.swift */,
 				B00000000000000000000017 /* RecordingSession.swift */,
 				B00000000000000000000019 /* ScrollSessionizer.swift */,
+				B00000000000000000000060 /* KeyTypingSessionizer.swift */,
 				B0000000000000000000001A /* Cropper.swift */,
 				B0000000000000000000001D /* EnrichmentUploader.swift */,
 				B0000000000000000000001F /* EnrichmentStatusStream.swift */,
@@ -605,6 +611,7 @@
 				B00000000000000000000006 /* GoalSheetController.swift in Sources */,
 				B00000000000000000000007 /* RecordingSession.swift in Sources */,
 				B00000000000000000000009 /* ScrollSessionizer.swift in Sources */,
+				B00000000000000000000050 /* KeyTypingSessionizer.swift in Sources */,
 				B0000000000000000000000A /* Cropper.swift in Sources */,
 				B0000000000000000000000D /* EnrichmentUploader.swift in Sources */,
 				B0000000000000000000000F /* EnrichmentStatusStream.swift in Sources */,
@@ -640,6 +647,7 @@
 				AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */,
 				B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */,
 				B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */,
+				B00000000000000000000051 /* KeyTypingSessionizerTests.swift in Sources */,
 				B0000000000000000000000C /* CropperTests.swift in Sources */,
 				B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */,
 				B00000000000000000000010 /* SSEParserTests.swift in Sources */,

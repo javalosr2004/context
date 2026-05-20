@@ -62,7 +62,7 @@ private struct DetailScreen: View {
         self.controller = controller
         self.entry = entry
         self.onClose = onClose
-        _model = StateObject(wrappedValue: RecordingDetailModel(entry: entry))
+        _model = StateObject(wrappedValue: RecordingDetailModel(entry: entry, index: controller.index))
     }
 
     var body: some View {

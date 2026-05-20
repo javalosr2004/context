@@ -18,6 +18,10 @@ struct EnrichedRecordingEvent: Identifiable {
     let descriptionKind: String?
     let verified: Bool?
     let distancePx: Double?
+    /// Populated for kind == "type": the coalesced typed string.
+    let typedText: String?
+    /// Populated for kind == "type": number of backspaces inside the burst.
+    let typedBackspaces: Int?
 }
 
 @MainActor
@@ -29,11 +33,13 @@ final class RecordingDetailModel: ObservableObject {
     @Published var entry: LocalRecordingEntry
 
     private var bundleURL: URL
+    private weak var index: RecordingsIndex?
 
-    init(entry: LocalRecordingEntry) {
+    init(entry: LocalRecordingEntry, index: RecordingsIndex? = nil) {
         self.entry = entry
         self.bundleURL = URL(fileURLWithPath: entry.bundlePath)
         self.goal = entry.goal
+        self.index = index
     }
 
     func update(entry: LocalRecordingEntry) {
@@ -67,6 +73,49 @@ final class RecordingDetailModel: ObservableObject {
         }
     }
 
+    /// Remove a single event from both raw + enriched jsonl (whichever exist),
+    /// delete its target/context crops, and decrement the recording's totals
+    /// so the list view reflects the new count. Orphaned frame jpegs are left
+    /// on disk — they may still be referenced by other events.
+    func deleteEvent(id: String) {
+        let rawURL = bundleURL.appendingPathComponent("events.jsonl")
+        let enrichedURL = bundleURL.appendingPathComponent("events.enriched.jsonl")
+        for url in [rawURL, enrichedURL] {
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            do {
+                let text = try String(contentsOf: url, encoding: .utf8)
+                let kept = text
+                    .split(separator: "\n", omittingEmptySubsequences: true)
+                    .filter { Self.eventId(in: String($0)) != id }
+                let joined = kept.joined(separator: "\n") + (kept.isEmpty ? "" : "\n")
+                try joined.data(using: .utf8)?.write(to: url, options: .atomic)
+            } catch {
+                self.error = "Failed to rewrite \(url.lastPathComponent): \(error.localizedDescription)"
+                return
+            }
+        }
+
+        let crops = bundleURL.appendingPathComponent("crops")
+        try? FileManager.default.removeItem(at: crops.appendingPathComponent("\(id)_target.jpg"))
+        try? FileManager.default.removeItem(at: crops.appendingPathComponent("\(id)_context.jpg"))
+
+        events.removeAll { $0.id == id }
+        if let idx = index {
+            let newTotal = events.count
+            let newCompleted = min(entry.completed, newTotal)
+            idx.updateStatus(id: entry.id, status: entry.lastStatus, completed: newCompleted, total: newTotal)
+            if let refreshed = idx.entry(id: entry.id) { self.entry = refreshed }
+        }
+    }
+
+    private static func eventId(in line: String) -> String? {
+        guard let data = line.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["id"] as? String
+    }
+
     private static func parseLine(_ raw: any StringProtocol) -> EnrichedRecordingEvent? {
         guard let data = String(raw).data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -80,6 +129,7 @@ final class RecordingDetailModel: ObservableObject {
         )
         let descJSON = json["description"] as? [String: Any]
         let metaJSON = json["description_meta"] as? [String: Any]
+        let typingJSON = json["typing"] as? [String: Any]
         return EnrichedRecordingEvent(
             id: id,
             timestampMs: timestampMs,
@@ -92,7 +142,9 @@ final class RecordingDetailModel: ObservableObject {
             visibleText: descJSON?["visible_text"] as? String,
             descriptionKind: descJSON?["kind"] as? String,
             verified: metaJSON?["verified"] as? Bool,
-            distancePx: metaJSON?["distance_px"] as? Double
+            distancePx: metaJSON?["distance_px"] as? Double,
+            typedText: typingJSON?["text"] as? String,
+            typedBackspaces: typingJSON?["backspace_count"] as? Int
         )
     }
 }
@@ -100,6 +152,8 @@ final class RecordingDetailModel: ObservableObject {
 struct RecordingDetailView: View {
     @ObservedObject var model: RecordingDetailModel
     let onClose: () -> Void
+
+    @State private var pendingDelete: EnrichedRecordingEvent?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -193,8 +247,38 @@ struct RecordingDetailView: View {
     private var eventList: some View {
         List(model.events) { event in
             EventRow(event: event, bundleRoot: model.bundleRoot())
+                .contextMenu {
+                    Button(role: .destructive) {
+                        pendingDelete = event
+                    } label: {
+                        Label("Delete event", systemImage: "trash")
+                    }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        pendingDelete = event
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
         }
         .listStyle(.inset)
+        .confirmationDialog(
+            "Delete this event?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            presenting: pendingDelete
+        ) { event in
+            Button("Delete", role: .destructive) {
+                model.deleteEvent(id: event.id)
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { event in
+            Text("Removes the \(event.kind) event from this recording. Crops are deleted; frames stay on disk.")
+        }
     }
 
     private func revealInFinder() {
@@ -232,7 +316,16 @@ private struct EventRow: View {
                         .font(.caption.monospaced())
                         .foregroundStyle(.tertiary)
                 }
-                if let phrase = event.targetPhrase {
+                if event.kind == "type", let typed = event.typedText {
+                    Text("typed \u{201C}\(typed)\u{201D}")
+                        .font(.body)
+                        .lineLimit(3)
+                    if let bs = event.typedBackspaces, bs > 0 {
+                        Text("\(bs) backspace\(bs == 1 ? "" : "s")")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                } else if let phrase = event.targetPhrase {
                     Text(phrase)
                         .font(.body)
                         .lineLimit(2)
@@ -256,6 +349,8 @@ private struct EventRow: View {
         if let rel = event.targetCropPath,
            let image = NSImage(contentsOf: bundleRoot.appendingPathComponent(rel)) {
             Image(nsImage: image).resizable().scaledToFit()
+        } else if event.kind == "type" {
+            Image(systemName: "keyboard").foregroundStyle(.secondary)
         } else {
             Image(systemName: "photo").foregroundStyle(.tertiary)
         }

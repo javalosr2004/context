@@ -46,6 +46,7 @@ final class RecordingSession {
     private var persistedFrameIds: Set<String> = []
     private let writeQueue = DispatchQueue(label: "context.recording.writes")
     private let scrollSessionizer = ScrollSessionizer()
+    private let typingSessionizer = KeyTypingSessionizer()
 
     /// Allows Phase 2+ to intercept built events before they are written.
     /// Returns an array (typically 0 or 1, scroll sessionizer may emit later).
@@ -138,6 +139,9 @@ final class RecordingSession {
         if let closed = scrollSessionizer.flush() {
             emitScroll(closed, bundle: bundle)
         }
+        if let closedTyping = typingSessionizer.flush() {
+            emitTyping(closedTyping, bundle: bundle)
+        }
         try? await frameStream.stop()
 
         manifest.endedAtMs = MonotonicClock.wallClockMs()
@@ -155,6 +159,14 @@ final class RecordingSession {
     func abort(reason: String) {
         Self.log.error("Recording aborted: \(reason, privacy: .public)")
         eventTap.stop()
+        if let bundle {
+            if let closedTyping = typingSessionizer.flush() {
+                emitTyping(closedTyping, bundle: bundle)
+            }
+            if let closedScroll = scrollSessionizer.flush() {
+                emitScroll(closedScroll, bundle: bundle)
+            }
+        }
         Task { try? await frameStream.stop() }
         if let bundle, var manifest {
             manifest.aborted = true
@@ -174,6 +186,9 @@ final class RecordingSession {
         guard state == .recording, let bundle else { return }
 
         if raw.kind == .scrollWheel {
+            if let closedTyping = typingSessionizer.flush() {
+                emitTyping(closedTyping, bundle: bundle)
+            }
             let frame = frameStream.latestFrame(near: raw.hostTimeMs)
             if let closed = scrollSessionizer.ingest(
                 hostTimeMs: raw.hostTimeMs,
@@ -194,10 +209,64 @@ final class RecordingSession {
             emitScroll(closed, bundle: bundle)
         }
 
+        // Typing burst handling: route printable / backspace strokes into the
+        // sessionizer instead of persisting one event per keystroke. Anything
+        // else (shortcuts, navigation, flags, mouse) flushes the burst first.
+        if raw.kind == .keyDown {
+            let classification = KeyTypingSessionizer.classify(
+                keyCode: raw.keyCode,
+                characters: raw.characters,
+                modifiers: ModifierFlagsFormatter.names(from: raw.modifierFlags)
+            )
+            if case .discrete = classification {
+                if let closedTyping = typingSessionizer.flush() {
+                    emitTyping(closedTyping, bundle: bundle)
+                }
+            } else {
+                let frame = frameStream.latestFrame(near: raw.hostTimeMs)
+                if let closedTyping = typingSessionizer.ingest(
+                    classification: classification,
+                    hostTimeMs: raw.hostTimeMs,
+                    cursor: raw.cursor,
+                    frameId: frame?.frameId
+                ) {
+                    emitTyping(closedTyping, bundle: bundle)
+                }
+                return
+            }
+        } else {
+            if let closedTyping = typingSessionizer.flush() {
+                emitTyping(closedTyping, bundle: bundle)
+            }
+        }
+
         let frame = frameStream.latestFrame(near: raw.hostTimeMs)
         let event = Self.makeRecordedEvent(raw: raw, frame: frame, cropPaths: nil)
         let cropped = applyCrops(event: event, cursor: raw.cursor, frame: frame, bundle: bundle)
         persist(event: cropped, frame: frame, bundle: bundle)
+    }
+
+    private func emitTyping(_ t: SessionizedTyping, bundle: BundleLayout) {
+        let frame = t.startFrameId.flatMap { frameStream.frame(byId: $0) }
+            ?? frameStream.latestFrame(near: t.startHostTimeMs)
+        let burst = TypingBurst(
+            text: t.text,
+            keyCount: t.keyCount,
+            backspaceCount: t.backspaceCount,
+            startFrameId: t.startFrameId,
+            endFrameId: t.endFrameId,
+            durationMs: t.durationMs
+        )
+        let event = RecordedEvent(
+            id: UUID().uuidString,
+            timestampMs: t.startHostTimeMs,
+            kind: .type,
+            cursor: Point(x: Int(t.cursor.x.rounded()), y: Int(t.cursor.y.rounded())),
+            typing: burst,
+            frameId: frame?.frameId
+        )
+        // Typing has no spatial target — skip crops, keep the frame for context.
+        persist(event: event, frame: frame, bundle: bundle)
     }
 
     private func emitScroll(_ s: SessionizedScroll, bundle: BundleLayout) {
@@ -251,6 +320,7 @@ final class RecordingSession {
             button: event.button,
             scroll: event.scroll,
             key: event.key,
+            typing: event.typing,
             frameId: event.frameId,
             targetCropPath: targetPath,
             contextCropPath: contextPath

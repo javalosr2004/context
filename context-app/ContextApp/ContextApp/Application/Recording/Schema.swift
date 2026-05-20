@@ -1,13 +1,17 @@
 import Foundation
 
 /// Pinned schema version for recording bundles. Bump only in dedicated phases.
-let kRecordingSchemaVersion: Int = 1
+/// v2: adds `RecordedEventKind.type` and `RecordedEvent.typing` for sessionized
+/// printable-key bursts. Discrete `key_down` events are still emitted for
+/// shortcuts, control keys, and any keystroke that closes a burst.
+let kRecordingSchemaVersion: Int = 2
 
 enum RecordedEventKind: String, Codable {
     case click
     case scroll
     case keyDown = "key_down"
     case flags
+    case type
 }
 
 enum MouseButton: String, Codable {
@@ -51,6 +55,28 @@ struct KeyStroke: Codable, Equatable {
     }
 }
 
+/// One coalesced typing run: consecutive printable keystrokes with only
+/// shift/caps modifiers, optionally interleaved with backspaces that mutate
+/// the in-flight buffer. Closed by any non-printable key, any
+/// cmd/ctrl/opt-modified key, mouse/scroll input, an idle gap, or stop().
+struct TypingBurst: Codable, Equatable {
+    let text: String
+    let keyCount: Int
+    let backspaceCount: Int
+    let startFrameId: String?
+    let endFrameId: String?
+    let durationMs: Int
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case keyCount = "key_count"
+        case backspaceCount = "backspace_count"
+        case startFrameId = "start_frame_id"
+        case endFrameId = "end_frame_id"
+        case durationMs = "duration_ms"
+    }
+}
+
 struct RecordedEvent: Codable {
     let id: String
     let timestampMs: Int64
@@ -59,9 +85,36 @@ struct RecordedEvent: Codable {
     let button: MouseButton?
     let scroll: ScrollDelta?
     let key: KeyStroke?
+    let typing: TypingBurst?
     let frameId: String?
     let targetCropPath: String?
     let contextCropPath: String?
+
+    init(
+        id: String,
+        timestampMs: Int64,
+        kind: RecordedEventKind,
+        cursor: Point,
+        button: MouseButton? = nil,
+        scroll: ScrollDelta? = nil,
+        key: KeyStroke? = nil,
+        typing: TypingBurst? = nil,
+        frameId: String? = nil,
+        targetCropPath: String? = nil,
+        contextCropPath: String? = nil
+    ) {
+        self.id = id
+        self.timestampMs = timestampMs
+        self.kind = kind
+        self.cursor = cursor
+        self.button = button
+        self.scroll = scroll
+        self.key = key
+        self.typing = typing
+        self.frameId = frameId
+        self.targetCropPath = targetCropPath
+        self.contextCropPath = contextCropPath
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -71,6 +124,7 @@ struct RecordedEvent: Codable {
         case button
         case scroll
         case key
+        case typing
         case frameId = "frame_id"
         case targetCropPath = "target_crop_path"
         case contextCropPath = "context_crop_path"

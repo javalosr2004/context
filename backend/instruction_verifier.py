@@ -47,7 +47,7 @@ _VALID_VERDICTS: frozenset[str] = frozenset(
 
 VERIFIER_SYSTEM_PROMPT = (
     "You classify whether the user's screen matches the next tutorial "
-    "instruction. You MUST answer in two steps, both in the JSON "
+    "instruction. You MUST answer in three fields, all in the JSON "
     "response:\n\n"
     "  1. screen_summary — a short phrase (<= 12 words) naming the "
     "dominant visible UI on screen. Examples: 'GitHub sign-out account "
@@ -55,21 +55,35 @@ VERIFIER_SYSTEM_PROMPT = (
     "'GitHub signup form with email field focused'. Be concrete about "
     "what is in front of the user RIGHT NOW — don't summarize what "
     "they could navigate to.\n"
-    "  2. verdict — one of:\n"
+    "  2. previous_step_visible_effect — REQUIRED. One of:\n"
+    "      yes — the previous step's intended effect is plainly "
+    "visible on the screen you just summarized (e.g. previous step "
+    "was 'Open the workspace menu' and the workspace menu is now "
+    "open on screen).\n"
+    "      no  — the previous step's intended effect is NOT visible "
+    "(e.g. previous step was 'Open the workspace menu' but the screen "
+    "still shows the same channel view it would have shown before, "
+    "with no menu). Reasoning that the user 'could now click X' is "
+    "NOT visible effect — only what already changed counts.\n"
+    "      na  — no previous step was provided (first instruction of "
+    "the tutorial).\n"
+    "     If you pick 'no', you MUST also pick verdict='blocked'. Do "
+    "not rescue an absent effect by reasoning about what the user "
+    "could click next.\n"
+    "  3. verdict — one of:\n"
     "      on_track  — from the screen you just summarized, the user "
-    "can begin the instruction's first action right now, possibly after "
-    "one obvious click on something visible. If reaching the "
-    "instruction would require completing a different flow first "
-    "(finishing a sign-out, dismissing an account picker, resolving a "
-    "confirmation dialog, navigating through unrelated pages), that is "
-    "NOT on_track.\n"
+    "is positioned to begin the instruction's first action right now, "
+    "AND (if there was a previous step) its effect is visible. Do not "
+    "use 'one obvious click away' to justify on_track — if a click is "
+    "still required to reach the instruction's starting state, the "
+    "previous step did not finish; that is blocked.\n"
     "      blocked   — a specific UI element occupies the screen and "
-    "must be resolved before the instruction can be attempted. "
-    "Examples: a modal/error dialog, a sign-in wall, an OS permission "
-    "prompt, a picker / confirmation / wizard step belonging to a "
-    "DIFFERENT flow, or visible evidence the previous step did not "
-    "complete (e.g. the previous step was 'Sign out' but the screen "
-    "still shows the sign-out picker). Name the element.\n"
+    "must be resolved before the instruction can be attempted, OR the "
+    "previous step's effect is not visible. Examples: a modal/error "
+    "dialog, a sign-in wall, an OS permission prompt, a picker / "
+    "confirmation / wizard step belonging to a DIFFERENT flow, or the "
+    "screen still shows the pre-previous-step state. Name the element "
+    "or the missing effect.\n"
     "      diverged  — the screen is a coherent app state, but it is "
     "NOT where this instruction assumes the user is. Common cases: the "
     "user has already completed this step (and likely later ones) — "
@@ -77,12 +91,8 @@ VERIFIER_SYSTEM_PROMPT = (
     "signed-in dashboard. Name what you see vs. what the instruction "
     "assumes.\n"
     "      unsure    — you cannot confidently pick one of the above.\n\n"
-    "If a previous step is provided, FIRST check whether its intended "
-    "effect is visible. If the previous step was 'Sign out' but the "
-    "screen still shows the sign-out picker, the prior step did not "
-    "complete — that is blocked. Do NOT default to on_track just "
-    "because the right app is visible and no error is shown.\n\n"
-    'Respond strictly as JSON: {"screen_summary": "...", "verdict": '
+    'Respond strictly as JSON: {"screen_summary": "...", '
+    '"previous_step_visible_effect": "yes"|"no"|"na", "verdict": '
     '"on_track"|"blocked"|"diverged"|"unsure", "evidence": "one short '
     'sentence"}. No text outside the JSON.'
 )
@@ -93,6 +103,7 @@ class VerifierVerdict:
     verdict: Verdict
     reason: str
     screen_summary: str = ""
+    previous_step_visible_effect: str = ""
 
     @property
     def ok(self) -> bool:
@@ -116,19 +127,25 @@ def build_request(
         f"{goal_line}"
         f"{prev_line}"
         f"Next instruction the user will attempt: {instruction}\n\n"
-        "Answer in two steps. First, in screen_summary, name the "
+        "Answer in three fields. First, in screen_summary, name the "
         "dominant visible UI on the screen in <= 12 words — be "
         "concrete about what's in front of the user right now. Then "
-        "pick a verdict.\n\n"
-        "Test for on_track: from the screen you just summarized, can "
-        "the user begin the next instruction's first action right now "
-        "(possibly after one obvious click on something visible)? If "
-        "they must first finish some other flow (sign-out, picker, "
-        "confirmation, wizard step), it is blocked. If the previous "
-        "step's effect isn't visible on screen, it is also blocked. If "
-        "the screen contradicts where this instruction assumes the "
-        "user is (already past it, wrong section), it is diverged.\n\n"
-        'Respond with JSON: {"screen_summary": "...", "verdict": '
+        "set previous_step_visible_effect to 'yes', 'no', or 'na' "
+        f"(use 'na' iff no previous step was provided{'' if previous_instruction else ' — that is the case here'}). "
+        "Then pick a verdict.\n\n"
+        "Hard rule: if previous_step_visible_effect is 'no', verdict "
+        "MUST be 'blocked'. The 'one obvious click away' justification "
+        "is not allowed — a click still pending means the previous "
+        "step did not finish.\n\n"
+        "Test for on_track: the previous step's effect is visible (or "
+        "there is no previous step) AND the screen is the starting "
+        "state this instruction assumes. If they must first finish "
+        "some other flow (sign-out, picker, confirmation, wizard step) "
+        "it is blocked. If the screen contradicts where this "
+        "instruction assumes the user is (already past it, wrong "
+        "section), it is diverged.\n\n"
+        'Respond with JSON: {"screen_summary": "...", '
+        '"previous_step_visible_effect": "yes"|"no"|"na", "verdict": '
         '"on_track"|"blocked"|"diverged"|"unsure", "evidence": "..."}'
     )
     return LLMRequest(
@@ -153,6 +170,9 @@ def _normalize_verdict(raw: str) -> Verdict | None:
     return None
 
 
+_VALID_PREV_EFFECT: frozenset[str] = frozenset({"yes", "no", "na"})
+
+
 def parse_verdict(raw: str) -> VerifierVerdict:
     text = raw.strip()
     if text.startswith("```"):
@@ -172,13 +192,39 @@ def parse_verdict(raw: str) -> VerifierVerdict:
         or "no evidence given"
     )
     screen_summary = str(payload.get("screen_summary", "")).strip()
+    prev_effect_raw = str(
+        payload.get("previous_step_visible_effect", "")
+    ).strip().lower()
+    prev_effect = prev_effect_raw if prev_effect_raw in _VALID_PREV_EFFECT else ""
+
+    # Hard gate: if the model itself reports the previous step's effect
+    # is not visible, force blocked regardless of the verdict it picked.
+    # This removes the "one obvious click away" loophole where the model
+    # rationalizes on_track from a screen still showing the pre-step
+    # state.
+    if prev_effect == "no" and verdict != "blocked":
+        return VerifierVerdict(
+            verdict="blocked",
+            reason=evidence
+            if evidence != "no evidence given"
+            else "previous step's effect not visible on screen",
+            screen_summary=screen_summary,
+            previous_step_visible_effect=prev_effect,
+        )
+
     if verdict is None:
         # Unknown label: fail-open as unsure so the walk continues.
         return VerifierVerdict(
-            verdict="unsure", reason=evidence, screen_summary=screen_summary
+            verdict="unsure",
+            reason=evidence,
+            screen_summary=screen_summary,
+            previous_step_visible_effect=prev_effect,
         )
     return VerifierVerdict(
-        verdict=verdict, reason=evidence, screen_summary=screen_summary
+        verdict=verdict,
+        reason=evidence,
+        screen_summary=screen_summary,
+        previous_step_visible_effect=prev_effect,
     )
 
 
@@ -219,6 +265,7 @@ def classify_screen(
             "raw_preview": raw.strip()[:200],
             "verdict": verdict.verdict,
             "screen_summary": verdict.screen_summary,
+            "previous_step_visible_effect": verdict.previous_step_visible_effect,
             "parsed_ok": verdict.ok,
             "parsed_reason": verdict.reason,
         },

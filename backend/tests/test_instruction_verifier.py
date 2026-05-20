@@ -116,6 +116,49 @@ class ParseVerdictTests(unittest.TestCase):
         v = parse_verdict('{"verdict": "blocked"}')
         self.assertEqual(v.reason, "no evidence given")
 
+    def test_prev_effect_no_forces_blocked_even_when_model_says_on_track(self) -> None:
+        v = parse_verdict(
+            '{"screen_summary": "Slack channel view", '
+            '"previous_step_visible_effect": "no", '
+            '"verdict": "on_track", '
+            '"evidence": "User can click Add workspaces"}'
+        )
+        self.assertEqual(v.verdict, "blocked")
+        self.assertFalse(v.ok)
+        self.assertEqual(v.previous_step_visible_effect, "no")
+
+    def test_prev_effect_yes_leaves_verdict_intact(self) -> None:
+        v = parse_verdict(
+            '{"screen_summary": "Workspace menu open", '
+            '"previous_step_visible_effect": "yes", '
+            '"verdict": "on_track", "evidence": "menu visible"}'
+        )
+        self.assertEqual(v.verdict, "on_track")
+        self.assertEqual(v.previous_step_visible_effect, "yes")
+
+    def test_prev_effect_na_leaves_verdict_intact(self) -> None:
+        v = parse_verdict(
+            '{"previous_step_visible_effect": "na", '
+            '"verdict": "on_track", "evidence": "first step"}'
+        )
+        self.assertEqual(v.verdict, "on_track")
+        self.assertEqual(v.previous_step_visible_effect, "na")
+
+    def test_prev_effect_no_supplies_default_reason_when_evidence_missing(self) -> None:
+        v = parse_verdict(
+            '{"previous_step_visible_effect": "no", "verdict": "on_track"}'
+        )
+        self.assertEqual(v.verdict, "blocked")
+        self.assertIn("previous step", v.reason.lower())
+
+    def test_prev_effect_invalid_value_is_ignored(self) -> None:
+        v = parse_verdict(
+            '{"previous_step_visible_effect": "maybe", '
+            '"verdict": "on_track", "evidence": "ok"}'
+        )
+        self.assertEqual(v.verdict, "on_track")
+        self.assertEqual(v.previous_step_visible_effect, "")
+
 
 class BuildRequestTests(unittest.TestCase):
     def test_request_uses_system_prompt_and_screen(self) -> None:

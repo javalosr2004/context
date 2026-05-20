@@ -1,14 +1,38 @@
 from __future__ import annotations
 
+import contextlib
+import os
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 
 from .storage import BundleValidationError, RecordingRow, Storage, storage_from_env
+from .worker import EnrichmentWorker
 
 
-def create_app(storage: Storage | None = None) -> FastAPI:
+def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
     app = FastAPI(title="recording-enrichment", version="0.1.0")
     state_storage = storage or storage_from_env()
+    worker: Optional[EnrichmentWorker] = None
+
+    @app.on_event("startup")
+    async def _start_worker() -> None:
+        nonlocal worker
+        if os.environ.get("WORKER_ENABLED", "1") == "0":
+            return
+        chosen_describer = describer
+        if chosen_describer is None and os.environ.get("HOLO_API_KEY"):
+            from .holo_describe import HoloDescriber
+            chosen_describer = HoloDescriber()
+        worker = EnrichmentWorker(state_storage, chosen_describer)
+        worker.start()
+
+    @app.on_event("shutdown")
+    async def _stop_worker() -> None:
+        if worker is not None:
+            with contextlib.suppress(Exception):
+                await worker.stop()
 
     @app.get("/health")
     def health() -> dict[str, str]:

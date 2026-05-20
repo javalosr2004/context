@@ -95,6 +95,9 @@
 		B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* EnrichmentUploaderTests.swift */; };
 		B0000000000000000000000F /* EnrichmentStatusStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F /* EnrichmentStatusStream.swift */; };
 		B00000000000000000000010 /* SSEParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* SSEParserTests.swift */; };
+		B00000000000000000000030 /* RecordingsIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040 /* RecordingsIndex.swift */; };
+		B00000000000000000000031 /* RecordingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000041 /* RecordingsListView.swift */; };
+		B00000000000000000000032 /* RecordingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042 /* RecordingsWindowController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -199,6 +202,9 @@
 		B0000000000000000000001E /* EnrichmentUploaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentUploaderTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000001F /* EnrichmentStatusStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentStatusStream.swift; sourceTree = "<group>"; };
 		B00000000000000000000021 /* SSEParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParserTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000040 /* RecordingsIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsIndex.swift; sourceTree = "<group>"; };
+		B00000000000000000000041 /* RecordingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsListView.swift; sourceTree = "<group>"; };
+		B00000000000000000000042 /* RecordingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsWindowController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -354,6 +360,7 @@
 				B0000000000000000000001A /* Cropper.swift */,
 				B0000000000000000000001D /* EnrichmentUploader.swift */,
 				B0000000000000000000001F /* EnrichmentStatusStream.swift */,
+				B00000000000000000000040 /* RecordingsIndex.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -409,6 +416,8 @@
 				AB0000000000000000000011 /* MarkdownTextView.swift */,
 				AD0000000000000000000013 /* EdgeTabView.swift */,
 				AE0000000000000000000012 /* DevSettingsView.swift */,
+				B00000000000000000000041 /* RecordingsListView.swift */,
+				B00000000000000000000042 /* RecordingsWindowController.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -589,6 +598,9 @@
 				B0000000000000000000000A /* Cropper.swift in Sources */,
 				B0000000000000000000000D /* EnrichmentUploader.swift in Sources */,
 				B0000000000000000000000F /* EnrichmentStatusStream.swift in Sources */,
+				B00000000000000000000030 /* RecordingsIndex.swift in Sources */,
+				B00000000000000000000031 /* RecordingsListView.swift in Sources */,
+				B00000000000000000000032 /* RecordingsWindowController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

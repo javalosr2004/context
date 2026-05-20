@@ -11,6 +11,8 @@ final class StatusBarController {
     private let tutorialEndpointStore: TutorialAPIEndpointStore
     private let recordingSession = RecordingSession()
     private let goalSheet = GoalSheetController()
+    private let recordingsIndex = RecordingsIndex()
+    private lazy var recordingsWindow = RecordingsWindowController(index: recordingsIndex)
     private static let recordingEnrichmentBaseURL = URL(string: "http://localhost:7100")!
 
     init(
@@ -49,6 +51,9 @@ final class StatusBarController {
         let recordTitle = recordingSession.isRecording ? "Stop Recording" : "Record..."
         menu.addItem(CallbackMenuItem(title: recordTitle, actionHandler: { [weak self] in
             self?.toggleRecording()
+        }))
+        menu.addItem(CallbackMenuItem(title: "Show Recordings...", actionHandler: { [weak self] in
+            self?.recordingsWindow.show()
         }))
         menu.addItem(NSMenuItem.separator())
         let endpointItem = NSMenuItem(title: endpointTitle(), action: nil, keyEquivalent: "")
@@ -200,14 +205,34 @@ final class StatusBarController {
                 do {
                     let bundleURL = try await recordingSession.stop()
                     rebuildMenu()
+                    let recordingId = bundleURL.lastPathComponent.replacingOccurrences(of: "recording-", with: "")
+                    let goalText = self.loadGoalText(from: bundleURL) ?? "(unknown goal)"
+                    let entry = LocalRecordingEntry(
+                        id: recordingId,
+                        bundlePath: bundleURL.path,
+                        goal: goalText,
+                        createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
+                        remoteId: nil,
+                        lastStatus: "uploading",
+                        totalEvents: 0,
+                        completed: 0,
+                        failed: 0
+                    )
+                    recordingsIndex.upsert(entry)
+                    recordingsWindow.refresh()
+
                     let uploader = EnrichmentUploader(baseURL: Self.recordingEnrichmentBaseURL)
                     do {
                         let remote = try await uploader.upload(bundleDir: bundleURL)
-                        let alert = NSAlert()
-                        alert.messageText = "Recording uploaded"
-                        alert.informativeText = "id=\(remote.id) total=\(remote.totalEvents)\nLocal bundle: \(bundleURL.path)"
-                        alert.runModal()
+                        var updated = entry
+                        updated.remoteId = remote.id
+                        updated.lastStatus = remote.status
+                        updated.totalEvents = remote.totalEvents
+                        recordingsIndex.upsert(updated)
+                        recordingsWindow.refresh()
                     } catch {
+                        recordingsIndex.updateStatus(id: recordingId, status: "failed")
+                        recordingsWindow.refresh()
                         let alert = NSAlert()
                         alert.messageText = "Recording saved locally (upload failed)"
                         alert.informativeText = "\(bundleURL.path)\n\nError: \(error.localizedDescription)"
@@ -239,5 +264,14 @@ final class StatusBarController {
         alert.messageText = "Recording error"
         alert.informativeText = error.localizedDescription
         alert.runModal()
+    }
+
+    private func loadGoalText(from bundleURL: URL) -> String? {
+        let manifestURL = bundleURL.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else {
+            return nil
+        }
+        return manifest.goal.text
     }
 }

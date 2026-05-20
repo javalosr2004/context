@@ -14,11 +14,11 @@ struct LocalRecordingEntry: Codable, Identifiable, Equatable {
 }
 
 @MainActor
-final class RecordingsIndex {
+final class RecordingsIndex: ObservableObject {
     private static let log = Logger(subsystem: "ContextApp.Recording", category: "Index")
 
     private let indexURL: URL
-    private(set) var entries: [LocalRecordingEntry] = []
+    @Published private(set) var entries: [LocalRecordingEntry] = []
 
     init(baseDirectory: URL = RecordingSession.defaultBaseDirectory()) {
         let dir = baseDirectory
@@ -43,6 +43,10 @@ final class RecordingsIndex {
         if let total { entries[idx].totalEvents = total }
         if let failed { entries[idx].failed = failed }
         persist()
+    }
+
+    func entry(id: String) -> LocalRecordingEntry? {
+        entries.first(where: { $0.id == id })
     }
 
     func remove(id: String) {

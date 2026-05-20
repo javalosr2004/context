@@ -98,6 +98,8 @@
 		B00000000000000000000030 /* RecordingsIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040 /* RecordingsIndex.swift */; };
 		B00000000000000000000031 /* RecordingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000041 /* RecordingsListView.swift */; };
 		B00000000000000000000032 /* RecordingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042 /* RecordingsWindowController.swift */; };
+		B00000000000000000000033 /* RecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043 /* RecordingController.swift */; };
+		B00000000000000000000034 /* RecordingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000044 /* RecordingDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -205,6 +207,8 @@
 		B00000000000000000000040 /* RecordingsIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsIndex.swift; sourceTree = "<group>"; };
 		B00000000000000000000041 /* RecordingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsListView.swift; sourceTree = "<group>"; };
 		B00000000000000000000042 /* RecordingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsWindowController.swift; sourceTree = "<group>"; };
+		B00000000000000000000043 /* RecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingController.swift; sourceTree = "<group>"; };
+		B00000000000000000000044 /* RecordingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -361,6 +365,7 @@
 				B0000000000000000000001D /* EnrichmentUploader.swift */,
 				B0000000000000000000001F /* EnrichmentStatusStream.swift */,
 				B00000000000000000000040 /* RecordingsIndex.swift */,
+				B00000000000000000000043 /* RecordingController.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -418,6 +423,7 @@
 				AE0000000000000000000012 /* DevSettingsView.swift */,
 				B00000000000000000000041 /* RecordingsListView.swift */,
 				B00000000000000000000042 /* RecordingsWindowController.swift */,
+				B00000000000000000000044 /* RecordingDetailView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -601,6 +607,8 @@
 				B00000000000000000000030 /* RecordingsIndex.swift in Sources */,
 				B00000000000000000000031 /* RecordingsListView.swift in Sources */,
 				B00000000000000000000032 /* RecordingsWindowController.swift in Sources */,
+				B00000000000000000000033 /* RecordingController.swift in Sources */,
+				B00000000000000000000034 /* RecordingDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

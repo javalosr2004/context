@@ -19,6 +19,7 @@ final class OverlayCoordinator {
     private var screenGroundingController: ScreenGroundingController?
     private var screenObserver: NSObjectProtocol?
     private var statusBarController: StatusBarController?
+    private let recordingController = RecordingController()
     private var popupResizeCancellable: AnyCancellable?
     private var tutorialActionConsumer: TutorialActionConsumer?
     private var tutorialPlanController: TutorialPlanController?
@@ -174,6 +175,7 @@ final class OverlayCoordinator {
 
         popupPanel.contentView = NSHostingView(rootView: ChatPopupView(
             sessionController: tutorialSessionController,
+            recordingController: recordingController,
             onTutorialStepSelected: { step in
                 await handleTutorialStep(step, 0)
             },
@@ -187,6 +189,9 @@ final class OverlayCoordinator {
             },
             onMinify: {
                 popupController.collapse()
+            },
+            onShowRecordings: { [weak self] in
+                self?.statusBarController?.showRecordings()
             }
         ))
         popupResizeCancellable = tutorialSessionController.objectWillChange.sink { [weak self] _ in
@@ -206,6 +211,7 @@ final class OverlayCoordinator {
         self.statusBarController = StatusBarController(
             endpointStore: endpointStore,
             tutorialEndpointStore: tutorialEndpointStore,
+            recordingController: recordingController,
             onShowOverlay: { popupController.restore() },
             onTestBbox: { debugController.showReplacementBbox() }
         )

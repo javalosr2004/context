@@ -142,9 +142,11 @@ struct ChatPopupView: View {
     private static let maximumChatResponseHeight: CGFloat = 500
 
     @ObservedObject var sessionController: TutorialSessionController
+    @ObservedObject var recordingController: RecordingController
     let onTutorialStepSelected: (TutorialStep) async -> String
     let onInputInstruction: (InstructionInput) async -> String
     let onMinify: () -> Void
+    let onShowRecordings: () -> Void
 
     @State private var activeStepID: String?
     @State private var expandedStepID: String?
@@ -183,14 +185,18 @@ struct ChatPopupView: View {
 
     init(
         sessionController: TutorialSessionController,
+        recordingController: RecordingController,
         onTutorialStepSelected: @escaping (TutorialStep) async -> String,
         onInputInstruction: @escaping (InstructionInput) async -> String,
-        onMinify: @escaping () -> Void
+        onMinify: @escaping () -> Void,
+        onShowRecordings: @escaping () -> Void
     ) {
         self.sessionController = sessionController
+        self.recordingController = recordingController
         self.onTutorialStepSelected = onTutorialStepSelected
         self.onInputInstruction = onInputInstruction
         self.onMinify = onMinify
+        self.onShowRecordings = onShowRecordings
     }
 
     var body: some View {
@@ -312,10 +318,34 @@ struct ChatPopupView: View {
     }
 
     private var handoffChrome: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             nativeWindowControlSpacer
 
             Spacer()
+
+            Button(action: { recordingController.toggleRecording() }) {
+                Image(systemName: recordingController.isRecording ? "stop.circle.fill" : "record.circle")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(recordingController.isRecording ? Color.red : OverlayTheme.secondaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(OverlayTheme.quietFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .help(recordingController.isRecording ? "Stop recording" : "Record a workflow")
+
+            Button(action: onShowRecordings) {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(OverlayTheme.quietFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .help("Show recordings")
 
             Button(action: startNewChat) {
                 Image(systemName: "square.and.pencil")

@@ -1,52 +1,50 @@
 import SwiftUI
 
-@MainActor
-final class RecordingsListModel: ObservableObject {
-    @Published var entries: [LocalRecordingEntry] = []
-    private let index: RecordingsIndex
-
-    init(index: RecordingsIndex) {
-        self.index = index
-        reload()
-    }
-
-    func reload() {
-        entries = index.entries
-    }
-}
-
 struct RecordingsListView: View {
-    @ObservedObject var model: RecordingsListModel
+    @ObservedObject var index: RecordingsIndex
+    let onOpen: (LocalRecordingEntry) -> Void
+    let onStartRecording: () -> Void
+    let isRecording: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Recordings").font(.title2.bold())
                 Spacer()
-                Button("Refresh") { model.reload() }
+                Button(action: onStartRecording) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isRecording ? "stop.circle.fill" : "record.circle")
+                        Text(isRecording ? "Stop" : "Record")
+                    }
+                }
+                .keyboardShortcut("r", modifiers: [.command])
+                .tint(isRecording ? .red : .accentColor)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
 
-            if model.entries.isEmpty {
+            if index.entries.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "record.circle")
                         .font(.system(size: 40))
                         .foregroundStyle(.secondary)
                     Text("No recordings yet").font(.headline)
-                    Text("Start one from the menu bar: Record…")
+                    Text("Click Record to capture a workflow.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(model.entries) { entry in
-                    RecordingRow(entry: entry)
+                List(index.entries) { entry in
+                    Button(action: { onOpen(entry) }) {
+                        RecordingRow(entry: entry)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .listStyle(.inset)
             }
         }
-        .frame(minWidth: 420, minHeight: 320)
+        .frame(minWidth: 460, minHeight: 360)
     }
 }
 
@@ -54,16 +52,25 @@ private struct RecordingRow: View {
     let entry: LocalRecordingEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(entry.goal).font(.body).lineLimit(2)
-            HStack(spacing: 8) {
-                Text("\(entry.totalEvents) events").font(.caption).foregroundStyle(.secondary)
-                StatusPill(status: entry.lastStatus, completed: entry.completed, total: entry.totalEvents)
-                Spacer()
-                Text(entry.bundlePath).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "record.circle.fill")
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.goal).font(.body).lineLimit(2)
+                HStack(spacing: 8) {
+                    Text("\(entry.totalEvents) events").font(.caption).foregroundStyle(.secondary)
+                    StatusPill(status: entry.lastStatus, completed: entry.completed, total: entry.totalEvents)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 

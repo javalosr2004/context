@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 @MainActor
 final class StatusBarController {
@@ -9,15 +10,14 @@ final class StatusBarController {
     private let onTestBbox: () -> Void
     private let statusItem: NSStatusItem
     private let tutorialEndpointStore: TutorialAPIEndpointStore
-    private let recordingSession = RecordingSession()
-    private let goalSheet = GoalSheetController()
-    private let recordingsIndex = RecordingsIndex()
-    private lazy var recordingsWindow = RecordingsWindowController(index: recordingsIndex)
-    private static let recordingEnrichmentBaseURL = URL(string: "http://localhost:7100")!
+    private let recordingController: RecordingController
+    private lazy var recordingsWindow = RecordingsWindowController(controller: recordingController)
+    private var recordingCancellable: AnyCancellable?
 
     init(
         endpointStore: GroundingEndpointStore,
         tutorialEndpointStore: TutorialAPIEndpointStore,
+        recordingController: RecordingController,
         onShowOverlay: @escaping () -> Void,
         onTestBbox: @escaping () -> Void
     ) {
@@ -25,8 +25,12 @@ final class StatusBarController {
         self.onShowOverlay = onShowOverlay
         self.onTestBbox = onTestBbox
         self.tutorialEndpointStore = tutorialEndpointStore
+        self.recordingController = recordingController
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         configureStatusItem()
+        recordingCancellable = recordingController.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildMenu() }
     }
 
     func stop() {
@@ -48,9 +52,9 @@ final class StatusBarController {
             self?.showOverlay()
         }))
         menu.addItem(NSMenuItem.separator())
-        let recordTitle = recordingSession.isRecording ? "Stop Recording" : "Record..."
+        let recordTitle = recordingController.isRecording ? "Stop Recording" : "Record..."
         menu.addItem(CallbackMenuItem(title: recordTitle, actionHandler: { [weak self] in
-            self?.toggleRecording()
+            self?.recordingController.toggleRecording()
         }))
         menu.addItem(CallbackMenuItem(title: "Show Recordings...", actionHandler: { [weak self] in
             self?.recordingsWindow.show()
@@ -199,79 +203,7 @@ final class StatusBarController {
         NSApplication.shared.terminate(nil)
     }
 
-    private func toggleRecording() {
-        if recordingSession.isRecording {
-            Task { @MainActor in
-                do {
-                    let bundleURL = try await recordingSession.stop()
-                    rebuildMenu()
-                    let recordingId = bundleURL.lastPathComponent.replacingOccurrences(of: "recording-", with: "")
-                    let goalText = self.loadGoalText(from: bundleURL) ?? "(unknown goal)"
-                    let entry = LocalRecordingEntry(
-                        id: recordingId,
-                        bundlePath: bundleURL.path,
-                        goal: goalText,
-                        createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
-                        remoteId: nil,
-                        lastStatus: "uploading",
-                        totalEvents: 0,
-                        completed: 0,
-                        failed: 0
-                    )
-                    recordingsIndex.upsert(entry)
-                    recordingsWindow.refresh()
-
-                    let uploader = EnrichmentUploader(baseURL: Self.recordingEnrichmentBaseURL)
-                    do {
-                        let remote = try await uploader.upload(bundleDir: bundleURL)
-                        var updated = entry
-                        updated.remoteId = remote.id
-                        updated.lastStatus = remote.status
-                        updated.totalEvents = remote.totalEvents
-                        recordingsIndex.upsert(updated)
-                        recordingsWindow.refresh()
-                    } catch {
-                        recordingsIndex.updateStatus(id: recordingId, status: "failed")
-                        recordingsWindow.refresh()
-                        let alert = NSAlert()
-                        alert.messageText = "Recording saved locally (upload failed)"
-                        alert.informativeText = "\(bundleURL.path)\n\nError: \(error.localizedDescription)"
-                        alert.runModal()
-                    }
-                } catch {
-                    presentError(error)
-                }
-                rebuildMenu()
-            }
-            return
-        }
-
-        Task { @MainActor in
-            do {
-                let goal = try await goalSheet.prompt()
-                _ = try await recordingSession.start(goal: goal, screen: NSScreen.main)
-            } catch GoalEntryError.cancelled {
-                // user dismissed; no-op
-            } catch {
-                presentError(error)
-            }
-            rebuildMenu()
-        }
-    }
-
-    private func presentError(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Recording error"
-        alert.informativeText = error.localizedDescription
-        alert.runModal()
-    }
-
-    private func loadGoalText(from bundleURL: URL) -> String? {
-        let manifestURL = bundleURL.appendingPathComponent("manifest.json")
-        guard let data = try? Data(contentsOf: manifestURL),
-              let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else {
-            return nil
-        }
-        return manifest.goal.text
+    func showRecordings() {
+        recordingsWindow.show()
     }
 }

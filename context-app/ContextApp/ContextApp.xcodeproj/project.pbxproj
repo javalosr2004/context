@@ -81,6 +81,12 @@
 		AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000015 /* EdgeTabAnchorTests.swift */; };
 		B00000000000000000000001 /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* Schema.swift */; };
 		B00000000000000000000002 /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* Permissions.swift */; };
+		B00000000000000000000003 /* MonotonicClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* MonotonicClock.swift */; };
+		B00000000000000000000004 /* ContinuousFrameStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ContinuousFrameStream.swift */; };
+		B00000000000000000000005 /* InputEventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* InputEventTap.swift */; };
+		B00000000000000000000006 /* GoalSheetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* GoalSheetController.swift */; };
+		B00000000000000000000007 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* RecordingSession.swift */; };
+		B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* RecordingSchemaTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -171,6 +177,12 @@
 		AD0000000000000000000015 /* EdgeTabAnchorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchorTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000011 /* Schema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schema.swift; sourceTree = "<group>"; };
 		B00000000000000000000012 /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
+		B00000000000000000000013 /* MonotonicClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonotonicClock.swift; sourceTree = "<group>"; };
+		B00000000000000000000014 /* ContinuousFrameStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuousFrameStream.swift; sourceTree = "<group>"; };
+		B00000000000000000000015 /* InputEventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputEventTap.swift; sourceTree = "<group>"; };
+		B00000000000000000000016 /* GoalSheetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalSheetController.swift; sourceTree = "<group>"; };
+		B00000000000000000000017 /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
+		B00000000000000000000018 /* RecordingSchemaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSchemaTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -234,6 +246,7 @@
 				A70000000000000000000016 /* TutorialActionConsumerTests.swift */,
 				A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */,
 				AD0000000000000000000015 /* EdgeTabAnchorTests.swift */,
+				B00000000000000000000018 /* RecordingSchemaTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -312,6 +325,11 @@
 			children = (
 				B00000000000000000000011 /* Schema.swift */,
 				B00000000000000000000012 /* Permissions.swift */,
+				B00000000000000000000013 /* MonotonicClock.swift */,
+				B00000000000000000000014 /* ContinuousFrameStream.swift */,
+				B00000000000000000000015 /* InputEventTap.swift */,
+				B00000000000000000000016 /* GoalSheetController.swift */,
+				B00000000000000000000017 /* RecordingSession.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -538,6 +556,11 @@
 				AF0000000000000000000001 /* ClipboardPopoverController.swift in Sources */,
 				B00000000000000000000001 /* Schema.swift in Sources */,
 				B00000000000000000000002 /* Permissions.swift in Sources */,
+				B00000000000000000000003 /* MonotonicClock.swift in Sources */,
+				B00000000000000000000004 /* ContinuousFrameStream.swift in Sources */,
+				B00000000000000000000005 /* InputEventTap.swift in Sources */,
+				B00000000000000000000006 /* GoalSheetController.swift in Sources */,
+				B00000000000000000000007 /* RecordingSession.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -563,6 +586,7 @@
 				A70000000000000000000006 /* TutorialActionConsumerTests.swift in Sources */,
 				A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */,
 				AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */,
+				B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

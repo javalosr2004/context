@@ -9,6 +9,8 @@ final class StatusBarController {
     private let onTestBbox: () -> Void
     private let statusItem: NSStatusItem
     private let tutorialEndpointStore: TutorialAPIEndpointStore
+    private let recordingSession = RecordingSession()
+    private let goalSheet = GoalSheetController()
 
     init(
         endpointStore: GroundingEndpointStore,
@@ -41,6 +43,11 @@ final class StatusBarController {
         let menu = NSMenu()
         menu.addItem(CallbackMenuItem(title: "Show Overlay", actionHandler: { [weak self] in
             self?.showOverlay()
+        }))
+        menu.addItem(NSMenuItem.separator())
+        let recordTitle = recordingSession.isRecording ? "Stop Recording" : "Record..."
+        menu.addItem(CallbackMenuItem(title: recordTitle, actionHandler: { [weak self] in
+            self?.toggleRecording()
         }))
         menu.addItem(NSMenuItem.separator())
         let endpointItem = NSMenuItem(title: endpointTitle(), action: nil, keyEquivalent: "")
@@ -184,5 +191,42 @@ final class StatusBarController {
 
     private func quitApplication() {
         NSApplication.shared.terminate(nil)
+    }
+
+    private func toggleRecording() {
+        if recordingSession.isRecording {
+            Task { @MainActor in
+                do {
+                    let bundleURL = try await recordingSession.stop()
+                    let alert = NSAlert()
+                    alert.messageText = "Recording saved"
+                    alert.informativeText = bundleURL.path
+                    alert.runModal()
+                } catch {
+                    presentError(error)
+                }
+                rebuildMenu()
+            }
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                let goal = try await goalSheet.prompt()
+                _ = try await recordingSession.start(goal: goal, screen: NSScreen.main)
+            } catch GoalEntryError.cancelled {
+                // user dismissed; no-op
+            } catch {
+                presentError(error)
+            }
+            rebuildMenu()
+        }
+    }
+
+    private func presentError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Recording error"
+        alert.informativeText = error.localizedDescription
+        alert.runModal()
     }
 }

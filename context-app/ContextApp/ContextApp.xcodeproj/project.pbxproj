@@ -93,6 +93,8 @@
 		B0000000000000000000000C /* CropperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* CropperTests.swift */; };
 		B0000000000000000000000D /* EnrichmentUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D /* EnrichmentUploader.swift */; };
 		B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* EnrichmentUploaderTests.swift */; };
+		B0000000000000000000000F /* EnrichmentStatusStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F /* EnrichmentStatusStream.swift */; };
+		B00000000000000000000010 /* SSEParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* SSEParserTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -195,6 +197,8 @@
 		B0000000000000000000001C /* CropperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropperTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000001D /* EnrichmentUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentUploader.swift; sourceTree = "<group>"; };
 		B0000000000000000000001E /* EnrichmentUploaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentUploaderTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001F /* EnrichmentStatusStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentStatusStream.swift; sourceTree = "<group>"; };
+		B00000000000000000000021 /* SSEParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParserTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -262,6 +266,7 @@
 				B0000000000000000000001B /* ScrollSessionizerTests.swift */,
 				B0000000000000000000001C /* CropperTests.swift */,
 				B0000000000000000000001E /* EnrichmentUploaderTests.swift */,
+				B00000000000000000000021 /* SSEParserTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -348,6 +353,7 @@
 				B00000000000000000000019 /* ScrollSessionizer.swift */,
 				B0000000000000000000001A /* Cropper.swift */,
 				B0000000000000000000001D /* EnrichmentUploader.swift */,
+				B0000000000000000000001F /* EnrichmentStatusStream.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -582,6 +588,7 @@
 				B00000000000000000000009 /* ScrollSessionizer.swift in Sources */,
 				B0000000000000000000000A /* Cropper.swift in Sources */,
 				B0000000000000000000000D /* EnrichmentUploader.swift in Sources */,
+				B0000000000000000000000F /* EnrichmentStatusStream.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -611,6 +618,7 @@
 				B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */,
 				B0000000000000000000000C /* CropperTests.swift in Sources */,
 				B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */,
+				B00000000000000000000010 /* SSEParserTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

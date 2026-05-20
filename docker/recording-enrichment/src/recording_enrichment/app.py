@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import json
 import os
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.responses import FileResponse, StreamingResponse
 
+from .event_bus import EventBus
 from .storage import BundleValidationError, RecordingRow, Storage, storage_from_env
 from .worker import EnrichmentWorker
 
@@ -14,7 +17,11 @@ from .worker import EnrichmentWorker
 def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
     app = FastAPI(title="recording-enrichment", version="0.1.0")
     state_storage = storage or storage_from_env()
+    bus = EventBus()
     worker: Optional[EnrichmentWorker] = None
+
+    def on_worker_event(recording_id: str, kind: str, payload: dict) -> None:
+        bus.publish(recording_id, kind, payload)
 
     @app.on_event("startup")
     async def _start_worker() -> None:
@@ -25,7 +32,7 @@ def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
         if chosen_describer is None and os.environ.get("HOLO_API_KEY"):
             from .holo_describe import HoloDescriber
             chosen_describer = HoloDescriber()
-        worker = EnrichmentWorker(state_storage, chosen_describer)
+        worker = EnrichmentWorker(state_storage, chosen_describer, on_event=on_worker_event)
         worker.start()
 
     @app.on_event("shutdown")
@@ -73,6 +80,33 @@ def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
             "completed": row.completed,
             "failed": row.failed,
         }
+
+    @app.get("/recordings/{recording_id}/events/stream")
+    async def stream_events(recording_id: str, request: Request) -> StreamingResponse:
+        row = state_storage.get_recording(recording_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        last_event_id_header = request.headers.get("last-event-id")
+        last_event_id: Optional[int] = None
+        if last_event_id_header is not None:
+            try:
+                last_event_id = int(last_event_id_header)
+            except ValueError:
+                last_event_id = None
+
+        async def gen():
+            try:
+                async for event in bus.subscribe(recording_id, last_event_id=last_event_id):
+                    if await request.is_disconnected():
+                        break
+                    line = f"id: {event.sequence}\nevent: {event.kind}\ndata: {json.dumps(event.payload)}\n\n"
+                    yield line
+                    if event.kind == "done":
+                        break
+            except asyncio.CancelledError:
+                return
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
 
     @app.get("/recordings/{recording_id}/events")
     def get_events(recording_id: str) -> FileResponse:

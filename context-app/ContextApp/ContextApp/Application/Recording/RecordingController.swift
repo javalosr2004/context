@@ -26,7 +26,7 @@ final class RecordingController: ObservableObject {
     private var streams: [String: EnrichmentStatusStream] = [:]
     private var streamCancellables: [String: Set<AnyCancellable>] = [:]
 
-    init(enrichmentBaseURL: URL = URL(string: "http://localhost:7100")!) {
+    init(enrichmentBaseURL: URL = URL(string: "http://localhost:8080")!) {
         self.session = RecordingSession()
         self.goalSheet = GoalSheetController()
         self.index = RecordingsIndex()

@@ -46,6 +46,17 @@ services:
       timeout: 3s
       retries: 3
 
+  gateway:
+    image: caddy:2-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+      - recording-enrichment
+    restart: unless-stopped
+
 volumes:
   enrichment_data:
   recording_enrichment_data:

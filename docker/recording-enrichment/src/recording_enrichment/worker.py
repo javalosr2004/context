@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from .holo_describe import Describer, Description, PROMPT_VERSION
+from .holo_verify import GroundingClient, VerifySettings, verify_against_cursor
 from .schemas import EventIn
 from .storage import Storage
 
@@ -32,6 +33,8 @@ class EnrichmentWorker:
         *,
         settings: Optional[WorkerSettings] = None,
         on_event: Optional[callable] = None,  # type: ignore[type-arg]
+        verifier: Optional[GroundingClient] = None,
+        verify_settings: Optional[VerifySettings] = None,
     ):
         self._storage = storage
         self._describer = describer
@@ -40,6 +43,8 @@ class EnrichmentWorker:
         self._task: Optional[asyncio.Task] = None
         self._sem = asyncio.Semaphore(self._settings.max_concurrency)
         self._on_event = on_event  # called as (recording_id, "enriched"|"progress"|"done", payload)
+        self._verifier = verifier
+        self._verify_settings = verify_settings or VerifySettings()
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -143,16 +148,29 @@ class EnrichmentWorker:
             error = "missing_crops_or_describer"
 
         if description is not None:
+            verified: Optional[bool] = None
+            distance_px: Optional[float] = None
+            if self._verify_settings.enabled and self._verifier is not None and event.frame_id:
+                frame_path = bundle / "frames" / f"{event.frame_id}.jpg"
+                if frame_path.exists():
+                    verified, distance_px = await asyncio.to_thread(
+                        verify_against_cursor,
+                        client=self._verifier,
+                        frame_jpeg=frame_path.read_bytes(),
+                        target_phrase=description.target_phrase,
+                        cursor=(event.cursor.x, event.cursor.y),
+                        max_distance_px=self._verify_settings.max_distance_px,
+                    )
             base["description"] = description.model_dump()
             base["description_meta"] = {
                 "model": getattr(self._describer, "_model", "unknown"),
                 "prompt_version": PROMPT_VERSION,
                 "generated_at_ms": int(time.time() * 1000),
-                "verified": None,
-                "distance_px": None,
+                "verified": verified,
+                "distance_px": distance_px,
             }
             if job_id:
-                self._storage.update_job(job_id, status="done")
+                self._storage.update_job(job_id, status="done", verified=verified, distance_px=distance_px)
             self._storage.bump_counts(recording_id, completed_delta=1)
             self._emit(
                 recording_id,
@@ -161,8 +179,8 @@ class EnrichmentWorker:
                     "event_id": event.id,
                     "target_phrase": description.target_phrase,
                     "kind": description.kind,
-                    "verified": None,
-                    "distance_px": None,
+                    "verified": verified,
+                    "distance_px": distance_px,
                 },
             )
         else:

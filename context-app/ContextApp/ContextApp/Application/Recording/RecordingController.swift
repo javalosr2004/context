@@ -59,8 +59,34 @@ final class RecordingController: ObservableObject {
             lastError = nil
         } catch GoalEntryError.cancelled {
             // no-op
+        } catch let RecordingSessionError.permissionsDenied(perms) {
+            presentPermissionsAlert(perms: perms)
         } catch {
             presentError(error)
+        }
+    }
+
+    private func presentPermissionsAlert(perms: RecordingPermissions) {
+        let alert = NSAlert()
+        alert.messageText = "Permissions required to record"
+        var lines: [String] = []
+        if perms.needsScreen {
+            lines.append("• Screen Recording — capture frames of the workflow.")
+        }
+        if perms.needsAccessibility {
+            lines.append("• Accessibility — observe clicks, scrolls, and keystrokes (read-only).")
+        }
+        alert.informativeText = lines.joined(separator: "\n")
+            + "\n\nGrant the missing permissions in System Settings, then click Record again."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            let urlString: String = perms.needsAccessibility
+                ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                : "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            if let url = URL(string: urlString) {
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 

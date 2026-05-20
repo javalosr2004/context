@@ -19,13 +19,14 @@ struct EdgeTabView: View {
 
     var body: some View {
         shape
-            .fill(.ultraThinMaterial)
+            .fill(.regularMaterial)
+            .overlay(shape.fill(Color.black.opacity(0.06)))
             .overlay(shape.stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
             .overlay(glyph)
-            .shadow(color: .black.opacity(0.12), radius: 6, y: 1)
-            .offset(x: isHovering ? -2 : 0)
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+            .opacity(isHovering ? 1.0 : 0.55)
             .scaleEffect(isPressed ? 0.96 : 1.0, anchor: .trailing)
-            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isHovering)
+            .animation(.easeOut(duration: 0.18), value: isHovering)
             .animation(.easeOut(duration: 0.10), value: isPressed)
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
@@ -52,5 +53,6 @@ struct EdgeTabView: View {
                     .foregroundStyle(OverlayTheme.primaryText)
             }
         }
+        .offset(x: 1.5)
     }
 }

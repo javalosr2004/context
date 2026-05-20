@@ -9,6 +9,10 @@
 		reverse_proxy recording-enrichment:8000
 	}
 
+	handle_path /grounding/* {
+		reverse_proxy gui-grounding:8080
+	}
+
 	handle {
 		reverse_proxy backend:8000
 	}

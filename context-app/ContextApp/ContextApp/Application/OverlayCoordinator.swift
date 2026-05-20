@@ -4,10 +4,10 @@ import SwiftUI
 
 @MainActor
 final class OverlayCoordinator {
-    private let endpointStore = GroundingEndpointStore()
+    private let tutorialEndpointStore = TutorialAPIEndpointStore()
+    private lazy var endpointStore = GroundingEndpointStore(baseURLStore: tutorialEndpointStore)
     private let messageStore = ChatMessageStore()
     private let screenProvider: () -> NSScreen?
-    private let tutorialEndpointStore = TutorialAPIEndpointStore()
     private let webGroundingEndpointStore = WebGroundingEndpointStore()
     private var devSettingsWindowController: DevSettingsWindowController?
 

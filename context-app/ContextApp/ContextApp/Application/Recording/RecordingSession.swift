@@ -45,6 +45,7 @@ final class RecordingSession {
     private var eventsFileHandle: FileHandle?
     private var persistedFrameIds: Set<String> = []
     private let writeQueue = DispatchQueue(label: "context.recording.writes")
+    private let scrollSessionizer = ScrollSessionizer()
 
     /// Allows Phase 2+ to intercept built events before they are written.
     /// Returns an array (typically 0 or 1, scroll sessionizer may emit later).
@@ -134,6 +135,9 @@ final class RecordingSession {
         }
         state = .stopping
         eventTap.stop()
+        if let closed = scrollSessionizer.flush() {
+            emitScroll(closed, bundle: bundle)
+        }
         try? await frameStream.stop()
 
         manifest.endedAtMs = MonotonicClock.wallClockMs()
@@ -168,12 +172,89 @@ final class RecordingSession {
 
     private func consume(raw: RawInputEvent) {
         guard state == .recording, let bundle else { return }
-        let frame = frameStream.latestFrame(near: raw.hostTimeMs)
-        let event = Self.makeRecordedEvent(raw: raw, frame: frame)
-        let transformed = (eventTransform?(event, frame)) ?? [event]
-        for ev in transformed {
-            persist(event: ev, frame: frame, bundle: bundle)
+
+        if raw.kind == .scrollWheel {
+            let frame = frameStream.latestFrame(near: raw.hostTimeMs)
+            if let closed = scrollSessionizer.ingest(
+                hostTimeMs: raw.hostTimeMs,
+                cursor: raw.cursor,
+                dx: raw.scrollDeltaX,
+                dy: raw.scrollDeltaY,
+                phaseRaw: raw.scrollPhaseRaw,
+                momentumPhaseRaw: raw.scrollMomentumPhaseRaw,
+                frameId: frame?.frameId
+            ) {
+                emitScroll(closed, bundle: bundle)
+            }
+            return
         }
+
+        // Any non-scroll event flushes the open scroll session first.
+        if let closed = scrollSessionizer.flush() {
+            emitScroll(closed, bundle: bundle)
+        }
+
+        let frame = frameStream.latestFrame(near: raw.hostTimeMs)
+        let event = Self.makeRecordedEvent(raw: raw, frame: frame, cropPaths: nil)
+        let cropped = applyCrops(event: event, cursor: raw.cursor, frame: frame, bundle: bundle)
+        persist(event: cropped, frame: frame, bundle: bundle)
+    }
+
+    private func emitScroll(_ s: SessionizedScroll, bundle: BundleLayout) {
+        let frame = s.startFrameId.flatMap { frameStream.frame(byId: $0) }
+            ?? frameStream.latestFrame(near: s.startHostTimeMs)
+        let id = UUID().uuidString
+        let scroll = ScrollDelta(
+            startFrameId: s.startFrameId ?? "",
+            endFrameId: s.endFrameId ?? (s.startFrameId ?? ""),
+            dx: s.dx,
+            dy: s.dy,
+            durationMs: s.durationMs,
+            direction: s.direction
+        )
+        var event = RecordedEvent(
+            id: id,
+            timestampMs: s.startHostTimeMs,
+            kind: .scroll,
+            cursor: Point(x: Int(s.cursor.x.rounded()), y: Int(s.cursor.y.rounded())),
+            button: nil,
+            scroll: scroll,
+            key: nil,
+            frameId: frame?.frameId,
+            targetCropPath: nil,
+            contextCropPath: nil
+        )
+        event = applyCrops(event: event, cursor: s.cursor, frame: frame, bundle: bundle)
+        persist(event: event, frame: frame, bundle: bundle)
+    }
+
+    private func applyCrops(event: RecordedEvent, cursor: CGPoint, frame: CapturedFrame?, bundle: BundleLayout) -> RecordedEvent {
+        guard let frame else { return event }
+        let (target, context) = Cropper.crop(frame: frame, around: cursor)
+        var targetPath: String? = nil
+        var contextPath: String? = nil
+        if let target {
+            let url = bundle.targetCropURL(eventId: event.id)
+            do { try target.write(to: url); targetPath = "crops/\(url.lastPathComponent)" }
+            catch { Self.log.warning("target_crop_write_failed: \(error.localizedDescription, privacy: .public)") }
+        }
+        if let context {
+            let url = bundle.contextCropURL(eventId: event.id)
+            do { try context.write(to: url); contextPath = "crops/\(url.lastPathComponent)" }
+            catch { Self.log.warning("context_crop_write_failed: \(error.localizedDescription, privacy: .public)") }
+        }
+        return RecordedEvent(
+            id: event.id,
+            timestampMs: event.timestampMs,
+            kind: event.kind,
+            cursor: event.cursor,
+            button: event.button,
+            scroll: event.scroll,
+            key: event.key,
+            frameId: event.frameId,
+            targetCropPath: targetPath,
+            contextCropPath: contextPath
+        )
     }
 
     private func persist(event: RecordedEvent, frame: CapturedFrame?, bundle: BundleLayout) {
@@ -209,7 +290,7 @@ final class RecordingSession {
         try data.write(to: bundle.manifestURL, options: .atomic)
     }
 
-    private static func makeRecordedEvent(raw: RawInputEvent, frame: CapturedFrame?) -> RecordedEvent {
+    private static func makeRecordedEvent(raw: RawInputEvent, frame: CapturedFrame?, cropPaths: (String, String)?) -> RecordedEvent {
         let kind: RecordedEventKind
         var button: MouseButton? = nil
         var key: KeyStroke? = nil

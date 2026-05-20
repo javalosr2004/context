@@ -87,6 +87,10 @@
 		B00000000000000000000006 /* GoalSheetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* GoalSheetController.swift */; };
 		B00000000000000000000007 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* RecordingSession.swift */; };
 		B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* RecordingSchemaTests.swift */; };
+		B00000000000000000000009 /* ScrollSessionizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* ScrollSessionizer.swift */; };
+		B0000000000000000000000A /* Cropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* Cropper.swift */; };
+		B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* ScrollSessionizerTests.swift */; };
+		B0000000000000000000000C /* CropperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* CropperTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -183,6 +187,10 @@
 		B00000000000000000000016 /* GoalSheetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalSheetController.swift; sourceTree = "<group>"; };
 		B00000000000000000000017 /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
 		B00000000000000000000018 /* RecordingSchemaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSchemaTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000019 /* ScrollSessionizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSessionizer.swift; sourceTree = "<group>"; };
+		B0000000000000000000001A /* Cropper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cropper.swift; sourceTree = "<group>"; };
+		B0000000000000000000001B /* ScrollSessionizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSessionizerTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001C /* CropperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropperTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -247,6 +255,8 @@
 				A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */,
 				AD0000000000000000000015 /* EdgeTabAnchorTests.swift */,
 				B00000000000000000000018 /* RecordingSchemaTests.swift */,
+				B0000000000000000000001B /* ScrollSessionizerTests.swift */,
+				B0000000000000000000001C /* CropperTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -330,6 +340,8 @@
 				B00000000000000000000015 /* InputEventTap.swift */,
 				B00000000000000000000016 /* GoalSheetController.swift */,
 				B00000000000000000000017 /* RecordingSession.swift */,
+				B00000000000000000000019 /* ScrollSessionizer.swift */,
+				B0000000000000000000001A /* Cropper.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -561,6 +573,8 @@
 				B00000000000000000000005 /* InputEventTap.swift in Sources */,
 				B00000000000000000000006 /* GoalSheetController.swift in Sources */,
 				B00000000000000000000007 /* RecordingSession.swift in Sources */,
+				B00000000000000000000009 /* ScrollSessionizer.swift in Sources */,
+				B0000000000000000000000A /* Cropper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -587,6 +601,8 @@
 				A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */,
 				AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */,
 				B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */,
+				B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */,
+				B0000000000000000000000C /* CropperTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

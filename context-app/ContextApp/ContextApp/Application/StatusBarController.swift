@@ -11,6 +11,7 @@ final class StatusBarController {
     private let tutorialEndpointStore: TutorialAPIEndpointStore
     private let recordingSession = RecordingSession()
     private let goalSheet = GoalSheetController()
+    private static let recordingEnrichmentBaseURL = URL(string: "http://localhost:7100")!
 
     init(
         endpointStore: GroundingEndpointStore,
@@ -198,10 +199,20 @@ final class StatusBarController {
             Task { @MainActor in
                 do {
                     let bundleURL = try await recordingSession.stop()
-                    let alert = NSAlert()
-                    alert.messageText = "Recording saved"
-                    alert.informativeText = bundleURL.path
-                    alert.runModal()
+                    rebuildMenu()
+                    let uploader = EnrichmentUploader(baseURL: Self.recordingEnrichmentBaseURL)
+                    do {
+                        let remote = try await uploader.upload(bundleDir: bundleURL)
+                        let alert = NSAlert()
+                        alert.messageText = "Recording uploaded"
+                        alert.informativeText = "id=\(remote.id) total=\(remote.totalEvents)\nLocal bundle: \(bundleURL.path)"
+                        alert.runModal()
+                    } catch {
+                        let alert = NSAlert()
+                        alert.messageText = "Recording saved locally (upload failed)"
+                        alert.informativeText = "\(bundleURL.path)\n\nError: \(error.localizedDescription)"
+                        alert.runModal()
+                    }
                 } catch {
                     presentError(error)
                 }

@@ -91,6 +91,8 @@
 		B0000000000000000000000A /* Cropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* Cropper.swift */; };
 		B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* ScrollSessionizerTests.swift */; };
 		B0000000000000000000000C /* CropperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* CropperTests.swift */; };
+		B0000000000000000000000D /* EnrichmentUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D /* EnrichmentUploader.swift */; };
+		B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* EnrichmentUploaderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -191,6 +193,8 @@
 		B0000000000000000000001A /* Cropper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cropper.swift; sourceTree = "<group>"; };
 		B0000000000000000000001B /* ScrollSessionizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSessionizerTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000001C /* CropperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropperTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001D /* EnrichmentUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentUploader.swift; sourceTree = "<group>"; };
+		B0000000000000000000001E /* EnrichmentUploaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentUploaderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -257,6 +261,7 @@
 				B00000000000000000000018 /* RecordingSchemaTests.swift */,
 				B0000000000000000000001B /* ScrollSessionizerTests.swift */,
 				B0000000000000000000001C /* CropperTests.swift */,
+				B0000000000000000000001E /* EnrichmentUploaderTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -342,6 +347,7 @@
 				B00000000000000000000017 /* RecordingSession.swift */,
 				B00000000000000000000019 /* ScrollSessionizer.swift */,
 				B0000000000000000000001A /* Cropper.swift */,
+				B0000000000000000000001D /* EnrichmentUploader.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -575,6 +581,7 @@
 				B00000000000000000000007 /* RecordingSession.swift in Sources */,
 				B00000000000000000000009 /* ScrollSessionizer.swift in Sources */,
 				B0000000000000000000000A /* Cropper.swift in Sources */,
+				B0000000000000000000000D /* EnrichmentUploader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -603,6 +610,7 @@
 				B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */,
 				B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */,
 				B0000000000000000000000C /* CropperTests.swift in Sources */,
+				B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

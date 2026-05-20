@@ -33,10 +33,10 @@ final class ScreenStabilityWatcher {
     static let comparisonWindow: TimeInterval = 0.3
     static let timeout: TimeInterval = 5.0
     static let stabilityThreshold: Double = 0.02
-    static let unchangedDifferenceFrameLimit = 3
+    static let unchangedDifferenceFrameLimit = 4
     static let unchangedDifferenceTolerance: Double = 0.001
     static let downscaleFactor: CGFloat = 2.0
-    static let blurRadius: Double = 2.0
+    static let blurRadius: Double = 1.0
 
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private var activeStream: SCStream?

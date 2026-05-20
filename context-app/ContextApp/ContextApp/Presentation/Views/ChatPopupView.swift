@@ -2024,7 +2024,8 @@ struct ChatPopupView: View {
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.image]
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let response = SystemDialogPresenter.runSynchronously { panel.runModal() }
+        guard response == .OK, let url = panel.url else { return }
 
         do {
             referenceImageData = try Data(contentsOf: url)

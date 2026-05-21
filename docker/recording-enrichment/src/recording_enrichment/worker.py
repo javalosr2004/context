@@ -57,7 +57,11 @@ class EnrichmentWorker:
                 await self._task
 
     async def _run(self) -> None:
-        logger.info("worker_started max_concurrency=%s", self._settings.max_concurrency)
+        logger.info(
+            "worker_started max_concurrency=%s describer=%s",
+            self._settings.max_concurrency,
+            type(self._describer).__name__ if self._describer is not None else "None",
+        )
         try:
             while not self._stop.is_set():
                 recording_id = self._storage.next_pending_recording()
@@ -67,11 +71,13 @@ class EnrichmentWorker:
                     except asyncio.TimeoutError:
                         pass
                     continue
+                logger.info("worker_picked_up recording_id=%s", recording_id)
                 try:
                     await self._enrich_recording(recording_id)
                 except Exception:
                     logger.exception("worker_recording_failed recording_id=%s", recording_id)
                     self._storage.mark_recording(recording_id, "failed")
+                    self._emit(recording_id, "done", {"status": "failed"})
         finally:
             logger.info("worker_stopped")
 
@@ -85,6 +91,7 @@ class EnrichmentWorker:
             return
 
         self._storage.mark_recording(recording_id, "enriching")
+        self._emit_progress(recording_id)
         bundle = self._storage.bundle_dir(recording_id)
         events_path = bundle / "events.jsonl"
         partial = bundle / "events.enriched.jsonl.partial"
@@ -172,6 +179,7 @@ class EnrichmentWorker:
             if job_id:
                 self._storage.update_job(job_id, status="done", verified=verified, distance_px=distance_px)
             self._storage.bump_counts(recording_id, completed_delta=1)
+            self._emit_progress(recording_id)
             self._emit(
                 recording_id,
                 "enriched",
@@ -196,6 +204,7 @@ class EnrichmentWorker:
             if job_id:
                 self._storage.update_job(job_id, status="failed", error=error)
             self._storage.bump_counts(recording_id, failed_delta=1)
+            self._emit_progress(recording_id)
         return base
 
     def _emit(self, recording_id: str, kind: str, payload: dict) -> None:
@@ -205,6 +214,23 @@ class EnrichmentWorker:
             self._on_event(recording_id, kind, payload)
         except Exception:
             logger.exception("on_event handler failed")
+
+    def _emit_progress(self, recording_id: str) -> None:
+        """Push the current DB row as a 'progress' frame so SSE clients see
+        every status transition and the moving completed/failed counters."""
+        row = self._storage.get_recording(recording_id)
+        if row is None:
+            return
+        self._emit(
+            recording_id,
+            "progress",
+            {
+                "status": row.status,
+                "completed": row.completed,
+                "failed": row.failed,
+                "total": row.total_events,
+            },
+        )
 
 
 def _read_optional(bundle: Path, rel: Optional[str]) -> Optional[bytes]:

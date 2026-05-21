@@ -112,6 +112,23 @@ def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
 
         async def gen():
             try:
+                # Push the current DB row as the first frame. Without this, a
+                # client connecting while the recording is still "pending"
+                # would receive nothing until the worker emits its first event
+                # — which could be several seconds — and the UI would stay on
+                # its initial guess. The synthetic frame has no sequence
+                # number so it doesn't pollute Last-Event-ID resumption.
+                snapshot_row = state_storage.get_recording(recording_id)
+                if snapshot_row is not None:
+                    snapshot = {
+                        "status": snapshot_row.status,
+                        "completed": snapshot_row.completed,
+                        "failed": snapshot_row.failed,
+                        "total": snapshot_row.total_events,
+                        "snapshot": True,
+                    }
+                    yield f"event: progress\ndata: {json.dumps(snapshot)}\n\n"
+
                 async for event in bus.subscribe(recording_id, last_event_id=last_event_id):
                     if await request.is_disconnected():
                         break

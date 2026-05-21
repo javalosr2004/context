@@ -67,6 +67,27 @@ def test_ingest_zip_rejects_unsupported_schema(tmp_path: Path):
         s.ingest_zip(_build_zip(_manifest(schema_version=99), [_event()]))
 
 
+def test_ingest_zip_accepts_v2_with_typing_burst(tmp_path: Path):
+    s = Storage(tmp_path)
+    typing_event = {
+        "id": "evt-burst",
+        "timestamp_ms": 200,
+        "kind": "type",
+        "cursor": {"x": 0, "y": 0},
+        "typing": {
+            "text": "hello",
+            "key_count": 5,
+            "backspace_count": 0,
+            "start_frame_id": "abc",
+            "end_frame_id": "abc",
+            "duration_ms": 240,
+        },
+    }
+    row = s.ingest_zip(_build_zip(_manifest(schema_version=2), [typing_event]))
+    assert row.id == "rec-1"
+    assert row.total_events == 1
+
+
 def test_ingest_zip_rejects_missing_manifest(tmp_path: Path):
     s = Storage(tmp_path)
     buf = io.BytesIO()

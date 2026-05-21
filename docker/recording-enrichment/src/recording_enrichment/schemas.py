@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-SUPPORTED_SCHEMA_VERSIONS = {1}
+SUPPORTED_SCHEMA_VERSIONS = {1, 2}
 
 
 class GoalIn(BaseModel):
@@ -50,14 +50,26 @@ class KeyIn(BaseModel):
     modifiers: list[str] = Field(default_factory=list)
 
 
+class TypingBurstIn(BaseModel):
+    """Coalesced printable-keystroke run emitted by the v2 recorder."""
+
+    text: str
+    key_count: int
+    backspace_count: int
+    start_frame_id: Optional[str] = None
+    end_frame_id: Optional[str] = None
+    duration_ms: int
+
+
 class EventIn(BaseModel):
     id: str
     timestamp_ms: int
-    kind: Literal["click", "scroll", "key_down", "flags"]
+    kind: Literal["click", "scroll", "key_down", "flags", "type"]
     cursor: PointIn
     button: Optional[Literal["left", "right", "other"]] = None
     scroll: Optional[ScrollIn] = None
     key: Optional[KeyIn] = None
+    typing: Optional[TypingBurstIn] = None
     frame_id: Optional[str] = None
     target_crop_path: Optional[str] = None
     context_crop_path: Optional[str] = None

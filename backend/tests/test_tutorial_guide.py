@@ -85,12 +85,13 @@ class TutorialGuideTests(unittest.TestCase):
         self.assertIn("not only a tutorial generator", TUTORIAL_CREATOR_SYSTEM_PROMPT)
         self.assertIn("Never announce or describe the internal route", TUTORIAL_CREATOR_SYSTEM_PROMPT)
 
-    def test_tool_stream_prompt_describes_loop_and_tool_rules(self) -> None:
-        self.assertIn("agent loop", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+    def test_tool_stream_prompt_lists_core_tools(self) -> None:
         self.assertIn("tutorial_update_plan", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertIn("tutorial_request_screen", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("COMPLETED", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("tutorial_request_completion", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("tutorial_ask_user", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertIn("refines_current", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("user_choice", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
 
     def test_stream_tutorial_maps_domain_request_to_llm_request(self) -> None:
         llm = FakeLLM()

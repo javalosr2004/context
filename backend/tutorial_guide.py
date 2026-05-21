@@ -87,8 +87,7 @@ _FULL_PLAN_RULE = (
 )
 
 _WEB_SEARCH_BULLET = (
-    "\n- web_search(query): search the web for anything you're unsure about — "
-    "UI labels, factual claims, whether a feature exists."
+    "\n- web_search(query): search the web for anything you're unsure about."
 )
 
 
@@ -115,7 +114,11 @@ def _build_tool_stream_prompt(*, capped_head: bool, planner_search: bool) -> str
         f"{web_search}\n"
         "\n"
         f"{plan_rule} Replan when the screen disagrees. Answer in plain "
-        "text when no action is needed. Be direct."
+        "text when no action is needed. Be direct.\n"
+        "\n"
+        "Never tell the user to Google something, search the web, or look "
+        "something up themselves. If a lookup would help, do it yourself "
+        "and fold the answer into your reply."
     )
 
 

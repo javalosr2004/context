@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 from typing import Optional
 
@@ -12,6 +13,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from .event_bus import EventBus
 from .storage import BundleValidationError, RecordingRow, Storage, storage_from_env
 from .worker import EnrichmentWorker
+
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
@@ -48,10 +52,22 @@ def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
     @app.post("/recordings", status_code=202)
     async def upload_recording(bundle: UploadFile = File(...)) -> dict:
         zip_bytes = await bundle.read()
+        logger.info(
+            "upload_recording received | filename=%s content_type=%s bytes=%d",
+            bundle.filename, bundle.content_type, len(zip_bytes),
+        )
         try:
             row = state_storage.ingest_zip(zip_bytes)
         except BundleValidationError as e:
+            logger.warning("upload_recording rejected | detail=%s", e)
             raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception:
+            logger.exception("upload_recording crashed")
+            raise
+        logger.info(
+            "upload_recording ok | recording_id=%s status=%s total_events=%d",
+            row.id, row.status, row.total_events,
+        )
         return {
             "recording_id": row.id,
             "status": row.status,

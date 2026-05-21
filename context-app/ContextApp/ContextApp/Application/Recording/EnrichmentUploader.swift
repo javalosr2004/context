@@ -41,31 +41,84 @@ final class EnrichmentUploader {
     }
 
     func upload(bundleDir: URL) async throws -> RemoteRecording {
-        let zipURL = try await zipBundle(at: bundleDir)
+        let endpoint = baseURL.appendingPathComponent("recordings")
+        let sketch = Self.bundleSketch(at: bundleDir)
+        Self.log.info(
+            "upload start endpoint=\(endpoint.absoluteString, privacy: .public) bundle=\(bundleDir.lastPathComponent, privacy: .public) \(sketch, privacy: .public)"
+        )
+        let zipURL: URL
+        do {
+            zipURL = try await zipBundle(at: bundleDir)
+        } catch {
+            Self.log.error("upload zip_failed err=\(error.localizedDescription, privacy: .public)")
+            throw error
+        }
         defer { try? FileManager.default.removeItem(at: zipURL) }
         let data = try Data(contentsOf: zipURL)
+        Self.log.info("upload zip_ready bytes=\(data.count, privacy: .public)")
 
         let boundary = "Boundary-\(UUID().uuidString)"
-        var req = URLRequest(url: baseURL.appendingPathComponent("recordings"))
+        var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.httpBody = Self.multipartBody(boundary: boundary, fieldName: "bundle", fileName: "bundle.zip", data: data)
 
-        let (respData, response) = try await session.data(for: req)
+        let respData: Data
+        let response: URLResponse
+        do {
+            (respData, response) = try await session.data(for: req)
+        } catch {
+            Self.log.error(
+                "upload transport_failed endpoint=\(endpoint.absoluteString, privacy: .public) err=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
         guard let http = response as? HTTPURLResponse else {
+            Self.log.error("upload malformed_response non_http")
             throw EnrichmentUploaderError.malformedResponse
         }
+        let bodyPreview = String(data: respData.prefix(512), encoding: .utf8) ?? "<\(respData.count) bytes>"
+        Self.log.info(
+            "upload http_response status=\(http.statusCode, privacy: .public) bytes=\(respData.count, privacy: .public) body=\(bodyPreview, privacy: .public)"
+        )
         if http.statusCode >= 400 {
             let body = String(data: respData, encoding: .utf8) ?? "<\(respData.count) bytes>"
             throw EnrichmentUploaderError.requestFailed(http.statusCode, body)
         }
         do {
             let remote = try JSONDecoder().decode(RemoteRecording.self, from: respData)
-            Self.log.info("Uploaded recording_id=\(remote.id) total=\(remote.totalEvents)")
+            Self.log.info("upload ok recording_id=\(remote.id, privacy: .public) total=\(remote.totalEvents, privacy: .public)")
             return remote
         } catch {
+            Self.log.error("upload decode_failed body=\(bodyPreview, privacy: .public)")
             throw EnrichmentUploaderError.malformedResponse
         }
+    }
+
+    /// One-line summary of the manifest the user is about to upload, for logs.
+    /// Returns "manifest_read_failed=..." if the manifest cannot be parsed —
+    /// useful signal in itself because that's a bundle bug the server would
+    /// reject anyway.
+    static func bundleSketch(at bundleDir: URL) -> String {
+        let manifestURL = bundleDir.appendingPathComponent("manifest.json")
+        let eventsURL = bundleDir.appendingPathComponent("events.jsonl")
+        let framesDir = bundleDir.appendingPathComponent("frames")
+        guard let data = try? Data(contentsOf: manifestURL) else {
+            return "manifest_missing=\(manifestURL.path)"
+        }
+        let manifest: Manifest
+        do {
+            manifest = try JSONDecoder().decode(Manifest.self, from: data)
+        } catch {
+            return "manifest_decode_failed=\(error.localizedDescription)"
+        }
+        let eventCount = (try? String(contentsOf: eventsURL, encoding: .utf8))?
+            .split(whereSeparator: { $0.isNewline })
+            .count ?? -1
+        let frameCount = (try? FileManager.default.contentsOfDirectory(atPath: framesDir.path).count) ?? -1
+        return "recording_id=\(manifest.recordingId) schema_version=\(manifest.schemaVersion) "
+            + "app_version=\(manifest.appVersion) goal_chars=\(manifest.goal.text.count) "
+            + "events=\(eventCount) frames=\(frameCount) aborted=\(manifest.aborted)"
     }
 
     // MARK: - Helpers

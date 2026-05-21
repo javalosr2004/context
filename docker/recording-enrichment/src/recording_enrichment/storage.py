@@ -5,6 +5,7 @@ columns — every column adds a migration we have to maintain.
 """
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import sqlite3
@@ -16,6 +17,9 @@ from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
 from .schemas import EventIn, ManifestIn, SUPPORTED_SCHEMA_VERSIONS
+
+
+logger = logging.getLogger(__name__)
 
 
 SCHEMA_SQL = """
@@ -95,24 +99,57 @@ class Storage:
         """
         import io
 
+        logger.info("ingest_zip start | zip_bytes=%d", len(zip_bytes))
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             names = zf.namelist()
             top = _common_prefix(names)
+            frame_count = sum(1 for n in names if n.endswith(".jpg") and "/frames/" in n)
+            crop_count = sum(1 for n in names if n.endswith(".jpg") and "/crops/" in n)
+            logger.info(
+                "ingest_zip layout | top=%r entries=%d frames=%d crops=%d sample=%s",
+                top, len(names), frame_count, crop_count, names[:6],
+            )
             try:
                 manifest_data = zf.read(f"{top}manifest.json")
                 events_data = zf.read(f"{top}events.jsonl")
             except KeyError as e:
+                logger.warning("ingest_zip reject | missing_file=%s", e)
                 raise BundleValidationError(f"missing required file: {e}") from e
             try:
                 manifest = ManifestIn.model_validate_json(manifest_data)
             except Exception as e:
+                logger.warning(
+                    "ingest_zip reject | manifest_invalid err=%s preview=%r",
+                    e, manifest_data[:240],
+                )
                 raise BundleValidationError(f"manifest invalid: {e}") from e
+            logger.info(
+                "ingest_zip manifest | recording_id=%s schema_version=%d "
+                "app_version=%s aborted=%s goal_chars=%d",
+                manifest.recording_id, manifest.schema_version,
+                manifest.app_version, manifest.aborted, len(manifest.goal.text),
+            )
             if manifest.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+                logger.warning(
+                    "ingest_zip reject | unsupported_schema_version=%d supported=%s",
+                    manifest.schema_version, sorted(SUPPORTED_SCHEMA_VERSIONS),
+                )
                 raise BundleValidationError(
                     f"unsupported schema_version={manifest.schema_version}"
                 )
 
-            events = list(_parse_events(events_data))
+            try:
+                events = list(_parse_events(events_data))
+            except BundleValidationError as e:
+                logger.warning("ingest_zip reject | events_invalid err=%s", e)
+                raise
+            kind_counts: dict[str, int] = {}
+            for ev in events:
+                kind_counts[ev.kind] = kind_counts.get(ev.kind, 0) + 1
+            logger.info(
+                "ingest_zip events | count=%d kinds=%s",
+                len(events), kind_counts,
+            )
 
             dest = self.bundles_dir / manifest.recording_id
             if dest.exists():

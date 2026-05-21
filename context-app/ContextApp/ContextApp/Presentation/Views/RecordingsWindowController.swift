@@ -45,6 +45,9 @@ struct RecordingsRootView: View {
                     index: controller.index,
                     onOpen: { entry in selectedId = entry.id },
                     onStartRecording: { controller.toggleRecording() },
+                    onRetry: { entry in
+                        Task { await controller.retryUpload(entryId: entry.id) }
+                    },
                     isRecording: controller.isRecording
                 )
             }

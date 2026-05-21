@@ -108,22 +108,56 @@ final class RecordingController: ObservableObject {
                 failed: 0
             )
             index.upsert(entry)
-
-            do {
-                let remote = try await uploader.upload(bundleDir: bundleURL)
-                var updated = entry
-                updated.remoteId = remote.id
-                updated.lastStatus = remote.status
-                updated.totalEvents = remote.totalEvents
-                index.upsert(updated)
-                attachStream(recordingId: remote.id)
-            } catch {
-                index.updateStatus(id: recordingId, status: "failed")
-                presentUploadFailure(bundleURL: bundleURL, error: error)
-            }
+            await performUpload(entry: entry, presentFailure: true)
         } catch {
             isRecording = false
             presentError(error)
+        }
+    }
+
+    /// Retry an upload from the recordings list. The bundle on disk is the
+    /// source of truth — no re-recording happens. Surfaces no modal alert on
+    /// failure; the row's status pill goes back to "failed" and the user can
+    /// retry again from the same UI.
+    func retryUpload(entryId: String) async {
+        guard let entry = index.entry(id: entryId) else {
+            Self.log.warning("retry_upload missing_entry id=\(entryId, privacy: .public)")
+            return
+        }
+        let bundleURL = URL(fileURLWithPath: entry.bundlePath)
+        guard FileManager.default.fileExists(atPath: bundleURL.path) else {
+            Self.log.error("retry_upload missing_bundle path=\(bundleURL.path, privacy: .public)")
+            index.updateStatus(id: entry.id, status: "failed")
+            return
+        }
+        Self.log.info(
+            "retry_upload start id=\(entry.id, privacy: .public) bundle=\(bundleURL.path, privacy: .public)"
+        )
+        index.updateStatus(id: entry.id, status: "uploading")
+        await performUpload(entry: entry, presentFailure: false)
+    }
+
+    private func performUpload(entry: LocalRecordingEntry, presentFailure: Bool) async {
+        let bundleURL = URL(fileURLWithPath: entry.bundlePath)
+        do {
+            let remote = try await uploader.upload(bundleDir: bundleURL)
+            var updated = entry
+            updated.remoteId = remote.id
+            updated.lastStatus = remote.status
+            updated.totalEvents = remote.totalEvents
+            index.upsert(updated)
+            Self.log.info(
+                "upload_completed id=\(entry.id, privacy: .public) remote=\(remote.id, privacy: .public) status=\(remote.status, privacy: .public)"
+            )
+            attachStream(recordingId: remote.id)
+        } catch {
+            Self.log.error(
+                "upload_failed id=\(entry.id, privacy: .public) err=\(error.localizedDescription, privacy: .public)"
+            )
+            index.updateStatus(id: entry.id, status: "failed")
+            if presentFailure {
+                presentUploadFailure(bundleURL: bundleURL, error: error)
+            }
         }
     }
 

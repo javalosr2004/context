@@ -4,6 +4,7 @@ struct RecordingsListView: View {
     @ObservedObject var index: RecordingsIndex
     let onOpen: (LocalRecordingEntry) -> Void
     let onStartRecording: () -> Void
+    let onRetry: (LocalRecordingEntry) -> Void
     let isRecording: Bool
 
     var body: some View {
@@ -37,7 +38,7 @@ struct RecordingsListView: View {
             } else {
                 List(index.entries) { entry in
                     Button(action: { onOpen(entry) }) {
-                        RecordingRow(entry: entry)
+                        RecordingRow(entry: entry, onRetry: { onRetry(entry) })
                     }
                     .buttonStyle(.plain)
                 }
@@ -50,6 +51,7 @@ struct RecordingsListView: View {
 
 private struct RecordingRow: View {
     let entry: LocalRecordingEntry
+    let onRetry: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -62,6 +64,16 @@ private struct RecordingRow: View {
                 HStack(spacing: 8) {
                     Text("\(entry.totalEvents) events").font(.caption).foregroundStyle(.secondary)
                     StatusPill(status: entry.lastStatus, completed: entry.completed, total: entry.totalEvents)
+                    if entry.lastStatus == "failed" {
+                        Button(action: onRetry) {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help("Re-upload this bundle to the enrichment service.")
+                    }
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.caption2)

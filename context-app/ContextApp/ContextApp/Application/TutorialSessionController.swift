@@ -609,6 +609,9 @@ final class TutorialSessionController: ObservableObject {
         currentStepID = stepID
         currentActionIndex = actionIndex
         status = .ready
+        Task { [weak self] in
+            await self?.markStepStarted(stepID: stepID, actionIndex: actionIndex)
+        }
         if let grounded = optimisticallyGroundedSlot,
            grounded.stepID == stepID,
            grounded.actionIndex == actionIndex {

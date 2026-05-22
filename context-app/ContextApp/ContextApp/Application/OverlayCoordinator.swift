@@ -56,27 +56,53 @@ final class OverlayCoordinator {
 
         var sessionControllerRef: TutorialSessionController?
         let clipboardPopoverController = ClipboardPopoverController(screenProvider: screenProvider)
+        let tutorialTooltipController = TutorialTooltipController(
+            screenProvider: screenProvider,
+            onNextProvider: {
+                guard let sessionController = sessionControllerRef,
+                      let stepID = sessionController.currentStepID,
+                      let actionIndex = sessionController.currentActionIndex else {
+                    return nil
+                }
+                return {
+                    Task { @MainActor in
+                        await sessionController.confirmStep(
+                            stepID: stepID,
+                            actionIndex: actionIndex,
+                            confirmed: true,
+                            note: nil
+                        )
+                    }
+                }
+            }
+        )
         let focusMaskController = FocusMaskController(
             screenProvider: screenProvider,
-            interactiveWindowsProvider: { [weak clipboardPopoverController] in
-                [popupPanel, edgeTabController.window, clipboardPopoverController?.interactiveWindow]
-                    .compactMap { $0 }
+            interactiveWindowsProvider: { [weak clipboardPopoverController, weak tutorialTooltipController] in
+                [
+                    popupPanel,
+                    edgeTabController.window,
+                    clipboardPopoverController?.interactiveWindow,
+                    tutorialTooltipController?.interactiveWindow,
+                ].compactMap { $0 }
             },
-            onExit: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
+            onExit: { [weak bboxPanel, weak self, weak clipboardPopoverController, weak tutorialTooltipController] in
                 bboxPanel?.orderOut(nil)
                 clipboardPopoverController?.hide()
+                tutorialTooltipController?.hide()
                 self?.screenGroundingController?.clearCache()
                 self?.stabilityWatcher.cancel()
             },
             onInsideClick: { () -> Bool in
                 // Advance is driven exclusively by the explicit "Next" button in
-                // the chat popup. An inside-click on the indicator is just the
-                // user interacting with the underlying app — never a confirm.
+                // the tutorial-tooltip callout. An inside-click on the indicator
+                // is just the user interacting with the underlying app.
                 return false
             },
-            onOutsideClick: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
+            onOutsideClick: { [weak bboxPanel, weak self, weak clipboardPopoverController, weak tutorialTooltipController] in
                 bboxPanel?.orderOut(nil)
                 clipboardPopoverController?.hide()
+                tutorialTooltipController?.hide()
                 self?.screenGroundingController?.clearCache()
                 self?.stabilityWatcher.cancel()
             }
@@ -89,11 +115,17 @@ final class OverlayCoordinator {
         let screenGroundingController = ScreenGroundingController(
             bboxController: debugController,
             endpointStore: endpointStore,
-            ignoredWindowProvider: { [weak clipboardPopoverController] in
-                [popupPanel, edgeTabController.window, bboxPanel, clipboardPopoverController?.interactiveWindow]
-                    .compactMap { $0 }
+            ignoredWindowProvider: { [weak clipboardPopoverController, weak tutorialTooltipController] in
+                [
+                    popupPanel,
+                    edgeTabController.window,
+                    bboxPanel,
+                    clipboardPopoverController?.interactiveWindow,
+                    tutorialTooltipController?.interactiveWindow,
+                ].compactMap { $0 }
             },
             screenProvider: screenProvider,
+            tooltipController: tutorialTooltipController,
             clipboardPopoverController: clipboardPopoverController
         )
         let tutorialPlanController = TutorialPlanController(

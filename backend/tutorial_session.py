@@ -83,6 +83,7 @@ from backend.tutorial_session_events import (
     StepReadyEvent,
     TutorialTextDeltaEvent,
     TextResponseEventLike,
+    VerificationHintEvent,
     WebSearchCompletedEvent,
     WebSearchSource,
     WebSearchStartedEvent,
@@ -208,11 +209,18 @@ class TutorialSession:
     draft_plan: DraftPlan | None = None
     draft_plan_task: asyncio.Task[None] | None = None
     # Per-instruction screen verification: at most one in flight per session.
-    # A "no" verdict sets pending_verification_replan and pokes step_event,
-    # which the _await_action wait loop checks before each sleep.
+    # On a "no" verdict the verifier emits a VerificationHintEvent toast.
+    # For diverged/blocked it ALSO stages pending_verification_replan (which
+    # the _await_action loop consumes) so the toast can auto-dismiss into a
+    # real replan. For unsure it leaves pending_verification_replan unset and
+    # waits for the user to confirm "off track" via UserHintResponseEvent.
     verifying_step_id: str | None = None
     verification_task: asyncio.Task[None] | None = None
     pending_verification_replan: str | None = None
+    # step_id of the verification hint currently showing on the overlay, or
+    # None. A UserHintResponseEvent with a matching step_id resolves it; any
+    # other step_id is treated as a stale toast and ignored.
+    awaiting_hint_response: str | None = None
     web_ground: WebGroundProducer = field(default_factory=NullWebGroundProducer)
     # Last gate (verifier) elapsed_ms, consumed by the next turn summary.
     _last_gate_elapsed_ms: float | None = None
@@ -1476,9 +1484,14 @@ class TutorialSession:
         if self.latest_screen is None:
             return
         # Supersede any in-flight verification (e.g. previous instruction
-        # entered and finished before its verdict landed).
+        # entered and finished before its verdict landed). Also drop any
+        # open hint slot from the previous instruction — a late toast tap
+        # on the old step shouldn't mutate the new instruction's replan
+        # state. handle_user_hint_response's step_id check then drops the
+        # late tap as stale.
         if self.verification_task is not None and not self.verification_task.done():
             self.verification_task.cancel()
+        self.awaiting_hint_response = None
         self.verifying_step_id = step.step_id
         screen = self.latest_screen
         instruction = step.instruction
@@ -1559,14 +1572,28 @@ class TutorialSession:
         )
         if verdict.ok:
             return
-        # "no" verdict: stash a replan note and wake the action wait loop.
-        # Do not overwrite an existing note (a user rejection is more
-        # specific than a verifier hunch).
-        if self.pending_verification_replan is None:
+        # "no" verdict. For diverged/blocked the verifier is high-confidence
+        # wrong, so we stage the replan and only surface the hint so the user
+        # can interject ("dismiss" to override). For unsure we hold the
+        # replan back and require the user to acknowledge before mutating
+        # the plan — verifier hunches alone aren't enough to interrupt.
+        auto_replanning = verdict.verdict in ("diverged", "blocked")
+        if auto_replanning and self.pending_verification_replan is None:
+            # Do not overwrite an existing note (a user rejection is more
+            # specific than a verifier hunch).
             self.pending_verification_replan = (
                 f"Screen verification failed for {step_id}: {verdict.reason}. "
                 "Re-plan from the current screen."
             )
+        self.awaiting_hint_response = step_id
+        await self.emit(
+            VerificationHintEvent(
+                step_id=step_id,
+                verdict=verdict.verdict,  # type: ignore[arg-type]
+                reason=verdict.reason or "",
+                auto_replanning=auto_replanning,
+            )
+        )
         self.step_event.set()
 
     async def _cancel_verification(self) -> None:
@@ -2311,6 +2338,41 @@ class TutorialSession:
         self.pending_verification_replan = None
         return note
 
+    def handle_user_hint_response(
+        self,
+        step_id: str,
+        action: Literal["acknowledge_off", "dismiss", "timeout"],
+    ) -> None:
+        """Resolve an open VerificationHintEvent.
+
+        Stale responses (the toast was for a different step, or no toast is
+        open) are dropped silently — the overlay may race a timeout against
+        a user tap, and we don't want either to clobber the other.
+        """
+        if self.awaiting_hint_response != step_id:
+            return
+        self.awaiting_hint_response = None
+        if action == "acknowledge_off":
+            # User confirmed something is off — stage a replan if the
+            # verifier hadn't already (i.e. an `unsure` verdict).
+            if self.pending_verification_replan is None:
+                self.pending_verification_replan = (
+                    f"User acknowledged off-track hint for step {step_id}. "
+                    "Re-plan from the current screen."
+                )
+            self.step_event.set()
+            return
+        if action == "dismiss":
+            # User explicitly overrode the verifier; drop any staged replan
+            # so diverged/blocked verdicts honor the user's "it's fine."
+            self.pending_verification_replan = None
+            self.step_event.set()
+            return
+        # timeout: no state change. Whatever the verifier staged stands —
+        # unsure leaves pending_verification_replan unset (continue);
+        # diverged/blocked has it set (auto-replan fires on next loop tick).
+        self.step_event.set()
+
     async def _wait_for_step_event(self) -> None:
         # Wait first, then clear: producers mutate state before set(), so any
         # set that races with our re-check will wake us up and we'll re-loop.
@@ -2346,6 +2408,7 @@ class TutorialSession:
             self.awaiting_step_id = None
             self.awaiting_action_index = None
             self.pending_verification_replan = None
+            self.awaiting_hint_response = None
         await self._cancel_verification()
 
     def _next_screen_request_id(self) -> str:

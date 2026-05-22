@@ -123,6 +123,25 @@ class UserCompletionResponseEvent(TutorialSessionEventModel):
     note: str | None = None
 
 
+class UserHintResponseEvent(TutorialSessionEventModel):
+    """User's response to a VerificationHintEvent toast.
+
+    ``acknowledge_off`` — user tapped the toast confirming the system is off
+    track. Force a replan regardless of verdict.
+
+    ``dismiss`` — user explicitly closed the toast. Suppress any pending
+    auto-replan (overrides the verifier).
+
+    ``timeout`` — toast auto-dismissed with no interaction. Behavior is
+    verdict-dependent on the backend: unsure -> continue, diverged/blocked
+    -> apply the auto-replan that was staged when the hint was emitted.
+    """
+
+    type: Literal["user_hint_response"]
+    step_id: str = Field(min_length=1)
+    action: Literal["acknowledge_off", "dismiss", "timeout"]
+
+
 ClientSessionEvent = Annotated[
     UserMessageEvent
     | UserAnswerEvent
@@ -130,7 +149,8 @@ ClientSessionEvent = Annotated[
     | UserConfirmationEvent
     | UserScreenEvent
     | UserCompletionResponseEvent
-    | UserStepAnnotationEvent,
+    | UserStepAnnotationEvent
+    | UserHintResponseEvent,
     Field(discriminator="type"),
 ]
 
@@ -315,6 +335,26 @@ class InstructionVerifiedEvent(TutorialSessionEventModel):
     screen_summary: str | None = None
 
 
+class VerificationHintEvent(TutorialSessionEventModel):
+    """Soft, non-modal toast surfaced by the overlay when the verifier
+    returned a negative verdict.
+
+    ``auto_replanning`` tells the overlay how to behave on timeout:
+    True  -> verdict was diverged/blocked (high confidence); the backend
+             has already staged a replan that will fire on toast timeout.
+             The toast can show a "re-routing…" affordance.
+    False -> verdict was unsure (low confidence); the backend will NOT
+             replan unless the user explicitly acknowledges via
+             UserHintResponseEvent { action: acknowledge_off }.
+    """
+
+    type: Literal["verification_hint"] = "verification_hint"
+    step_id: str
+    verdict: Literal["unsure", "blocked", "diverged"]
+    reason: str
+    auto_replanning: bool
+
+
 class LLMToolCallSummary(TutorialSessionEventModel):
     name: str
     arguments_chars: int = Field(ge=0)
@@ -376,6 +416,7 @@ ServerSessionEvent = (
     | CompletionProposedEvent
     | InstructionVerificationStartedEvent
     | InstructionVerifiedEvent
+    | VerificationHintEvent
     | LLMCallEvent
     | ErrorEvent
 )

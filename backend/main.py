@@ -36,6 +36,7 @@ from backend.tutorial_session_events import (
     TutorialSessionResponse,
     UserCompletionResponseEvent,
     UserConfirmationEvent,
+    UserHintResponseEvent,
     UserMessageEvent,
     UserScreenEvent,
     UserStepAnnotationEvent,
@@ -327,6 +328,9 @@ async def dispatch_client_event(session, event) -> None:  # type: ignore[no-unty
     if isinstance(event, UserStepAnnotationEvent):
         # Eval annotations don't drive session state — they're persisted by
         # the event log sink and extracted into fixtures offline.
+        return
+    if isinstance(event, UserHintResponseEvent):
+        session.handle_user_hint_response(event.step_id, event.action)
         return
 
 

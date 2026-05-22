@@ -49,14 +49,17 @@ enum TutorialHintResponseAction: String, Codable, Equatable {
     case timeout
 }
 
-/// Verifier verdict that triggered a VerificationHintEvent. `onTrack` is
-/// included for completeness with the backend's 4-way verdict; only the
-/// three negative verdicts are ever surfaced as a hint.
+/// Verifier verdict that triggered a VerificationHintEvent. `onTrack` and
+/// `pending` are included for contract completeness with the backend's
+/// 5-way verdict; only the three negative verdicts (unsure, blocked,
+/// diverged) are ever surfaced as a hint. `pending` is consumed entirely
+/// inside the backend retry loop and should never reach the overlay.
 enum TutorialVerificationVerdict: String, Codable, Equatable {
     case onTrack = "on_track"
     case unsure
     case blocked
     case diverged
+    case pending
 }
 
 struct StepAnnotationCorrections: Codable, Equatable {

@@ -1010,9 +1010,11 @@ struct ChatPopupView: View {
                 return "Not sure this matches"
             case .diverged, .blocked:
                 return "Looks like we're off track"
-            case .onTrack:
-                // onTrack should never surface as a hint, but render
-                // defensively rather than crash.
+            case .onTrack, .pending:
+                // onTrack and pending should never surface as a hint:
+                // onTrack proceeds silently; pending is consumed by the
+                // backend retry loop. Render defensively rather than
+                // crash if the contract drifts.
                 return "Heads up"
             }
         }()
@@ -1863,6 +1865,8 @@ struct ChatPopupView: View {
             if isExpanded {
                 stepDropdown(step)
             }
+
+            stepNextButtonRow(for: step)
         }
         .background(OverlayTheme.strongerFill)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
@@ -1870,6 +1874,30 @@ struct ChatPopupView: View {
             RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
                 .stroke(isHighlighted ? Color.accentColor.opacity(0.45) : OverlayTheme.hairline, lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func stepNextButtonRow(for step: TutorialStep) -> some View {
+        let enabled = canAdvanceCurrentStep && currentStepForAdvance?.stepId == step.stepId
+        HStack {
+            Spacer()
+            Button(action: advanceCurrentStep) {
+                Text("Next")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 7)
+                    .foregroundStyle(enabled ? Color.white : Color.white.opacity(0.5))
+                    .background(enabled ? Color.accentColor : Color.accentColor.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .help("Advance to the next step")
+            .keyboardShortcut(.return, modifiers: [])
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
     }
 
     private func upcomingStepList(_ steps: [TutorialStepDisplayItem]) -> some View {

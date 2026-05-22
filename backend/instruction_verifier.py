@@ -13,6 +13,10 @@ relative to that instruction:
     diverged  — screen is a coherent app state, but not the one this
                 instruction assumes; the user is somewhere else in the
                 flow (often already past it). Replan.
+    pending   — screen is mid-transition (spinner, skeleton loader,
+                blank frame between navigations, fading modal). No
+                judgment can be made yet. Caller should re-verify on a
+                fresh screen rather than treating this as a failure.
     unsure    — verifier can't tell. Fail-open: proceed.
 
 The model is forced to first describe the dominant visible UI in one
@@ -39,9 +43,9 @@ from backend.llm import LLMRequest, MultimodalLLM
 logger = logging.getLogger(__name__)
 
 
-Verdict = Literal["on_track", "blocked", "diverged", "unsure"]
+Verdict = Literal["on_track", "blocked", "diverged", "unsure", "pending"]
 _VALID_VERDICTS: frozenset[str] = frozenset(
-    {"on_track", "blocked", "diverged", "unsure"}
+    {"on_track", "blocked", "diverged", "unsure", "pending"}
 )
 
 
@@ -90,11 +94,17 @@ VERIFIER_SYSTEM_PROMPT = (
     "e.g. the instruction says 'sign up' but the screen shows a "
     "signed-in dashboard. Name what you see vs. what the instruction "
     "assumes.\n"
+    "      pending   — the screen is mid-transition: a spinner, "
+    "skeleton loader, blank/white frame between navigations, a fading "
+    "modal, or a clearly unsettled UI. The judgment is not blocked or "
+    "diverged — it just can't be made yet. Use this ONLY for transient "
+    "states; do not use 'pending' to dodge a hard call on a settled "
+    "screen.\n"
     "      unsure    — you cannot confidently pick one of the above.\n\n"
     'Respond strictly as JSON: {"screen_summary": "...", '
     '"previous_step_visible_effect": "yes"|"no"|"na", "verdict": '
-    '"on_track"|"blocked"|"diverged"|"unsure", "evidence": "one short '
-    'sentence"}. No text outside the JSON.'
+    '"on_track"|"blocked"|"diverged"|"pending"|"unsure", "evidence": '
+    '"one short sentence"}. No text outside the JSON.'
 )
 
 
@@ -143,10 +153,12 @@ def build_request(
         "some other flow (sign-out, picker, confirmation, wizard step) "
         "it is blocked. If the screen contradicts where this "
         "instruction assumes the user is (already past it, wrong "
-        "section), it is diverged.\n\n"
+        "section), it is diverged. If the screen is mid-transition "
+        "(spinner, skeleton, blank/white frame, fading modal) it is "
+        "pending.\n\n"
         'Respond with JSON: {"screen_summary": "...", '
         '"previous_step_visible_effect": "yes"|"no"|"na", "verdict": '
-        '"on_track"|"blocked"|"diverged"|"unsure", "evidence": "..."}'
+        '"on_track"|"blocked"|"diverged"|"pending"|"unsure", "evidence": "..."}'
     )
     return LLMRequest(
         system_prompt=VERIFIER_SYSTEM_PROMPT,
@@ -201,8 +213,9 @@ def parse_verdict(raw: str) -> VerifierVerdict:
     # is not visible, force blocked regardless of the verdict it picked.
     # This removes the "one obvious click away" loophole where the model
     # rationalizes on_track from a screen still showing the pre-step
-    # state.
-    if prev_effect == "no" and verdict != "blocked":
+    # state. Exception: 'pending' is a transient signal — a mid-transition
+    # screen often has no visible effect yet; let the caller retry.
+    if prev_effect == "no" and verdict not in ("blocked", "pending"):
         return VerifierVerdict(
             verdict="blocked",
             reason=evidence

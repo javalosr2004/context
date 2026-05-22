@@ -1499,6 +1499,14 @@ class TutorialSession:
             self._run_verification(step.step_id, instruction, screen)
         )
 
+    # Max times we'll re-classify a `pending` (mid-transition) screen
+    # before giving up and treating it as `unsure`. Total wall-clock cost
+    # is roughly _PENDING_RETRY_DELAY_S * (_PENDING_MAX_RETRIES - 1) plus
+    # the LLM calls themselves; keep both small so a genuinely-stuck
+    # screen doesn't park the verifier indefinitely.
+    _PENDING_MAX_RETRIES = 3
+    _PENDING_RETRY_DELAY_S = 1.5
+
     async def _run_verification(
         self,
         step_id: str,
@@ -1522,15 +1530,48 @@ class TutorialSession:
                 "llm": "fast" if self.fast_llm is not None else "main",
             },
         )
+        current_screen = screen
         try:
-            verdict: VerifierVerdict = await asyncio.to_thread(
-                classify_screen,
-                verifier_llm,
-                instruction,
-                screen,
-                self.goal,
-                self._last_completed_instruction(),
-            )
+            verdict: VerifierVerdict | None = None
+            for attempt in range(1, self._PENDING_MAX_RETRIES + 1):
+                verdict = await asyncio.to_thread(
+                    classify_screen,
+                    verifier_llm,
+                    instruction,
+                    current_screen,
+                    self.goal,
+                    self._last_completed_instruction(),
+                )
+                if verdict.verdict != "pending":
+                    break
+                logger.info(
+                    "[verifier] pending_retry",
+                    extra={
+                        "session_id": self.session_id,
+                        "step_id": step_id,
+                        "attempt": attempt,
+                        "max": self._PENDING_MAX_RETRIES,
+                        "reason": verdict.reason,
+                    },
+                )
+                if attempt >= self._PENDING_MAX_RETRIES:
+                    # Exhausted retries on a screen that won't settle.
+                    # Degrade silently to `unsure` so the user is not
+                    # interrupted by a hint they cannot act on.
+                    verdict = VerifierVerdict(
+                        verdict="unsure",
+                        reason="pending_retries_exhausted",
+                        screen_summary=verdict.screen_summary,
+                        previous_step_visible_effect=verdict.previous_step_visible_effect,
+                    )
+                    break
+                await asyncio.sleep(self._PENDING_RETRY_DELAY_S)
+                if self.awaiting_step_id != step_id:
+                    # User moved on while we were waiting; drop silently.
+                    return
+                if self.latest_screen is not None:
+                    current_screen = self.latest_screen
+            assert verdict is not None
         except asyncio.CancelledError:
             logger.info(
                 "[verifier] cancelled",

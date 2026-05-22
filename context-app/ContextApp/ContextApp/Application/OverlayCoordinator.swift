@@ -68,43 +68,11 @@ final class OverlayCoordinator {
                 self?.screenGroundingController?.clearCache()
                 self?.stabilityWatcher.cancel()
             },
-            onInsideClick: { [weak bboxPanel, weak self, weak popupPanel, weak clipboardPopoverController, screenProvider] () -> Bool in
-                guard let sessionController = sessionControllerRef,
-                      let stepID = sessionController.currentStepID,
-                      let actionIndex = sessionController.currentActionIndex else { return true }
-                // For type actions, inside-click is the user focusing the field
-                // before typing — not a "done" signal. Keep the mask up; advance
-                // is driven by the explicit advance button in the chat popup.
-                if sessionController.actionIsType(stepID: stepID, actionIndex: actionIndex) {
-                    bboxPanel?.orderOut(nil)
-                    return false
-                }
-                bboxPanel?.orderOut(nil)
-                clipboardPopoverController?.hide()
-                Task { @MainActor in
-                    if let screen = screenProvider(), let self {
-                        self.stabilityIndicator?.show()
-                        let excluded: [NSWindow] = [popupPanel, edgeTabController.window, self.stabilityIndicator?.window]
-                            .compactMap { $0 }
-                        await self.stabilityWatcher.waitUntilStable(
-                            on: screen,
-                            excludingWindows: excluded,
-                            onProgress: { [weak self] progress in
-                                Task { @MainActor in self?.stabilityIndicator?.update(progress: progress) }
-                            }
-                        )
-                        self.stabilityIndicator?.hide()
-                    }
-                    let stableScreen = await sessionController.currentScreenSnapshot()
-                    await sessionController.confirmStep(
-                        stepID: stepID,
-                        actionIndex: actionIndex,
-                        confirmed: true,
-                        note: nil,
-                        screen: stableScreen
-                    )
-                }
-                return true
+            onInsideClick: { () -> Bool in
+                // Advance is driven exclusively by the explicit "Next" button in
+                // the chat popup. An inside-click on the indicator is just the
+                // user interacting with the underlying app — never a confirm.
+                return false
             },
             onOutsideClick: { [weak bboxPanel, weak self, weak clipboardPopoverController] in
                 bboxPanel?.orderOut(nil)

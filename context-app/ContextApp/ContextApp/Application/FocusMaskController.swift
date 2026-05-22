@@ -43,9 +43,6 @@ final class FocusMaskController {
 
         hide()
         paddedCutout = layout.paddedCutout(screenFrame: screen.frame, targetFrame: cutoutFrame)
-        dimPanels = layout
-            .dimmingRects(screenFrame: screen.frame, targetFrame: cutoutFrame)
-            .map(makeDimPanel)
 
         showExitPanel(on: screen.frame)
         installClickMonitors()

@@ -3,65 +3,41 @@ import SwiftUI
 struct DebugBboxView: View {
     let size: CGSize
 
+    @State private var pulse: Bool = false
+
+    private let ringDiameter: CGFloat = 40
+    private let ringLineWidth: CGFloat = 3
+    private let dotDiameter: CGFloat = 10
+
     init(size: CGSize = DebugBoundingBox.size) {
         self.size = size
     }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OverlayTheme.highlightGlow, lineWidth: 10)
+            Circle()
+                .stroke(OverlayTheme.highlightGlow, lineWidth: ringLineWidth + 6)
                 .blur(radius: 6)
+                .frame(width: ringDiameter, height: ringDiameter)
+                .scaleEffect(pulse ? 1.25 : 0.95)
+                .opacity(pulse ? 0.0 : 0.85)
 
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OverlayTheme.highlightStroke, lineWidth: 2)
+            Circle()
+                .stroke(OverlayTheme.highlightStroke, lineWidth: ringLineWidth)
+                .frame(width: ringDiameter, height: ringDiameter)
+                .scaleEffect(pulse ? 1.12 : 1.0)
+                .opacity(pulse ? 0.6 : 1.0)
 
-            cornerHandles
+            Circle()
+                .fill(OverlayTheme.highlightStroke)
+                .frame(width: dotDiameter, height: dotDiameter)
         }
-        .padding(6)
         .allowsHitTesting(false)
         .frame(width: size.width, height: size.height)
-    }
-
-    private var cornerHandles: some View {
-        let handleLength: CGFloat = 22
-        let handleWidth: CGFloat = 3
-
-        return ZStack {
-            handle
-                .frame(width: handleLength, height: handleWidth)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            handle
-                .frame(width: handleWidth, height: handleLength)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            handle
-                .frame(width: handleLength, height: handleWidth)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            handle
-                .frame(width: handleWidth, height: handleLength)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-
-            handle
-                .frame(width: handleLength, height: handleWidth)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            handle
-                .frame(width: handleWidth, height: handleLength)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-
-            handle
-                .frame(width: handleLength, height: handleWidth)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            handle
-                .frame(width: handleWidth, height: handleLength)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
         }
-        .padding(2)
-    }
-
-    private var handle: some View {
-        Capsule()
-            .fill(OverlayTheme.highlightStroke)
-            .shadow(color: OverlayTheme.highlightGlow, radius: 5)
     }
 }

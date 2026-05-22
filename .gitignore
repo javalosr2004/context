@@ -70,6 +70,10 @@ Package.resolved
 *.swo
 *~
 
+# ---------- Git worktrees ----------
+**/.worktrees/
+.claude/worktrees/
+
 # ---------- ML / notebooks artifacts ----------
 *.pt
 *.pth

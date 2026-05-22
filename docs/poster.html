@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Context — Live Tutorial Overlay from a Single Recording</title>
+<style>
+  :root {
+    --ink: #0f1419;
+    --paper: #fbf9f4;
+    --rule: #1a1f2b;
+    --accent: #c2410c;
+    --accent-soft: #fde9d6;
+    --muted: #5b6470;
+    --panel: #f4efe5;
+    --panel-2: #ece5d4;
+    --code-bg: #0f1419;
+    --code-ink: #f5efe2;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #2a2a2a; }
+  body {
+    font-family: "Iowan Old Style", "Palatino", "Georgia", serif;
+    color: var(--ink);
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .poster {
+    width: 1200px;
+    margin: 24px auto;
+    background: var(--paper);
+    padding: 48px 56px 40px;
+    border: 1px solid #000;
+    box-shadow: 0 2px 24px rgba(0,0,0,0.4);
+  }
+
+  /* --- Header --- */
+  header.title-block {
+    border-bottom: 4px double var(--rule);
+    padding-bottom: 22px;
+    margin-bottom: 28px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 24px;
+  }
+  .eyebrow {
+    font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 8px;
+  }
+  h1.title {
+    font-family: "Iowan Old Style", "Palatino", serif;
+    font-size: 56px;
+    line-height: 1.02;
+    margin: 0 0 10px;
+    letter-spacing: -0.01em;
+  }
+  h1.title em { font-style: italic; color: var(--accent); }
+  .subtitle {
+    font-size: 19px;
+    color: var(--muted);
+    max-width: 780px;
+    margin: 0;
+  }
+  .meta {
+    font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    line-height: 1.7;
+  }
+  .meta strong { color: var(--ink); }
+
+  /* --- Layout --- */
+  .grid {
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 28px 36px;
+  }
+  .grid .full { grid-column: 1 / -1; }
+
+  section { margin-bottom: 0; }
+  h2 {
+    font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--rule);
+  }
+  h2 .num {
+    display: inline-block;
+    color: var(--ink);
+    background: var(--accent-soft);
+    padding: 2px 7px;
+    margin-right: 8px;
+    border-radius: 2px;
+  }
+  h3 {
+    font-family: "Iowan Old Style", "Palatino", serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 17px;
+    margin: 14px 0 6px;
+  }
+  p { margin: 0 0 10px; font-size: 14.5px; }
+  ul { margin: 0 0 10px; padding-left: 18px; font-size: 14.5px; }
+  li { margin-bottom: 4px; }
+  code, .mono {
+    font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+    font-size: 12.5px;
+  }
+  code { background: var(--panel-2); padding: 1px 5px; border-radius: 2px; }
+
+  /* --- Callout box --- */
+  .callout {
+    background: var(--panel);
+    border-left: 3px solid var(--accent);
+    padding: 14px 16px;
+    font-size: 14.5px;
+    margin: 0 0 12px;
+  }
+  .callout strong { color: var(--accent); }
+
+  /* --- Tables --- */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-bottom: 8px; }
+  th, td {
+    text-align: left;
+    padding: 7px 10px;
+    border-bottom: 1px solid #d8d0bd;
+    vertical-align: top;
+  }
+  th {
+    font-family: "SF Mono", "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1.5px solid var(--rule);
+    font-weight: 600;
+  }
+  td.mono { font-family: "SF Mono", "JetBrains Mono", monospace; font-size: 12px; }
+
+  /* --- Code blocks --- */
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 14px 16px;
+    margin: 0 0 12px;
+    overflow-x: auto;
+    font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    border-radius: 3px;
+  }
+  pre .k { color: #8ab4f8; }
+  pre .s { color: #f0b97d; }
+  pre .c { color: #6e7a8a; font-style: italic; }
+
+  /* --- Architecture diagram --- */
+  .diagram {
+    background: var(--panel);
+    padding: 18px;
+    margin-bottom: 12px;
+    border: 1px solid #d8d0bd;
+    font-family: "SF Mono", "JetBrains Mono", monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  /* --- Pipeline phases --- */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin: 8px 0 12px;
+  }
+  .phase {
+    background: var(--panel);
+    border-top: 3px solid var(--accent);
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+  .phase .label {
+    font-family: "SF Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .phase .name {
+    font-family: "Iowan Old Style", serif;
+    font-weight: 600;
+    font-style: italic;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  /* --- Stat blocks --- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .stat {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 12px 14px;
+    text-align: left;
+  }
+  .stat .num {
+    font-family: "Iowan Old Style", serif;
+    font-size: 32px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .stat .lbl {
+    font-family: "SF Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 4px;
+    display: block;
+  }
+
+  /* --- Footer --- */
+  footer.foot {
+    border-top: 4px double var(--rule);
+    margin-top: 32px;
+    padding-top: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    font-family: "SF Mono", monospace;
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+  footer.foot strong { color: var(--ink); display: block; margin-bottom: 4px; font-size: 11px; letter-spacing: 0.18em; }
+</style>
+</head>
+<body>
+
+<div class="poster">
+
+  <header class="title-block">
+    <div>
+      <p class="eyebrow">macOS · Capture · Replay · Verify</p>
+      <h1 class="title">Context: turning <em>one recording</em><br>into a live tutorial overlay</h1>
+      <p class="subtitle">
+        A teaching system, not an automation agent. Record a workflow once; replay it
+        as a step-by-step overlay that watches the user's screen, asks for confirmation
+        when uncertain, and replans when the world drifts from the plan.
+      </p>
+    </div>
+    <div class="meta">
+      <strong>Jesus Avalos</strong><br>
+      Solo author · MVP<br>
+      288 commits · Jan&nbsp;5&nbsp;–&nbsp;May&nbsp;22, 2026<br>
+      236 feat / fix commits<br>
+      <span style="color: var(--accent);">jesus-tasks @ HEAD</span>
+    </div>
+  </header>
+
+  <!-- Stats strip -->
+  <div class="stats">
+    <div class="stat">
+      <div class="num">5</div>
+      <span class="lbl">backend services<br>orchestrated by Caddy</span>
+    </div>
+    <div class="stat">
+      <div class="num">2</div>
+      <span class="lbl">surfaces — Swift recorder<br>+ Swift overlay (active)</span>
+    </div>
+    <div class="stat">
+      <div class="num">7</div>
+      <span class="lbl">phased rollout for<br>recording → enrichment</span>
+    </div>
+    <div class="stat">
+      <div class="num">0</div>
+      <span class="lbl">Accessibility API use<br>(vision-only by design)</span>
+    </div>
+  </div>
+
+  <!-- Pull quote -->
+  <div class="callout full" style="margin-bottom: 28px;">
+    <strong>Thesis.</strong> Software documentation is stuck between static GIFs and
+    fragile RPA scripts. A captured demonstration carries enough signal — pixels,
+    keystrokes, intent — to <em>teach</em> the next person, if the system can localize
+    each step on a new screen and gracefully recover when it can't. Context treats
+    that recovery as a first-class UI surface, not a hidden retry loop.
+  </div>
+
+  <div class="grid">
+
+    <!-- 1. Problem -->
+    <section>
+      <h2><span class="num">01</span>Problem &amp; Users</h2>
+      <h3>Who this is for</h3>
+      <ul>
+        <li><strong>Power users onboarding teammates</strong> to internal tools (CRMs, dashboards, ticketing) whose UI flows aren't documented.</li>
+        <li><strong>Support &amp; CS teams</strong> who write the same "click here, then here" emails dozens of times a week.</li>
+        <li><strong>Solo learners</strong> following a how-to who lose their place between tab-switches and steps.</li>
+      </ul>
+      <h3>Why existing tools fall short</h3>
+      <ul>
+        <li><em>Screencasts</em> can't tell you whether you completed step 3.</li>
+        <li><em>RPA / browser automation</em> brittle on minor UI changes; assumes a stable selector model that desktop apps don't expose.</li>
+        <li><em>LLM agents</em> over-commit — they take actions when they should be asking.</li>
+      </ul>
+    </section>
+
+    <!-- 2. Scope -->
+    <section>
+      <h2><span class="num">02</span>Scope of the MVP</h2>
+      <div class="callout">
+        <strong>In scope.</strong> macOS-only. Capture a click/keystroke trace plus
+        screenshots. Replay as an overlay that highlights the next target, asks for
+        confirmation, and replans on divergence.
+      </div>
+      <h3>Explicitly deferred</h3>
+      <ul>
+        <li><strong>Automation.</strong> The system points; the human acts.</li>
+        <li><strong>Generalization across apps.</strong> A recording teaches its own flow first; cross-flow transfer is a later phase.</li>
+        <li><strong>PII redaction.</strong> Architected to add later without rewrites; not in MVP.</li>
+        <li><strong>Cross-platform.</strong> macOS-first; Accessibility APIs avoided so vision-only stack can port.</li>
+      </ul>
+    </section>
+
+    <!-- 3. Architecture diagram -->
+    <section class="full">
+      <h2><span class="num">03</span>System Architecture</h2>
+      <div class="diagram">┌───────────────────────────────┐                          ┌────────────────────────────────────────┐
+│      context-app  (Swift)     │                          │       Python backend (FastAPI)         │
+│  ───────────────────────────  │                          │  ────────────────────────────────────  │
+│  • Recorder  (CGEvent tap,    │   POST /recordings       │  recording-enrichment   ── Holo VLM    │
+│    SCStream frames, goal)     │  ─────────────────────▶  │     describer · optional grounding     │
+│                               │  ◀───── SSE /events ───  │                                        │
+│  • Overlay  (NSPanel, bbox,   │                          │  backend  (tutorial_session.py)        │
+│    confirmation, ask-bar,     │   WS /tutorial-sessions  │     planner ─ verifier ─ replanner     │
+│    soft-hint toast)           │  ◀──────────────────▶    │                                        │
+│                               │                          │  enrichment-layer                      │
+│  • RecordingsList window      │                          │     search ▸ extract ▸ rank ▸ cache    │
+└───────────────────────────────┘                          │                                        │
+                                                            │  gui-grounding  ── target → bbox      │
+                  ┌──────────────── Caddy gateway :8080 ──▶ │  llm  ── OpenAI · Gemini · Holo       │
+                                                            └────────────────────────────────────────┘
+
+         Local store: ~/.context/sessions/{id}/  →  events.jsonl  +  frames/  +  crops/</div>
+    </section>
+
+    <!-- 4. Capture loop -->
+    <section>
+      <h2><span class="num">04</span>The Capture Loop</h2>
+      <p>The recorder is intentionally dumb — it produces a deterministic trace; meaning is layered on later.</p>
+      <ul>
+        <li><strong>Inputs.</strong> CGEvent tap (clicks, scrolls, key_down, modifier flags); SCStream frames; user-entered <em>goal</em> sheet.</li>
+        <li><strong>Coalescing.</strong> Printable keystrokes → "type bursts"; scroll deltas → sessionized scroll events.</li>
+        <li><strong>Outputs.</strong> Append-only <code>events.jsonl</code>, content-addressed <code>frames/</code>, per-event <code>crops/</code> (target + context).</li>
+        <li><strong>No AX.</strong> Vision-only by mandate — recordings stay portable to non-macOS targets.</li>
+      </ul>
+    </section>
+
+    <!-- 5. Enrichment & replay -->
+    <section>
+      <h2><span class="num">05</span>Enrichment &amp; Replay</h2>
+      <div class="pipeline">
+        <div class="phase"><span class="label">Phase 0–2</span><span class="name">Capture</span>Goal sheet, frame stream, sessionized scrolls + crops.</div>
+        <div class="phase"><span class="label">Phase 3–4</span><span class="name">Describe</span>Bundles upload to recording-enrichment; Holo VLM narrates each action.</div>
+        <div class="phase"><span class="label">Phase 5–6</span><span class="name">Verify</span>SSE progress stream; optional gui-grounding self-check on each described target.</div>
+        <div class="phase"><span class="label">Phase 7</span><span class="name">Replay</span>Overlay loads enriched tutorial; live verifier gates step transitions on user screen.</div>
+      </div>
+      <p>Each phase shipped as its own commit series (<code>phase 0</code>…<code>phase 7</code>), letting the demo regress at any phase boundary.</p>
+    </section>
+
+    <!-- 6. Step schema -->
+    <section class="full">
+      <h2><span class="num">06</span>Schemas (the "API" between agents and the UI)</h2>
+      <div class="grid" style="gap: 18px 28px;">
+        <div>
+          <h3>Recording event (one line in <code>events.jsonl</code>)</h3>
+<pre><span class="c">// per-event record from the macOS capture service</span>
+{
+  <span class="k">"id"</span>: <span class="s">"a1b2…"</span>,
+  <span class="k">"timestamp_ms"</span>: 1715000003120,
+  <span class="k">"kind"</span>: <span class="s">"click" | "scroll" | "type_burst" | "key_down"</span>,
+  <span class="k">"cursor"</span>: { <span class="k">"x"</span>: 812, <span class="k">"y"</span>: 433 },
+  <span class="k">"frame_id"</span>: <span class="s">"sha256:…"</span>,
+  <span class="k">"target_crop_path"</span>: <span class="s">"crops/{id}_target.jpg"</span>,
+  <span class="k">"context_crop_path"</span>: <span class="s">"crops/{id}_context.jpg"</span>
+}</pre>
+        </div>
+        <div>
+          <h3>Tutorial step (planner output, overlay input)</h3>
+<pre><span class="c"># backend/tutorial_schema.py</span>
+<span class="k">class</span> TutorialStep:
+    step_id: <span class="s">"step_001"</span>
+    description: <span class="s">"Open the Reply panel"</span>
+    actions: [TutorialAction]   <span class="c"># 1+ tightly-coupled actions</span>
+
+<span class="k">class</span> TutorialAction:
+    type: <span class="s">"click" | "type" | "press_key" | "user_choice" | …</span>
+    target: ActionTarget | None   <span class="c"># element / region / window</span>
+    text:   str | None            <span class="c"># for type</span>
+    requires_confirmation: bool</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Backend services -->
+    <section>
+      <h2><span class="num">07</span>Backend Services</h2>
+      <table>
+        <thead><tr><th>Service</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">backend</td><td>Tutorial session FSM: planner → verifier → replan; WS event bus.</td></tr>
+          <tr><td class="mono">recording-enrichment</td><td>Ingests recording bundles; Holo describes each action; emits SSE progress.</td></tr>
+          <tr><td class="mono">enrichment-layer</td><td>Web search → fetch → JS-class → render → extract → SQLite cache for grounding tutorials in real docs.</td></tr>
+          <tr><td class="mono">gui-grounding</td><td>Vision model that turns "the Reply button" + screenshot → bbox.</td></tr>
+          <tr><td class="mono">gateway (Caddy)</td><td>Single :8080 reverse proxy so the Swift client only knows one URL.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 8. Verifier loop -->
+    <section>
+      <h2><span class="num">08</span>The Verification Gate</h2>
+      <p>The replay loop's hardest job isn't planning — it's knowing when the plan is wrong.</p>
+      <ul>
+        <li><strong>Strict synchronous gate.</strong> The verifier inspects the user's screen <em>before</em> the planner emits the next step (replaces an earlier parallel design — see <code>remove-spaghetti.md</code>).</li>
+        <li><strong>previous_step_visible_effect.</strong> Hard-gated check that the prior action actually changed the UI — closes the "model says <em>on_track</em> but nothing happened" loophole.</li>
+        <li><strong>Soft hints.</strong> Negative verdicts surface a toast with a user-controlled "replan" button rather than auto-restarting.</li>
+        <li><strong>Clarifying questions.</strong> Turn-0 <code>tutorial_ask_user</code> tool lets the planner stall for input instead of hallucinating context.</li>
+      </ul>
+    </section>
+
+    <!-- 9. Engineering posture -->
+    <section>
+      <h2><span class="num">09</span>Engineering Posture</h2>
+      <ul>
+        <li><strong>Conventional commits, ruthless scope.</strong> 288 commits, almost all <code>feat()</code>/<code>fix()</code>; no merge noise.</li>
+        <li><strong>Schema-first.</strong> Pydantic models on the wire; TS bindings auto-generated from Rust where applicable.</li>
+        <li><strong>Layered Swift app.</strong> App / Application / Presentation / Domain — pure state logic isolated from NSPanel plumbing.</li>
+        <li><strong>Vision-only mandate.</strong> No AX inspector in recorder or replay; keeps the door open for Windows/Linux.</li>
+        <li><strong>Deterministic logs.</strong> JSONL + content-addressed frames → every session is replayable for eval.</li>
+        <li><strong>A/B-able prompts.</strong> <code>STEP_TOOLS_ENABLED</code> flag toggles capped-head vs. full-plan emission to test the "full-plan hypothesis."</li>
+      </ul>
+    </section>
+
+    <!-- 10. Commit narrative -->
+    <section class="full">
+      <h2><span class="num">10</span>What the Commit History Tells You</h2>
+      <div class="grid" style="gap: 14px 28px;">
+        <div>
+          <h3>Q1 — Foundations (Jan – Feb)</h3>
+          <ul>
+            <li>FastAPI backbone, planner + verifier first cuts, OpenAI/Gemini adapters.</li>
+            <li>Initial Electron overlay; <em>later deprecated</em> in favor of Swift.</li>
+            <li>JSONL event log + session FSM in <code>tutorial_session.py</code>.</li>
+          </ul>
+          <h3>Q2 — The Hard Problems (Mar – Apr)</h3>
+          <ul>
+            <li>Grounding cache (L1–L5) — making the verifier affordable.</li>
+            <li>Planner web_search + clarifying-question tool; reins on hallucinated steps.</li>
+            <li>Strict verification gate replaces parallel verifier.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Q2 → Q3 — Recording Pipeline (Apr – May)</h3>
+          <ul>
+            <li>Phased rollout, <code>phase 0</code>…<code>phase 7</code>: schema, capture, sessionization, upload, Holo describer, SSE bus, optional self-verification, recordings list.</li>
+            <li>Soft verification hints + bbox UX polish on the overlay.</li>
+            <li>Caddy gateway unifies the Swift client's view of the backend.</li>
+          </ul>
+          <h3>Trajectory</h3>
+          <ul>
+            <li>Earlier work: <em>can we plan and verify at all?</em></li>
+            <li>Recent work: <em>can a recording teach itself?</em></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11. What's next -->
+    <section class="full">
+      <h2><span class="num">11</span>Open Questions &amp; Next Slice</h2>
+      <div class="grid" style="gap: 14px 28px;">
+        <div>
+          <h3>Live demo gaps</h3>
+          <ul>
+            <li>Latency budget on the verifier loop when running fully local.</li>
+            <li>Holo description quality on dense UIs (settings panels, IDEs).</li>
+            <li>Replan UX when the user goes off-script intentionally.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Architectural bets to validate</h3>
+          <ul>
+            <li><em>Full-plan hypothesis.</em> Re-emit the entire remaining plan each turn; confidence decays, length doesn't.</li>
+            <li><em>Vision-only forever.</em> Resist the temptation to slip AX in for "just one widget."</li>
+            <li><em>Recording is the artifact.</em> The tutorial is a view over it, not a separate document.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="foot">
+    <div>
+      <strong>Stack</strong>
+      Swift + AppKit · FastAPI · Pydantic · Caddy · Docker Compose · SQLite · OpenAI · Gemini · Holo · custom gui-grounding
+    </div>
+    <div>
+      <strong>Repo Layout</strong>
+      backend/ · context-app/ (Swift) · electron/ (legacy) · docker/ · docs/ · notebooks/
+    </div>
+    <div>
+      <strong>Design Tenets</strong>
+      Human-in-the-loop · vision-only · deterministic logs · clear module boundaries · no magic
+    </div>
+  </footer>
+
+</div>
+
+</body>
+</html>

@@ -249,6 +249,10 @@ struct ChatPopupView: View {
                     )
             }
 
+            if let hint = sessionController.awaitingHintResponse {
+                verificationHintCard(hint)
+            }
+
             if let batch = sessionController.pendingQuestionBatch {
                 questionCard(batch)
             }
@@ -992,6 +996,87 @@ struct ChatPopupView: View {
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 4)
+    }
+
+    /// Soft, non-modal toast for verifier hints. Tap "Something looks off"
+    /// to acknowledge (forces a replan); tap X to dismiss (overrides the
+    /// verifier and keeps the current step); no interaction auto-dismisses
+    /// after `hintAutoDismissSeconds` — behavior on timeout is verdict-
+    /// dependent on the backend, see backend/tutorial_session.handle_user_hint_response.
+    private func verificationHintCard(_ hint: PendingVerificationHint) -> some View {
+        let title: String = {
+            switch hint.verdict {
+            case .unsure:
+                return "Not sure this matches"
+            case .diverged, .blocked:
+                return "Looks like we're off track"
+            case .onTrack:
+                // onTrack should never surface as a hint, but render
+                // defensively rather than crash.
+                return "Heads up"
+            }
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: hint.autoReplanning ? "arrow.triangle.2.circlepath" : "questionmark.circle")
+                    .font(.system(size: 11, weight: .medium))
+                Text(title)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.42)
+                    .textCase(.uppercase)
+                Spacer(minLength: 0)
+                Button {
+                    Task { await sessionController.respondToHint(action: .dismiss) }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(OverlayTheme.tertiaryText)
+                }
+                .buttonStyle(.plain)
+            }
+            .foregroundStyle(OverlayTheme.tertiaryText)
+
+            if !hint.reason.isEmpty {
+                Text(hint.reason)
+                    .font(.system(size: 13))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                Task { await sessionController.respondToHint(action: .acknowledgeOff) }
+            } label: {
+                Text(hint.autoReplanning ? "Confirm something's off" : "Something looks off")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.invertedForeground)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(OverlayTheme.invertedAccent)
+                    .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .task(id: hint.stepID) {
+            // Auto-dismiss after a few seconds. .task(id:) is cancelled
+            // when the hint goes away (acknowledge/dismiss clear the slot)
+            // or when a new hint replaces it, so this won't fire late.
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            await sessionController.respondToHint(action: .timeout)
+        }
     }
 
     private var typingDots: some View {

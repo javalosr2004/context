@@ -65,6 +65,19 @@ struct PendingQuestionBatch: Equatable {
     let questions: [TutorialAssistantQuestion]
 }
 
+/// Open verification hint toast bound to the overlay UI.
+///
+/// `autoReplanning == true` means the backend has already staged a replan
+/// that fires on timeout (verdict was diverged or blocked). The toast can
+/// surface a "re-routing…" affordance. `false` means the backend will only
+/// replan if the user explicitly taps "off track" (verdict was unsure).
+struct PendingVerificationHint: Equatable {
+    let stepID: String
+    let verdict: TutorialVerificationVerdict
+    let reason: String
+    let autoReplanning: Bool
+}
+
 @MainActor
 final class TutorialSessionController: ObservableObject {
     @Published private(set) var awaitingConfirmationStepID: String?
@@ -76,6 +89,7 @@ final class TutorialSessionController: ObservableObject {
     @Published private(set) var pendingContinuePromptStepID: String?
     @Published private(set) var pendingCompletionPrompt: PendingCompletionPrompt?
     @Published private(set) var pendingQuestionBatch: PendingQuestionBatch?
+    @Published private(set) var awaitingHintResponse: PendingVerificationHint?
     @Published private(set) var status: TutorialSessionUIStatus = .ready
     @Published private(set) var agentTurn: (turn: Int, maxTurns: Int)?
     @Published private(set) var webSources: [TutorialSessionWebSource] = []
@@ -201,6 +215,26 @@ final class TutorialSessionController: ObservableObject {
         }
     }
 
+    /// Resolve an open VerificationHintEvent toast. The backend tracks the
+    /// open hint by `stepID`; if the toast has already been replaced (a
+    /// later verifier verdict arrived first), it drops the response as
+    /// stale — so it's safe to fire this even if the local state has
+    /// moved on. We clear the local slot eagerly so the toast disappears.
+    func respondToHint(action: TutorialHintResponseAction) async {
+        guard let pending = awaitingHintResponse else { return }
+        awaitingHintResponse = nil
+        do {
+            try await sendSessionEvent(
+                .userHintResponse(stepID: pending.stepID, action: action)
+            )
+        } catch {
+            // Best-effort: the toast has already been dismissed locally,
+            // so a send failure just leaves the backend's open-hint slot
+            // to be cleaned up by the next instruction transition.
+            logger.error("respondToHint(\(action.rawValue, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     func confirmStep(
         stepID: String,
         actionIndex: Int,
@@ -310,6 +344,7 @@ final class TutorialSessionController: ObservableObject {
         pendingContinuePromptStepID = nil
         pendingCompletionPrompt = nil
         pendingQuestionBatch = nil
+        awaitingHintResponse = nil
         draftPlan = nil
         optimisticallyGroundedSlot = nil
         agentTurn = nil
@@ -503,6 +538,7 @@ final class TutorialSessionController: ObservableObject {
             optimisticallyGroundedSlot = nil
             pendingCompletionPrompt = nil
             pendingQuestionBatch = nil
+            awaitingHintResponse = nil
             appendTutorialText("Tutorial completed.")
             status = .completed
         case .instructionVerificationStarted:
@@ -512,6 +548,13 @@ final class TutorialSessionController: ObservableObject {
             // will move us out of .verifying. No-op here keeps the spinner
             // honest until the next real signal arrives.
             break
+        case .verificationHint(let stepID, let verdict, let reason, let autoReplanning):
+            awaitingHintResponse = PendingVerificationHint(
+                stepID: stepID,
+                verdict: verdict,
+                reason: reason,
+                autoReplanning: autoReplanning
+            )
         case .completionProposed(let reason, let source):
             let promptSource = PendingCompletionPrompt.Source(rawValue: source) ?? .backend
             pendingCompletionPrompt = PendingCompletionPrompt(

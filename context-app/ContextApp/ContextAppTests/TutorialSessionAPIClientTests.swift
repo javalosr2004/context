@@ -232,4 +232,77 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         XCTAssertTrue(TutorialSessionUIStatus.sending.isBusy)
         XCTAssertFalse(TutorialSessionUIStatus.awaitingConfirmation.isBusy)
     }
+
+    func testServerEventDecodingVerificationHint() throws {
+        let data = Data("""
+        {
+          "type": "verification_hint",
+          "step_id": "step_042",
+          "verdict": "unsure",
+          "reason": "title bar text differs from expected",
+          "auto_replanning": false
+        }
+        """.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .verificationHint(let stepID, let verdict, let reason, let autoReplanning) = event else {
+            return XCTFail("Expected verificationHint, got \(event)")
+        }
+        XCTAssertEqual(stepID, "step_042")
+        XCTAssertEqual(verdict, .unsure)
+        XCTAssertEqual(reason, "title bar text differs from expected")
+        XCTAssertFalse(autoReplanning)
+    }
+
+    func testServerEventDecodingVerificationHintDiverged() throws {
+        let data = Data("""
+        {
+          "type": "verification_hint",
+          "step_id": "step_007",
+          "verdict": "diverged",
+          "reason": "wrong app in foreground",
+          "auto_replanning": true
+        }
+        """.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .verificationHint(_, let verdict, _, let autoReplanning) = event else {
+            return XCTFail("Expected verificationHint, got \(event)")
+        }
+        XCTAssertEqual(verdict, .diverged)
+        XCTAssertTrue(autoReplanning)
+    }
+
+    func testUserHintResponseEncodingUsesWireKeys() throws {
+        let event = TutorialSessionClientEvent.userHintResponse(
+            stepID: "step_042",
+            action: .acknowledgeOff
+        )
+
+        let data = try JSONEncoder().encode(event)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["type"] as? String, "user_hint_response")
+        XCTAssertEqual(object["step_id"] as? String, "step_042")
+        XCTAssertEqual(object["action"] as? String, "acknowledge_off")
+    }
+
+    func testUserHintResponseEncodesAllActionVariants() throws {
+        let actions: [(TutorialHintResponseAction, String)] = [
+            (.acknowledgeOff, "acknowledge_off"),
+            (.dismiss, "dismiss"),
+            (.timeout, "timeout"),
+        ]
+        for (action, wireValue) in actions {
+            let event = TutorialSessionClientEvent.userHintResponse(
+                stepID: "step_001",
+                action: action
+            )
+            let data = try JSONEncoder().encode(event)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(object["action"] as? String, wireValue, "wire value mismatch for \(action)")
+        }
+    }
 }

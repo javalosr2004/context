@@ -76,6 +76,7 @@ final class OverlayCoordinator {
                 // before typing — not a "done" signal. Keep the mask up; advance
                 // is driven by the explicit advance button in the chat popup.
                 if sessionController.actionIsType(stepID: stepID, actionIndex: actionIndex) {
+                    bboxPanel?.orderOut(nil)
                     return false
                 }
                 bboxPanel?.orderOut(nil)

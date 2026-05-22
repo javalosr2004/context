@@ -74,15 +74,22 @@ def merge_plan_tail(
                 "abandon_awaiting=true is mutually exclusive with "
                 "refines_current=true on the first tail item."
             )
-        if awaiting_step_id is None:
-            raise PlanMergeError(
-                "abandon_awaiting=true requires a live awaiting step."
+        # Forgive the planner when it asks to abandon a step that no
+        # longer exists. This typically happens after a gate-rejection
+        # truncation: the tail was already dropped, so there is no
+        # awaiting step to abandon. Treat that as a plain replan
+        # (append after the frozen prefix) and log for visibility,
+        # matching how refines_current is silently dropped below.
+        no_live_awaiting = awaiting_step_id is None or (
+            not frozen_prefix_ids
+            or frozen_prefix_ids[-1] != awaiting_step_id
+        )
+        if no_live_awaiting:
+            logger.info(
+                "[plan_merge] coercing abandon_awaiting=true → false; "
+                "no live awaiting step to abandon"
             )
-        if not frozen_prefix_ids or frozen_prefix_ids[-1] != awaiting_step_id:
-            raise PlanMergeError(
-                "abandon_awaiting=true requires the awaiting step to be the "
-                "last frozen prefix entry."
-            )
+            abandon_awaiting = False
 
     # Honor refines_current only when there's a live awaiting step at the
     # tail of the frozen prefix. Otherwise drop the bit and append — never

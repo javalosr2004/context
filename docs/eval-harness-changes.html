@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eval harness: changes log</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1c2230;
+    --fg: #e6e8ef;
+    --muted: #9aa3b2;
+    --accent: #7ec3ff;
+    --good: #7ed4a0;
+    --warn: #f4b860;
+    --bad: #f08b8b;
+    --line: #2a3142;
+    --code-bg: #0b0d12;
+  }
+  html { background: var(--bg); color: var(--fg); }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; margin: 36px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  h3 { font-size: 16px; margin: 22px 0 6px; color: var(--accent); }
+  p, li { color: var(--fg); }
+  small, .muted { color: var(--muted); }
+  code, pre {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    font-size: 13px;
+  }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+  pre {
+    background: var(--code-bg);
+    padding: 14px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 14px 0;
+  }
+  .panel-2 { background: var(--panel-2); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .b-fixed { background: rgba(126,212,160,0.15); color: var(--good); border: 1px solid rgba(126,212,160,0.4); }
+  .b-warn  { background: rgba(244,184,96,0.15); color: var(--warn); border: 1px solid rgba(244,184,96,0.4); }
+  .b-todo  { background: rgba(240,139,139,0.15); color: var(--bad);  border: 1px solid rgba(240,139,139,0.4); }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 18px; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .filepath { color: var(--accent); }
+  .toc { columns: 2; column-gap: 24px; }
+  .toc a { color: var(--fg); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .lead { color: var(--muted); font-size: 15.5px; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+  .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; margin: 8px 0; }
+  .kv .k { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Eval-harness changes</h1>
+<p class="lead">
+  What landed in the <code>jesus-tasks</code> branch on 2026-05-19 to take the tutorial system from
+  "1410 events with zero ground truth" to a logged-enough-to-judge state. One commit:
+  <code>feat(evals): persist frames, capture LLM calls/snippets, enrich verifier event, surface eval-mode toggle</code>.
+</p>
+
+<div class="panel">
+  <strong>Read this if</strong> you forgot why <code>events.jsonl</code> looks different now,
+  or you're about to build the eval extractor and want to know exactly what each row carries.
+</div>
+
+<h2 id="toc">Contents</h2>
+<div class="toc">
+  <ol>
+    <li><a href="#problem">The problem</a></li>
+    <li><a href="#gaps">What was missing</a></li>
+    <li><a href="#g3">Fix 3 — verifier event</a></li>
+    <li><a href="#g2">Fix 2 — frame persistence</a></li>
+    <li><a href="#g4b">Fix 4b — snippet content</a></li>
+    <li><a href="#g4a">Fix 4a — LLMCallEvent</a></li>
+    <li><a href="#g1">Fix 1 — eval-mode toggle</a></li>
+    <li><a href="#schema">Schema reference</a></li>
+    <li><a href="#layout">On-disk layout</a></li>
+    <li><a href="#tests">Tests</a></li>
+    <li><a href="#next">What's next</a></li>
+  </ol>
+</div>
+
+<h2 id="problem">1. The problem</h2>
+<p>
+  A 31-session, 1410-event audit found <code>events.jsonl</code> was logging the right
+  <em>events</em> but losing the <em>data those events need to be judgable</em>. The four-category eval
+  rubric (<code>plan</code>, <code>grounding</code>, <code>verifier</code>, <code>loop</code>) couldn't be scored
+  because:
+</p>
+<ul>
+  <li><strong>Zero human labels.</strong> <code>UserStepAnnotationEvent</code> schema existed; the overlay never emitted one.</li>
+  <li><strong>Frames never persisted.</strong> <code>frames/</code> dir was pre-created but empty; screens were inlined as base64 inside the JSONL.</li>
+  <li><strong>Verifier output truncated.</strong> The 4-way verdict (<code>on_track/blocked/diverged/unsure</code>) and <code>screen_summary</code> were logged via Python <code>logger.info</code> only, not into <code>events.jsonl</code>.</li>
+  <li><strong>No LLM I/O captured.</strong> No prompts, no raw responses, no tool-call args — only outcomes.</li>
+  <li><strong>Snippet content lost.</strong> <code>WebSearchCompletedEvent</code> had source URLs but not the text the planner actually ingested.</li>
+</ul>
+
+<h2 id="gaps">2. What this commit fixed</h2>
+<table>
+  <tr><th>Gap</th><th>Status</th><th>Where</th></tr>
+  <tr><td>3 — verifier event drops verdict + screen_summary</td><td><span class="badge b-fixed">fixed</span></td><td><span class="filepath">backend/tutorial_session_events.py</span>, <span class="filepath">backend/tutorial_session.py</span></td></tr>
+  <tr><td>2 — frames not persisted</td><td><span class="badge b-fixed">fixed</span></td><td><span class="filepath">backend/session_event_log.py</span></td></tr>
+  <tr><td>4b — snippet content not on the wire</td><td><span class="badge b-fixed">fixed</span></td><td><span class="filepath">backend/tutorial_session_events.py</span>, <span class="filepath">backend/tutorial_session.py</span></td></tr>
+  <tr><td>4a — no LLM I/O captured</td><td><span class="badge b-fixed">fixed</span></td><td><span class="filepath">backend/llm_recording.py</span> (new), <span class="filepath">backend/tutorial_session.py</span>, <span class="filepath">backend/tutorial_session_store.py</span>, <span class="filepath">backend/main.py</span></td></tr>
+  <tr><td>1 — eval-mode never user-discoverable</td><td><span class="badge b-fixed">fixed</span></td><td><span class="filepath">context-app/.../StatusBarController.swift</span></td></tr>
+</table>
+
+<hr>
+
+<h2 id="g3">Fix 3 — Enrich <code>InstructionVerifiedEvent</code></h2>
+<p>The verifier emits <code>{verdict, screen_summary, evidence}</code>; the event was only carrying <code>{ok: bool, reason}</code>. Now the full 4-way label is on the wire.</p>
+
+<div class="panel panel-2">
+<strong>Schema change</strong>
+<pre>class InstructionVerifiedEvent(TutorialSessionEventModel):
+    type: Literal["instruction_verified"] = "instruction_verified"
+    step_id: str
+    ok: bool
+    reason: str | None = None
+    <span style="color:var(--good)">verdict: Literal["on_track", "blocked", "diverged", "unsure"] | None = None
+    screen_summary: str | None = None</span></pre>
+</div>
+
+<p>Emit site updated in <code>tutorial_session.py:1349</code>.</p>
+
+<h2 id="g2">Fix 2 — Frame persistence + content addressing</h2>
+<p>
+  Every <code>ScreenSnapshot</code> carried in a known client event (<code>user_screen</code>, <code>user_confirmation</code>, <code>user_message.uploaded_images</code>) is
+  now decoded at write time, hashed (sha256), and written to
+  <code>frames/&lt;hash&gt;.&lt;ext&gt;</code>. The JSONL line carries a stable reference instead of inline base64.
+</p>
+
+<div class="panel panel-2">
+<strong>Before</strong>
+<pre>{"event":{"type":"user_screen","request_id":"r1",
+  "screen":{"mime_type":"image/png","data_base64":"iVBORw0KGgo...300KB..."}}}</pre>
+<strong>After</strong>
+<pre>{"event":{"type":"user_screen","request_id":"r1",
+  "screen":{"mime_type":"image/png",
+            "frame_hash":"a4d3...",
+            "frame_ref":"frames/a4d3....png",
+            "byte_size":312044}}}</pre>
+</div>
+
+<p>Why it matters:</p>
+<ul>
+  <li><strong>~100× smaller JSONLs</strong> — finally grep-able.</li>
+  <li><strong>Stable handle.</strong> <code>UserStepAnnotationEvent.frame_hash</code> now refers to something that actually exists on disk.</li>
+  <li><strong>Dedup.</strong> Identical screens collapse to one file (content-addressed).</li>
+  <li><strong>Fail-safe.</strong> A bad base64 decode falls back to the original inline snapshot — frame logging never blocks a live tutorial.</li>
+</ul>
+
+<p>Module also got a <code>threading.Lock</code> around JSONL appends since LLM-recorder writes happen from worker threads (next section).</p>
+
+<h2 id="g4b">Fix 4b — Snippet content on <code>WebSearchCompletedEvent</code></h2>
+<p>
+  The planner ingests the full snippet text. The event used to carry only <code>{title, url}</code>, so a
+  grounding-faithfulness judge had nothing to check claims against. <code>content</code> is now on the wire.
+</p>
+
+<pre>class WebSearchSource(TutorialSessionEventModel):
+    title: str
+    url: str
+    <span style="color:var(--good)">content: str = ""</span>  # full snippet body</pre>
+
+<p>Both enrichment-layer and single-query emit sites pass <code>s.content</code> through. The provider-native search path (<code>LLMWebSearchCompleted</code>) leaves <code>content=""</code> because that API doesn't expose snippets.</p>
+
+<h2 id="g4a">Fix 4a — <code>LLMCallEvent</code> + transparent recording</h2>
+<p>
+  New module <code>backend/llm_recording.py</code> with <code>RecordingLLM</code>: a transparent wrapper around any
+  <code>MultimodalLLM</code> that captures every round-trip without changing call-site code.
+</p>
+
+<div class="panel panel-2">
+<strong>Architecture</strong>
+<pre>main.py WS handler
+   └─ event_log = SessionEventLog(session_id)
+   └─ store.attach(session_id, emit, llm_call_sink=event_log.write_llm_call)
+                                       │
+                                       ▼
+TutorialSession.__post_init__:
+   self.llm          = RecordingLLM(llm,         agent="planner",       sink=sink)
+   self.fast_llm     = RecordingLLM(fast_llm,    agent="draft_planner", sink=sink)
+   self.verifier_llm = RecordingLLM(verifier_llm,agent="verifier",      sink=sink)</pre>
+</div>
+
+<p>Each call (sync or streaming) produces one <code>LLMCallRecord</code> at completion. The sink:</p>
+<ol>
+  <li>Writes the full payload to <code>llm_calls/&lt;call_id&gt;.json</code> (prompt_system, prompt_user, response_text, tool_calls).</li>
+  <li>Appends a compact <code>LLMCallEvent</code> line to <code>events.jsonl</code> with just metadata + <code>payload_ref</code>.</li>
+</ol>
+
+<div class="panel panel-2">
+<strong>Compact event (in JSONL)</strong>
+<pre>{"type":"llm_call","call_id":"abc123","agent":"verifier",
+ "model":"gemini-2.0-flash","elapsed_ms":312.7,"image_count":1,
+ "prompt_system_chars":1284,"prompt_user_chars":612,"response_text_chars":118,
+ "tool_calls":[],"ok":true,"error":null,
+ "payload_ref":"llm_calls/abc123.json"}</pre>
+<strong>Full payload (sidecar)</strong>
+<pre>llm_calls/abc123.json
+ → { call_id, agent, model, method, elapsed_ms, image_count,
+     prompt_system, prompt_user, response_text, tool_calls[], ok, error, extra }</pre>
+</div>
+
+<p>Streaming methods (<code>stream_text</code>, <code>stream_tutorial_tool_calls</code>, <code>stream_tutorial_events</code>) accumulate text and tool calls as they yield, then fire the recorder on exhaustion or exception.</p>
+
+<p>Safety posture:</p>
+<ul>
+  <li>Sink failures are caught and logged — eval logging never breaks a live tutorial.</li>
+  <li>Exceptions in the inner LLM are recorded (<code>ok=false, error=...</code>) then re-raised.</li>
+  <li>Images are never inlined into records — only <code>image_count</code> is stored. Frame bytes already live in <code>frames/</code>.</li>
+  <li>Thread-safe writes via the new <code>SessionEventLog._write_lock</code>.</li>
+</ul>
+
+<h2 id="g1">Fix 1 — Eval-mode toggle in the status bar</h2>
+<p>
+  The overlay <em>already had</em> <code>sendStepAnnotation(...)</code> in the controller, ✓/✗ buttons gated by
+  <code>@AppStorage("eval_mode_enabled")</code> in <code>ChatPopupView</code>, and the
+  <code>UserStepAnnotationEvent</code> encoder/decoder. The only missing piece: nothing wrote
+  <code>eval_mode_enabled</code>, so it could never be toggled on.
+</p>
+<p>
+  Added a discoverable menu item in <code>StatusBarController</code>:
+</p>
+
+<div class="panel panel-2">
+<pre>// in rebuildMenu():
+let evalItem = CallbackMenuItem(
+    title: "Eval Mode: \(isEvalModeEnabled() ? "On" : "Off")",
+    actionHandler: { [weak self] in self?.toggleEvalMode() }
+)
+evalItem.state = isEvalModeEnabled() ? .on : .off
+menu.addItem(evalItem)</pre>
+</div>
+
+<p>Now toggling the menu item flips <code>UserDefaults["eval_mode_enabled"]</code>, which the SwiftUI view observes, which surfaces the ✓ / ✗ buttons next to the step in the popup. Pressing one fires <code>UserStepAnnotationEvent</code> over the WS, with <code>frame_hash</code> already populated from the controller's last masked capture.</p>
+
+<hr>
+
+<h2 id="schema">3. Schema reference (post-change)</h2>
+
+<h3>InstructionVerifiedEvent</h3>
+<div class="kv">
+  <div class="k">step_id</div><div>which step was being verified</div>
+  <div class="k">ok</div><div>coarse boolean (legacy)</div>
+  <div class="k">reason</div><div>free text — error code or LLM evidence</div>
+  <div class="k">verdict</div><div><strong>NEW</strong> — <code>on_track | blocked | diverged | unsure | null</code></div>
+  <div class="k">screen_summary</div><div><strong>NEW</strong> — verifier's one-phrase description of the dominant UI</div>
+</div>
+
+<h3>WebSearchSource (in WebSearchCompletedEvent.sources)</h3>
+<div class="kv">
+  <div class="k">title</div><div>source title</div>
+  <div class="k">url</div><div>source URL</div>
+  <div class="k">content</div><div><strong>NEW</strong> — full snippet text the planner ingested (empty for native provider search)</div>
+</div>
+
+<h3>ScreenSnapshot (in client events, post-substitution)</h3>
+<div class="kv">
+  <div class="k">mime_type</div><div>image/png, image/jpeg, image/webp, image/heic, image/heif</div>
+  <div class="k">frame_hash</div><div><strong>NEW</strong> — sha256 of the raw bytes</div>
+  <div class="k">frame_ref</div><div><strong>NEW</strong> — relative path: <code>frames/&lt;hash&gt;.&lt;ext&gt;</code></div>
+  <div class="k">byte_size</div><div><strong>NEW</strong> — original byte length, for sanity checks</div>
+  <div class="k">data_base64</div><div><em>removed from the log</em> (still on the wire in-flight)</div>
+</div>
+
+<h3>LLMCallEvent (NEW)</h3>
+<div class="kv">
+  <div class="k">type</div><div><code>"llm_call"</code></div>
+  <div class="k">call_id</div><div>uuid4 hex</div>
+  <div class="k">agent</div><div><code>planner | draft_planner | verifier</code> (extensible)</div>
+  <div class="k">model</div><div>best-effort model name (e.g. <code>gemini-2.0-flash</code>)</div>
+  <div class="k">elapsed_ms</div><div>wall-clock for the round-trip</div>
+  <div class="k">image_count</div><div>images in the request</div>
+  <div class="k">*_chars</div><div>lengths of prompts and response</div>
+  <div class="k">tool_calls</div><div>list of <code>{name, arguments_chars}</code></div>
+  <div class="k">ok, error</div><div>exception capture</div>
+  <div class="k">payload_ref</div><div><code>llm_calls/&lt;call_id&gt;.json</code> with full prompt + response</div>
+</div>
+
+<h2 id="layout">4. On-disk layout</h2>
+<pre>~/.context/sessions/&lt;session_id&gt;/
+├── events.jsonl              # one event per line, both directions
+├── frames/                   # content-addressed screenshots
+│   ├── a4d3...png
+│   └── 9b1f...jpg
+└── llm_calls/                # full LLM prompts + responses
+    ├── abc123.json
+    └── def456.json</pre>
+
+<p>Override the root via <code>CONTEXT_SESSIONS_DIR</code>.</p>
+
+<h2 id="tests">5. Tests</h2>
+<table>
+  <tr><th>File</th><th>Coverage</th></tr>
+  <tr>
+    <td><span class="filepath">backend/tests/test_session_event_log.py</span></td>
+    <td>10 tests: frame substitution per event type, dedup, corrupt-base64 fallback, <code>write_llm_call</code> payload + event, type validation, concurrent multi-thread writes.</td>
+  </tr>
+  <tr>
+    <td><span class="filepath">backend/tests/test_llm_recording.py</span></td>
+    <td>7 tests: recording for all four LLM methods, exception capture + re-raise, sink-failure isolation, image_count without inlining bytes.</td>
+  </tr>
+</table>
+<p><strong>Result:</strong> 219 backend tests pass (excluding 4 pre-existing files that need the <code>google</code> SDK).</p>
+
+<h2 id="next">6. What's next</h2>
+
+<p>Now that the harness captures enough, the next concrete deliverables are:</p>
+
+<ol>
+  <li>
+    <span class="badge b-todo">todo</span>
+    <strong>Extractor:</strong> <code>backend/evals/extract.py</code> walks <code>events.jsonl</code> →
+    emits per-agent JSONL fixtures (<code>plan.jsonl</code>, <code>grounding.jsonl</code>, <code>verifier.jsonl</code>, <code>loop.jsonl</code>),
+    joining each agent decision with the <code>UserStepAnnotationEvent</code> that landed on the same step.
+  </li>
+  <li>
+    <span class="badge b-todo">todo</span>
+    <strong>First judge subagent:</strong> <code>.claude/agents/judge-verifier.md</code>.
+    Start here because <code>StepAnnotationCorrections.verifier_should_have_said</code> already provides labeled ground truth.
+    Measure Cohen's κ vs. humans on day one.
+  </li>
+  <li>
+    <span class="badge b-todo">todo</span>
+    <strong>Slash command:</strong> <code>.claude/commands/eval.md</code> →
+    <code>/eval verifier --n 50</code> dispatches N subagents in parallel, writes
+    <code>evals/results/&lt;ts&gt;.jsonl</code>, prints κ + diff vs. last run.
+  </li>
+  <li>
+    <span class="badge b-warn">later</span>
+    <strong>Annotation UI extension:</strong> the current ✓/✗ buttons only set <code>verdict</code>. To get useful category labels, off_track should open a small popover with category (plan/grounding/verifier/loop) and a free-text note.
+    <code>ambiguous</code> also has no button.
+  </li>
+  <li>
+    <span class="badge b-warn">later</span>
+    <strong>Backfill migration:</strong> old sessions still have inline base64 in their JSONLs. A one-shot script could rewrite them so historical κ is computable.
+  </li>
+</ol>
+
+<hr>
+<p class="muted">
+  Generated 2026-05-19. Commit: <code>feat(evals): persist frames, capture LLM calls/snippets, enrich verifier event, surface eval-mode toggle</code>.
+  Branch: <code>jesus-tasks</code>.
+</p>
+
+</body>
+</html>

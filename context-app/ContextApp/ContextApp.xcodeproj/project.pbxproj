@@ -101,6 +101,7 @@
 		B00000000000000000000032 /* RecordingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042 /* RecordingsWindowController.swift */; };
 		B00000000000000000000033 /* RecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043 /* RecordingController.swift */; };
 		B00000000000000000000034 /* RecordingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000044 /* RecordingDetailView.swift */; };
+		B00000000000000000000070 /* RecordingStatusClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000071 /* RecordingStatusClient.swift */; };
 		B00000000000000000000050 /* KeyTypingSessionizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* KeyTypingSessionizer.swift */; };
 		B00000000000000000000051 /* KeyTypingSessionizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* KeyTypingSessionizerTests.swift */; };
 /* End PBXBuildFile section */
@@ -213,6 +214,7 @@
 		B00000000000000000000042 /* RecordingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsWindowController.swift; sourceTree = "<group>"; };
 		B00000000000000000000043 /* RecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingController.swift; sourceTree = "<group>"; };
 		B00000000000000000000044 /* RecordingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDetailView.swift; sourceTree = "<group>"; };
+		B00000000000000000000071 /* RecordingStatusClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStatusClient.swift; sourceTree = "<group>"; };
 		B00000000000000000000060 /* KeyTypingSessionizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTypingSessionizer.swift; sourceTree = "<group>"; };
 		B00000000000000000000061 /* KeyTypingSessionizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTypingSessionizerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -375,6 +377,7 @@
 				B0000000000000000000001F /* EnrichmentStatusStream.swift */,
 				B00000000000000000000040 /* RecordingsIndex.swift */,
 				B00000000000000000000043 /* RecordingController.swift */,
+				B00000000000000000000071 /* RecordingStatusClient.swift */,
 			);
 			path = Recording;
 			sourceTree = "<group>";
@@ -620,6 +623,7 @@
 				B00000000000000000000032 /* RecordingsWindowController.swift in Sources */,
 				B00000000000000000000033 /* RecordingController.swift in Sources */,
 				B00000000000000000000034 /* RecordingDetailView.swift in Sources */,
+				B00000000000000000000070 /* RecordingStatusClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

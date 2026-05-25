@@ -48,8 +48,11 @@ struct RecordingsRootView: View {
                     onRetry: { entry in
                         Task { await controller.retryUpload(entryId: entry.id) }
                     },
-                    isRecording: controller.isRecording
+                    onRefresh: { await controller.refreshStatuses() },
+                    isRecording: controller.isRecording,
+                    isRefreshing: controller.isRefreshing
                 )
+                .task { await controller.refreshStatuses() }
             }
         }
     }

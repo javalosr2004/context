@@ -19,10 +19,12 @@ final class RecordingController: ObservableObject {
 
     @Published private(set) var isRecording: Bool = false
     @Published private(set) var lastError: String?
+    @Published private(set) var isRefreshing: Bool = false
 
     private let session: RecordingSession
     private let goalSheet: GoalSheetController
     private let uploader: EnrichmentUploader
+    private let statusClient: RecordingStatusClient
     private var streams: [String: EnrichmentStatusStream] = [:]
     private var streamCancellables: [String: Set<AnyCancellable>] = [:]
 
@@ -32,6 +34,7 @@ final class RecordingController: ObservableObject {
         self.index = RecordingsIndex()
         self.enrichmentBaseURL = enrichmentBaseURL
         self.uploader = EnrichmentUploader(baseURL: enrichmentBaseURL)
+        self.statusClient = RecordingStatusClient(baseURL: enrichmentBaseURL)
         attachStreamsForActiveEntries()
     }
 
@@ -158,6 +161,55 @@ final class RecordingController: ObservableObject {
             if presentFailure {
                 presentUploadFailure(bundleURL: bundleURL, error: error)
             }
+        }
+    }
+
+    // MARK: - Refresh
+
+    /// Called by the list view when it appears. Fetches the authoritative
+    /// status for every non-terminal entry and reattaches any SSE stream
+    /// that has dropped. SSE is the live channel; this repairs drift.
+    func refreshStatuses() async {
+        guard !isRefreshing else { return }
+        let targets = index.entries.filter { isNonTerminal($0.lastStatus) }
+        guard !targets.isEmpty else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        await withTaskGroup(of: Void.self) { group in
+            for entry in targets {
+                let remoteId = entry.remoteId ?? entry.id
+                // Skip entries that never got past local "uploading" — no
+                // server row exists for them yet.
+                guard entry.remoteId != nil || entry.lastStatus != "uploading" else { continue }
+                group.addTask { [weak self] in
+                    await self?.refreshOne(entryId: entry.id, recordingId: remoteId)
+                }
+            }
+        }
+    }
+
+    private func refreshOne(entryId: String, recordingId: String) async {
+        do {
+            let snap = try await statusClient.fetch(recordingId: recordingId)
+            index.updateStatus(
+                id: entryId,
+                status: snap.status,
+                completed: snap.completed,
+                total: snap.total > 0 ? snap.total : nil,
+                failed: snap.failed
+            )
+            if isNonTerminal(snap.status) {
+                attachStream(recordingId: recordingId)
+            } else {
+                detachStream(recordingId: recordingId)
+            }
+        } catch RecordingStatusClientError.notFound {
+            Self.log.warning("refresh_status not_found id=\(entryId, privacy: .public)")
+        } catch {
+            Self.log.warning(
+                "refresh_status failed id=\(entryId, privacy: .public) err=\(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 

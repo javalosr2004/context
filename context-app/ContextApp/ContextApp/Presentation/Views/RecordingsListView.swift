@@ -5,12 +5,19 @@ struct RecordingsListView: View {
     let onOpen: (LocalRecordingEntry) -> Void
     let onStartRecording: () -> Void
     let onRetry: (LocalRecordingEntry) -> Void
+    let onRefresh: () async -> Void
     let isRecording: Bool
+    let isRefreshing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Recordings").font(.title2.bold())
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("Refreshing statuses…")
+                }
                 Spacer()
                 Button(action: onStartRecording) {
                     HStack(spacing: 4) {

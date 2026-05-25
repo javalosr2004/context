@@ -17,7 +17,13 @@
 		reverse_proxy backend:8000
 	}
 
-	encode gzip
+	# Gzip buffers writes until a compressed block can be emitted, which
+	# breaks per-event flushing on Server-Sent Events. Exclude SSE paths.
+	@compressible {
+		not path /recordings/*/events/stream
+		not path /conversations/stream
+	}
+	encode @compressible gzip
 
 	log {
 		output stdout

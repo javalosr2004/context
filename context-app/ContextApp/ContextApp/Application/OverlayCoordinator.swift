@@ -164,9 +164,30 @@ final class OverlayCoordinator {
                 }
                 return await screenGroundingController.submit(instruction)
             },
-            presentNonSpatial: { step, actionIndex in
-                let kind = step.actions.indices.contains(actionIndex) ? step.actions[actionIndex].type : "<oor>"
-                return "Showing instruction inline for \(kind)."
+            presentNonSpatial: { [weak self, weak bboxPanel, weak clipboardPopoverController, weak tutorialTooltipController, screenProvider] step, actionIndex in
+                bboxPanel?.orderOut(nil)
+                clipboardPopoverController?.hide()
+                self?.focusMaskController?.hide()
+                self?.screenGroundingController?.clearCache()
+                self?.stabilityWatcher.cancel()
+
+                guard step.actions.indices.contains(actionIndex) else { return "" }
+                let action = step.actions[actionIndex]
+
+                if case .userChoice = action, !step.instruction.isEmpty,
+                   let screen = screenProvider() {
+                    let anchor = CGRect(
+                        x: screen.frame.midX - 1,
+                        y: screen.frame.midY - 1,
+                        width: 2,
+                        height: 2
+                    )
+                    tutorialTooltipController?.show(beside: anchor, message: step.instruction)
+                } else {
+                    tutorialTooltipController?.hide()
+                }
+
+                return "Showing instruction inline for \(action.type)."
             }
         )
         let handleTutorialStep: (TutorialStep, Int) async -> String = { step, actionIndex in

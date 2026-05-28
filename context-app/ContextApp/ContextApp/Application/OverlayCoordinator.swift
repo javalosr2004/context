@@ -174,16 +174,37 @@ final class OverlayCoordinator {
                 guard step.actions.indices.contains(actionIndex) else { return "" }
                 let action = step.actions[actionIndex]
 
-                if case .userChoice = action, !step.instruction.isEmpty,
-                   let screen = screenProvider() {
-                    let anchor = CGRect(
-                        x: screen.frame.midX - 1,
-                        y: screen.frame.midY - 1,
+                let screen = screenProvider()
+                let centerAnchor: CGRect? = screen.map { s in
+                    CGRect(
+                        x: s.frame.midX - 1,
+                        y: s.frame.midY - 1,
                         width: 2,
                         height: 2
                     )
-                    tutorialTooltipController?.show(beside: anchor, message: step.instruction)
-                } else {
+                }
+
+                switch action {
+                case .userChoice where !step.instruction.isEmpty:
+                    if let anchor = centerAnchor {
+                        tutorialTooltipController?.show(beside: anchor, message: step.instruction)
+                    } else {
+                        tutorialTooltipController?.hide()
+                    }
+                case .pressKey(let pressKey):
+                    if let anchor = centerAnchor {
+                        let message = step.instruction.isEmpty
+                            ? "Press the keys shown below."
+                            : step.instruction
+                        tutorialTooltipController?.show(
+                            beside: anchor,
+                            message: message,
+                            keys: pressKey.key
+                        )
+                    } else {
+                        tutorialTooltipController?.hide()
+                    }
+                default:
                     tutorialTooltipController?.hide()
                 }
 

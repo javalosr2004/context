@@ -590,8 +590,10 @@ class TutorialSession:
                 if self.grounding_strategy == "parallel":
                     self._kick_off_draft_plan()
             any_steps_walked = False
+            user_initiated = refresh_screen
             while True:
-                await self._plan_or_gate()
+                await self._plan_or_gate(user_initiated=user_initiated)
+                user_initiated = False
                 # Completion is now user-gated. Two paths can request it:
                 #   (a) LLM called tutorial_request_completion in the agent
                 #       loop — handled via self.pending_completion.
@@ -1257,7 +1259,7 @@ class TutorialSession:
 
     # -------- Strict gate: verify next step before re-engaging planner --------
 
-    async def _plan_or_gate(self) -> None:
+    async def _plan_or_gate(self, *, user_initiated: bool = False) -> None:
         """Decide whether to run the planner this iteration.
 
         Strict-gate semantics: on iterations where an existing plan still
@@ -1268,13 +1270,14 @@ class TutorialSession:
         planner regenerates from scratch.
         """
         unwalked = self._unwalked_steps()
-        if not self.plan_steps or not unwalked or self.latest_screen is None:
+        if user_initiated or not self.plan_steps or not unwalked or self.latest_screen is None:
             logger.info(
                 "[session] gate skipped; running planner",
                 extra={
                     "session_id": self.session_id,
                     "reason": (
-                        "no_plan" if not self.plan_steps
+                        "user_message" if user_initiated
+                        else "no_plan" if not self.plan_steps
                         else "no_unwalked" if not unwalked
                         else "no_screen"
                     ),

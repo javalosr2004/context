@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class WorkerSettings:
     def __init__(self) -> None:
-        self.max_concurrency = int(os.environ.get("HOLO_MAX_CONCURRENCY", "1"))
+        self.max_concurrency = int(os.environ.get("HOLO_MAX_CONCURRENCY", "3"))
         self.idle_sleep_s = float(os.environ.get("WORKER_IDLE_SLEEP_S", "1.0"))
 
 

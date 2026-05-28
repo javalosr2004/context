@@ -152,6 +152,21 @@ class Storage:
             )
 
             dest = self.bundles_dir / manifest.recording_id
+            # Guard: reject re-upload of an id the worker is mid-flight on.
+            # Wiping the bundle directory while _enrich_recording is reading
+            # events.jsonl / crops would silently corrupt the partial file.
+            # `pending`/`ready`/`failed` are safe to clobber (worker is idle
+            # on this id) so they still flow through the idempotent path.
+            existing = self.get_recording(manifest.recording_id)
+            if existing is not None and existing.status == "enriching":
+                logger.warning(
+                    "ingest_zip reject | recording_id=%s already enriching",
+                    manifest.recording_id,
+                )
+                raise BundleValidationError(
+                    f"recording_id {manifest.recording_id} is currently enriching; "
+                    "wait for it to finish before re-uploading"
+                )
             if dest.exists():
                 shutil.rmtree(dest)
             dest.mkdir(parents=True)
@@ -265,6 +280,39 @@ class Storage:
                     job_id,
                 ),
             )
+
+    def reset_for_reenrichment(self, recording_id: str) -> bool:
+        """Flip a finished recording back to pending so the worker re-runs it.
+
+        Used to recover recordings that landed as ``ready`` with an empty
+        ``events.enriched.jsonl`` (the dev-mode no-describer fast path) once
+        a describer is wired. Safe on ``ready`` and ``failed``; refuses to
+        touch ``enriching`` (the worker is mid-flight).
+        """
+        existing = self.get_recording(recording_id)
+        if existing is None:
+            return False
+        if existing.status == "enriching":
+            raise BundleValidationError(
+                f"recording_id {recording_id} is currently enriching"
+            )
+        now = int(time.time() * 1000)
+        with self._conn() as cx:
+            cx.execute(
+                "UPDATE recordings SET status='pending', completed=0, failed=0, updated_at=? WHERE id=?",
+                (now, recording_id),
+            )
+            cx.execute(
+                "UPDATE enrichment_jobs SET status='pending', error=NULL, distance_px=NULL, verified=NULL, started_at=NULL, finished_at=NULL WHERE recording_id=?",
+                (recording_id,),
+            )
+        # Drop the stale enriched files so a partial mid-run isn't mistaken
+        # for the new result, and so GET /events fails loudly until rerun.
+        for name in ("events.enriched.jsonl", "events.enriched.jsonl.partial"):
+            p = self.bundle_dir(recording_id) / name
+            if p.exists():
+                p.unlink()
+        return True
 
     def bump_counts(self, recording_id: str, completed_delta: int = 0, failed_delta: int = 0) -> None:
         now = int(time.time() * 1000)

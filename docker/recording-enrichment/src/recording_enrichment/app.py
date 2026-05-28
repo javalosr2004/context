@@ -33,7 +33,9 @@ def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
         if os.environ.get("WORKER_ENABLED", "1") == "0":
             return
         chosen_describer = describer
-        if chosen_describer is None and os.environ.get("HOLO_API_KEY"):
+        if chosen_describer is None and (
+            os.environ.get("HAI_API_KEY") or os.environ.get("HOLO_API_KEY")
+        ):
             from .holo_describe import HoloDescriber
             chosen_describer = HoloDescriber()
         worker = EnrichmentWorker(state_storage, chosen_describer, on_event=on_worker_event)
@@ -140,6 +142,17 @@ def create_app(storage: Storage | None = None, describer=None) -> FastAPI:
                 return
 
         return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.post("/recordings/{recording_id}/reenrich", status_code=202)
+    def reenrich(recording_id: str) -> dict:
+        try:
+            ok = state_storage.reset_for_reenrichment(recording_id)
+        except BundleValidationError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        if not ok:
+            raise HTTPException(status_code=404, detail="not found")
+        logger.info("reenrich queued | recording_id=%s", recording_id)
+        return {"recording_id": recording_id, "status": "pending"}
 
     @app.get("/recordings/{recording_id}/events")
     def get_events(recording_id: str) -> FileResponse:

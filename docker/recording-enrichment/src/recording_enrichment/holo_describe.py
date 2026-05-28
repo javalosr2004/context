@@ -106,10 +106,22 @@ class HoloDescriber:
         from openai import OpenAI  # imported lazily so tests don't need openai
 
         self._model = model or os.environ.get("HOLO_MODEL", "holo3-35b")
-        self._client = OpenAI(
-            api_key=api_key or os.environ.get("HOLO_API_KEY", "missing"),
-            base_url=base_url or os.environ.get("HOLO_BASE_URL", "https://api.hcompany.ai/v1"),
+        # HAI_* are the project-wide names (see backend/holo_client.py and
+        # docker/gui-grounding/.env). HOLO_* kept as a fallback for any
+        # operator who set the older name during early bring-up.
+        resolved_key = (
+            api_key
+            or os.environ.get("HAI_API_KEY")
+            or os.environ.get("HOLO_API_KEY")
+            or "missing"
         )
+        resolved_base_url = (
+            base_url
+            or os.environ.get("HAI_BASE_URL")
+            or os.environ.get("HOLO_BASE_URL")
+            or "https://api.hcompany.ai/v1"
+        )
+        self._client = OpenAI(api_key=resolved_key, base_url=resolved_base_url)
 
     def describe(self, target_jpeg: bytes, context_jpeg: bytes, goal: str) -> Description:
         response = self._client.chat.completions.create(

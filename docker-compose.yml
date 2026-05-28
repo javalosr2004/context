@@ -38,6 +38,12 @@ services:
       - "7100:8000"
     volumes:
       - recording_enrichment_data:/data
+    # Reuse the gui-grounding Holo creds — same upstream API (HAI_API_KEY /
+    # HAI_BASE_URL / HOLO_MODEL). Without this the worker boots without a
+    # describer and writes empty events.enriched.jsonl, marking recordings
+    # ready with no descriptions.
+    env_file:
+      - ./docker/gui-grounding/.env
     environment:
       - DATA_DIR=/data
     healthcheck:

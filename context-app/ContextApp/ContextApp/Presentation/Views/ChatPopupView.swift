@@ -147,6 +147,7 @@ struct ChatPopupView: View {
     let onInputInstruction: (InstructionInput) async -> String
     let onMinify: () -> Void
     let onShowRecordings: () -> Void
+    let onToggleChatHistory: () -> Void
 
     @State private var activeStepID: String?
     @State private var expandedStepID: String?
@@ -189,7 +190,8 @@ struct ChatPopupView: View {
         onTutorialStepSelected: @escaping (TutorialStep) async -> String,
         onInputInstruction: @escaping (InstructionInput) async -> String,
         onMinify: @escaping () -> Void,
-        onShowRecordings: @escaping () -> Void
+        onShowRecordings: @escaping () -> Void,
+        onToggleChatHistory: @escaping () -> Void
     ) {
         self.sessionController = sessionController
         self.recordingController = recordingController
@@ -197,6 +199,7 @@ struct ChatPopupView: View {
         self.onInputInstruction = onInputInstruction
         self.onMinify = onMinify
         self.onShowRecordings = onShowRecordings
+        self.onToggleChatHistory = onToggleChatHistory
     }
 
     var body: some View {
@@ -350,6 +353,18 @@ struct ChatPopupView: View {
             .background(OverlayTheme.quietFill)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .help("Show recordings")
+
+            Button(action: onToggleChatHistory) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(OverlayTheme.quietFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .help("Toggle chat history")
 
             Button(action: startNewChat) {
                 Image(systemName: "square.and.pencil")
@@ -793,8 +808,6 @@ struct ChatPopupView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .disabled(!canSubmitDraft)
                 .help("Send")
-            } else {
-                keyboardHint("⌘K")
             }
 
             if evalModeEnabled, currentStepForAdvance != nil {

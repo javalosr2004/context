@@ -12,6 +12,7 @@ final class OverlayCoordinator {
     private var devSettingsWindowController: DevSettingsWindowController?
 
     private var applicationMenuController: ApplicationMenuController?
+    private var chatHistoryController: ChatHistoryController?
     private var debugBboxController: DebugBboxController?
     private var edgeTabController: EdgeTabController?
     private var focusMaskController: FocusMaskController?
@@ -78,10 +79,11 @@ final class OverlayCoordinator {
         )
         let focusMaskController = FocusMaskController(
             screenProvider: screenProvider,
-            interactiveWindowsProvider: { [weak clipboardPopoverController, weak tutorialTooltipController] in
+            interactiveWindowsProvider: { [weak self, weak clipboardPopoverController, weak tutorialTooltipController] in
                 [
                     popupPanel,
                     edgeTabController.window,
+                    self?.chatHistoryController?.panel,
                     clipboardPopoverController?.interactiveWindow,
                     tutorialTooltipController?.interactiveWindow,
                 ].compactMap { $0 }
@@ -115,11 +117,12 @@ final class OverlayCoordinator {
         let screenGroundingController = ScreenGroundingController(
             bboxController: debugController,
             endpointStore: endpointStore,
-            ignoredWindowProvider: { [weak clipboardPopoverController, weak tutorialTooltipController] in
+            ignoredWindowProvider: { [weak self, weak clipboardPopoverController, weak tutorialTooltipController] in
                 [
                     popupPanel,
                     edgeTabController.window,
                     bboxPanel,
+                    self?.chatHistoryController?.panel,
                     clipboardPopoverController?.interactiveWindow,
                     tutorialTooltipController?.interactiveWindow,
                 ].compactMap { $0 }
@@ -130,8 +133,9 @@ final class OverlayCoordinator {
         )
         let tutorialPlanController = TutorialPlanController(
             endpointStore: tutorialEndpointStore,
-            ignoredWindowProvider: {
-                [popupPanel, edgeTabController.window, bboxPanel]
+            ignoredWindowProvider: { [weak self] in
+                [popupPanel, edgeTabController.window, bboxPanel, self?.chatHistoryController?.panel]
+                    .compactMap { $0 }
             },
             screenProvider: screenProvider
         )
@@ -139,8 +143,9 @@ final class OverlayCoordinator {
             messageStore: messageStore,
             endpointStore: tutorialEndpointStore,
             fallbackPlanController: tutorialPlanController,
-            ignoredWindowProvider: {
-                [popupPanel, edgeTabController.window, bboxPanel]
+            ignoredWindowProvider: { [weak self] in
+                [popupPanel, edgeTabController.window, bboxPanel, self?.chatHistoryController?.panel]
+                    .compactMap { $0 }
             },
             screenProvider: screenProvider,
             isGroundingAutoFireEnabled: { StatusBarController.isGroundingAutoFireEnabled() }
@@ -217,6 +222,13 @@ final class OverlayCoordinator {
         }
         tutorialSessionController.setTutorialActionHandler(handleTutorialStep)
 
+        let chatHistoryController = ChatHistoryController(
+            sessionController: tutorialSessionController,
+            screenProvider: screenProvider,
+            anchorFrame: popupPanel.frame
+        )
+        self.chatHistoryController = chatHistoryController
+
         popupPanel.contentView = NSHostingView(rootView: ChatPopupView(
             sessionController: tutorialSessionController,
             recordingController: recordingController,
@@ -236,6 +248,9 @@ final class OverlayCoordinator {
             },
             onShowRecordings: { [weak self] in
                 self?.statusBarController?.showRecordings()
+            },
+            onToggleChatHistory: { [weak self] in
+                self?.chatHistoryController?.toggle()
             }
         ))
         popupResizeCancellable = tutorialSessionController.objectWillChange.sink { [weak self] _ in
@@ -279,8 +294,10 @@ final class OverlayCoordinator {
         focusMaskController?.hide()
         tutorialSessionController?.stop()
         edgeTabController?.stop()
+        chatHistoryController?.hide()
         popupController = nil
         applicationMenuController = nil
+        chatHistoryController = nil
         debugBboxController = nil
         edgeTabController = nil
         focusMaskController = nil

@@ -83,12 +83,6 @@ private struct StepChipFlash: Equatable {
     let icon: String
 }
 
-private struct TutorialAnswerDisplay {
-    let id: UUID
-    let question: String
-    let answer: String
-}
-
 private struct SkeletonShimmer: View {
     @State private var phase: CGFloat = -1
 
@@ -163,7 +157,6 @@ struct ChatPopupView: View {
     @State private var maxImageWidth = 1280
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
-    @State private var dismissedAnswerID: UUID?
     @State private var nowPulse: Bool = false
     @State private var stepChipFlash: StepChipFlash?
     @State private var lastSeenTotalSteps: Int?
@@ -215,10 +208,6 @@ struct ChatPopupView: View {
                     tutorialMeta
                 }
 
-                if let answer = latestTutorialAnswer {
-                    answerCard(answer)
-                }
-
                 if let prompt = sessionController.pendingCompletionPrompt {
                     completionPromptCard(prompt)
                 }
@@ -232,24 +221,13 @@ struct ChatPopupView: View {
 
                 tutorialMeta
 
-                if let answer = latestTutorialAnswer {
-                    answerCard(answer)
-                }
-
                 if let prompt = sessionController.pendingCompletionPrompt {
                     completionPromptCard(prompt)
                 }
 
                 peekStack
-                    .opacity(
-                        (isTutorialPaused
-                            || sessionController.pendingCompletionPrompt != nil)
-                            ? 0.35 : 1
-                    )
-                    .allowsHitTesting(
-                        !isTutorialPaused
-                            && sessionController.pendingCompletionPrompt == nil
-                    )
+                    .opacity(sessionController.pendingCompletionPrompt != nil ? 0.35 : 1)
+                    .allowsHitTesting(sessionController.pendingCompletionPrompt == nil)
             }
 
             if let hint = sessionController.awaitingHintResponse {
@@ -872,76 +850,6 @@ struct ChatPopupView: View {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .stroke(OverlayTheme.hairline, lineWidth: 0.5)
             )
-    }
-
-    private func answerCard(_ answer: TutorialAnswerDisplay) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 11, weight: .medium))
-
-                Text("Answer · tutorial paused")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .tracking(0.42)
-                    .textCase(.uppercase)
-            }
-            .foregroundStyle(OverlayTheme.tertiaryText)
-
-            Text("\"\(answer.question)\"")
-                .font(.system(size: 12).italic())
-                .foregroundStyle(OverlayTheme.secondaryText)
-                .lineLimit(2)
-
-            ScrollView {
-                MarkdownTextView(text: answer.answer)
-                    .font(.system(size: 13.5))
-                    .lineSpacing(3)
-                    .foregroundStyle(OverlayTheme.primaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: Self.maximumChatResponseHeight)
-            .scrollContentBackground(.hidden)
-
-            if sessionController.status.isBusy {
-                typingDots
-                    .padding(.top, 1)
-            } else {
-                HStack(spacing: 6) {
-                    Button("↩ Resume tutorial") {
-                        dismissLatestAnswer()
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(OverlayTheme.invertedForeground)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(OverlayTheme.invertedAccent)
-                    .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
-
-                    Button("Ask follow-up") {
-                        isMessageFieldFocused = true
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(OverlayTheme.secondaryText)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                }
-                .padding(.top, 4)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(OverlayTheme.answerSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
-        )
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 4)
     }
 
     private func questionCard(_ batch: PendingQuestionBatch) -> some View {
@@ -1639,10 +1547,6 @@ struct ChatPopupView: View {
         sessionController.status == .completed
     }
 
-    private var isTutorialPaused: Bool {
-        latestTutorialAnswer != nil
-    }
-
     private var peekSteps: TutorialPeekSteps {
         guard let plan = latestPlan, !plan.steps.isEmpty, let currentStepIndex else {
             return TutorialPeekSteps(done: nil, now: nil, next: nil)
@@ -1659,15 +1563,6 @@ struct ChatPopupView: View {
             : nil
 
         return TutorialPeekSteps(done: doneStep, now: nowStep, next: nextStep)
-    }
-
-    private var latestTutorialAnswer: TutorialAnswerDisplay? {
-        guard let latestTutorialText = latestTextMessage(role: .tutorial) else { return nil }
-        guard latestTutorialText.id != dismissedAnswerID else { return nil }
-        guard !latestTutorialText.text.caseInsensitiveEquals("Tutorial completed.") else { return nil }
-        guard let latestUserText = latestTextMessage(role: .user) else { return nil }
-        guard latestTutorialText.createdAt >= latestUserText.createdAt else { return nil }
-        return TutorialAnswerDisplay(id: latestTutorialText.id, question: latestUserText.text, answer: latestTutorialText.text)
     }
 
     private var composerPlaceholder: String {
@@ -1695,18 +1590,6 @@ struct ChatPopupView: View {
         return plan.steps[currentStepIndex]
     }
 
-    private func latestTextMessage(role: ChatMessageRole) -> (id: UUID, text: String, createdAt: Date)? {
-        for message in sessionController.messages.reversed() where message.role == role {
-            if case .text(let text) = message.content {
-                let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmedText.isEmpty {
-                    return (message.id, trimmedText, message.createdAt)
-                }
-            }
-        }
-        return nil
-    }
-
     private func displayItem(
         for step: TutorialStep,
         index: Int,
@@ -1722,12 +1605,6 @@ struct ChatPopupView: View {
     private func handlePeekStepTap(kind: PeekStepKind, step: TutorialStep) {
         guard kind == .now else { return }
         toggleStepExpansion(step)
-    }
-
-    private func dismissLatestAnswer() {
-        dismissedAnswerID = latestTutorialAnswer?.id
-        draft = ""
-        isMessageFieldFocused = false
     }
 
     @ViewBuilder

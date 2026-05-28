@@ -4,6 +4,14 @@ import Combine
 @MainActor
 final class StatusBarController {
     private static let evalModeDefaultsKey = "eval_mode_enabled"
+    static let groundingAutoFireDefaultsKey = "gui_fire_auto"
+
+    /// Whether the grounding agent should fire automatically when the
+    /// backend signals a new step. When off, grounding only runs after the
+    /// user explicitly presses a step in the overlay.
+    nonisolated static func isGroundingAutoFireEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: groundingAutoFireDefaultsKey)
+    }
 
     private let endpointStore: GroundingEndpointStore
     private let onShowOverlay: () -> Void
@@ -91,6 +99,14 @@ final class StatusBarController {
         evalItem.toolTip = "When on, the overlay shows ✓/✗ buttons next to each step so you can label runs for eval extraction."
         evalItem.state = isEvalModeEnabled() ? .on : .off
         menu.addItem(evalItem)
+        let autoFire = StatusBarController.isGroundingAutoFireEnabled()
+        let groundingAutoFireItem = CallbackMenuItem(
+            title: "Auto-fire Grounding: \(autoFire ? "On" : "Off")",
+            actionHandler: { [weak self] in self?.toggleGroundingAutoFire() }
+        )
+        groundingAutoFireItem.toolTip = "When off, the grounding agent only runs after you press a step in the overlay. When on, it fires automatically on every step_ready."
+        groundingAutoFireItem.state = autoFire ? .on : .off
+        menu.addItem(groundingAutoFireItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(CallbackMenuItem(title: "Quit Context", actionHandler: quitApplication))
         statusItem.menu = menu
@@ -196,6 +212,12 @@ final class StatusBarController {
     private func toggleEvalMode() {
         let next = !isEvalModeEnabled()
         UserDefaults.standard.set(next, forKey: StatusBarController.evalModeDefaultsKey)
+        rebuildMenu()
+    }
+
+    private func toggleGroundingAutoFire() {
+        let next = !StatusBarController.isGroundingAutoFireEnabled()
+        UserDefaults.standard.set(next, forKey: StatusBarController.groundingAutoFireDefaultsKey)
         rebuildMenu()
     }
 

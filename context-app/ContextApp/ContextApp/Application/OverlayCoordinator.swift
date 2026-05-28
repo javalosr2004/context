@@ -142,7 +142,8 @@ final class OverlayCoordinator {
             ignoredWindowProvider: {
                 [popupPanel, edgeTabController.window, bboxPanel]
             },
-            screenProvider: screenProvider
+            screenProvider: screenProvider,
+            isGroundingAutoFireEnabled: { StatusBarController.isGroundingAutoFireEnabled() }
         )
         sessionControllerRef = tutorialSessionController
         errorStatusCancellable = tutorialSessionController.$status

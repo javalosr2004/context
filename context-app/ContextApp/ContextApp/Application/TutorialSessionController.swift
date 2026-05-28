@@ -108,6 +108,7 @@ final class TutorialSessionController: ObservableObject {
     private let messageStore: ChatMessageStore
     private let screenCaptureTimeoutNanoseconds: UInt64
     private let screenProvider: () -> NSScreen?
+    private let isGroundingAutoFireEnabled: () -> Bool
 
     private var tutorialActionHandler: ((TutorialStep, Int) async -> String)?
     private var listenTask: Task<Void, Never>?
@@ -126,7 +127,8 @@ final class TutorialSessionController: ObservableObject {
         capture: ScreenFrameCapture = ScreenFrameCapture(),
         ignoredWindowProvider: @escaping () -> [NSWindow] = { [] },
         screenProvider: @escaping () -> NSScreen?,
-        screenCaptureTimeoutNanoseconds: UInt64 = 5_000_000_000
+        screenCaptureTimeoutNanoseconds: UInt64 = 5_000_000_000,
+        isGroundingAutoFireEnabled: @escaping () -> Bool = { false }
     ) {
         self.capture = capture
         self.client = client
@@ -137,6 +139,7 @@ final class TutorialSessionController: ObservableObject {
         self.messages = messageStore.messages
         self.screenProvider = screenProvider
         self.screenCaptureTimeoutNanoseconds = screenCaptureTimeoutNanoseconds
+        self.isGroundingAutoFireEnabled = isGroundingAutoFireEnabled
     }
 
     func sendComposerText(_ text: String) async {
@@ -257,7 +260,7 @@ final class TutorialSessionController: ObservableObject {
             awaitingConfirmationStepID = nil
             awaitingActionIndex = nil
             status = confirmed ? .planning("Continuing") : .planning("Replanning from current screen")
-            if confirmed {
+            if confirmed, isGroundingAutoFireEnabled() {
                 advanceOptimistically(after: stepID, actionIndex: actionIndex)
             }
         } catch {
@@ -619,6 +622,7 @@ final class TutorialSessionController: ObservableObject {
             return
         }
         optimisticallyGroundedSlot = nil
+        guard isGroundingAutoFireEnabled() else { return }
         groundStep(stepID: stepID, actionIndex: actionIndex)
     }
 

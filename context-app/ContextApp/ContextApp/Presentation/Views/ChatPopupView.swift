@@ -229,9 +229,16 @@ struct ChatPopupView: View {
                     completionPromptCard(prompt)
                 }
 
-                peekStack
-                    .opacity(sessionController.pendingCompletionPrompt != nil ? 0.35 : 1)
-                    .allowsHitTesting(sessionController.pendingCompletionPrompt == nil)
+                if !sessionController.planPreviewSteps.isEmpty {
+                    // A replan is streaming: keep the completed step anchored
+                    // and show the new tail filling in, then hand back to the
+                    // interactive peek once plan_updated lands.
+                    replanningPreview(sessionController.planPreviewSteps)
+                } else {
+                    peekStack
+                        .opacity(sessionController.pendingCompletionPrompt != nil ? 0.35 : 1)
+                        .allowsHitTesting(sessionController.pendingCompletionPrompt == nil)
+                }
             }
 
             if let hint = sessionController.awaitingHintResponse {
@@ -1849,6 +1856,34 @@ struct ChatPopupView: View {
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 9)
+    }
+
+    private func replanningPreview(_ steps: [PlanPreviewStep]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let doneStep = peekSteps.done {
+                peekStepRow(kind: .done, title: doneStep.title, step: doneStep.step)
+            }
+
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.72)
+                Text("Re-routing…")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.63)
+                    .textCase(.uppercase)
+                    .foregroundStyle(OverlayTheme.tertiaryText)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+
+            streamingPreviewSteps(steps)
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
     }
 
     private func streamingPreviewSteps(_ steps: [PlanPreviewStep]) -> some View {

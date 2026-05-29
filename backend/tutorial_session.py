@@ -1335,6 +1335,20 @@ class TutorialSession:
                 },
             )
             return
+        # Not ok: the verifier is advisory, not authoritative. Surface the
+        # doubt as a decision the user owns rather than silently replanning.
+        # No response defaults to "continue" — we never yank the user out of
+        # a flow they may still be working through.
+        if not await self._ask_continue_or_replan(next_step, verdict):
+            logger.info(
+                "[session] user kept current step past gate",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": next_step.step_id,
+                    "verdict": verdict.verdict,
+                },
+            )
+            return
         logger.info(
             "[session] gate rejected; truncating tail and replanning",
             extra={
@@ -1502,6 +1516,56 @@ class TutorialSession:
             ),
             screen_summary=verdict.screen_summary,
         )
+
+    # How long the gate waits for the user's continue/replan decision before
+    # defaulting to "continue". A backstop only — the overlay normally resolves
+    # the modal well within this window (user tap or its own auto-dismiss). Kept
+    # generous so a slow-to-decide user is never replanned out from under.
+    _GATE_DECISION_TIMEOUT_S = 12.0
+
+    async def _ask_continue_or_replan(
+        self, step: TutorialStep, verdict: VerifierVerdict
+    ) -> bool:
+        """Surface a not-ok verdict as a user decision and wait for the call.
+
+        Emits a ``VerificationHintEvent`` and awaits the user's response via
+        ``step_event``. The decision is recorded by ``handle_user_hint_response``
+        as ``pending_verification_replan`` (set => replan, unset => continue);
+        a user action on the step also wakes us and leaves the slot unset.
+
+        Returns ``True`` if the plan should be truncated and re-planned,
+        ``False`` to continue the walk. No response within the backstop window
+        defaults to ``False`` — the verifier only advises; it never commands.
+        """
+        self.pending_verification_replan = None
+        self.awaiting_hint_response = step.step_id
+        # auto_replanning is False: nothing is staged until the user chooses,
+        # so timeout/no-response continues rather than replans.
+        await self.emit(
+            VerificationHintEvent(
+                step_id=step.step_id,
+                verdict=verdict.verdict,  # type: ignore[arg-type]
+                reason=verdict.reason or "",
+                auto_replanning=False,
+            )
+        )
+        self.step_event.clear()
+        try:
+            await asyncio.wait_for(
+                self.step_event.wait(), timeout=self._GATE_DECISION_TIMEOUT_S
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "[session] gate decision timed out; continuing",
+                extra={
+                    "session_id": self.session_id,
+                    "step_id": step.step_id,
+                    "verdict": verdict.verdict,
+                },
+            )
+        self.step_event.clear()
+        self.awaiting_hint_response = None
+        return self._consume_verification_replan() is not None
 
     # -------- Legacy parallel verifier (kept for cancellation API) --------
 

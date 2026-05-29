@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from collections.abc import Iterator
 from typing import Any
 
+from backend.instruction_verifier import VerifierVerdict
 from backend.llm import LLMRequest, LLMStreamEvent
+from backend.tutorial_schema import ActionTarget, TutorialAction, TutorialStep
 from backend.tutorial_session import TutorialSession
 from backend.tutorial_session_events import (
     UserHintResponseEvent,
@@ -157,6 +160,77 @@ class HintResponseDecisionTableTests(unittest.TestCase):
         self.assertEqual(
             session.pending_verification_replan, "something else staged"
         )
+
+
+def _step(step_id: str) -> TutorialStep:
+    return TutorialStep(
+        step_id=step_id,
+        instruction="open the settings panel",
+        actions=[
+            TutorialAction(
+                type="click",
+                target=ActionTarget(kind="element", description="settings"),
+                requires_confirmation=True,
+            )
+        ],
+        confidence=0.9,
+    )
+
+
+async def _wait_for_open_hint(session: TutorialSession, step_id: str) -> None:
+    # Spin until the gate has emitted the hint and is parked on step_event.
+    for _ in range(1000):
+        if session.awaiting_hint_response == step_id:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("hint never opened")
+
+
+class GateDecisionTests(unittest.IsolatedAsyncioTestCase):
+    """The gate surfaces a not-ok verdict as a user decision and returns
+    True only when a replan is wanted. The verifier is advisory: no response
+    defaults to continue (False)."""
+
+    async def test_dismiss_continues(self) -> None:
+        session = _fresh_session()
+        verdict = VerifierVerdict(verdict="diverged", reason="elsewhere")
+
+        async def respond() -> None:
+            await _wait_for_open_hint(session, "step_1")
+            session.handle_user_hint_response("step_1", "dismiss")
+
+        replan, _ = await asyncio.gather(
+            session._ask_continue_or_replan(_step("step_1"), verdict),
+            respond(),
+        )
+        self.assertFalse(replan)
+        self.assertIsNone(session.awaiting_hint_response)
+        self.assertIsNone(session.pending_verification_replan)
+
+    async def test_acknowledge_off_replans(self) -> None:
+        session = _fresh_session()
+        verdict = VerifierVerdict(verdict="diverged", reason="elsewhere")
+
+        async def respond() -> None:
+            await _wait_for_open_hint(session, "step_1")
+            session.handle_user_hint_response("step_1", "acknowledge_off")
+
+        replan, _ = await asyncio.gather(
+            session._ask_continue_or_replan(_step("step_1"), verdict),
+            respond(),
+        )
+        self.assertTrue(replan)
+        self.assertIsNone(session.awaiting_hint_response)
+
+    async def test_no_response_defaults_to_continue(self) -> None:
+        session = _fresh_session()
+        session._GATE_DECISION_TIMEOUT_S = 0.05
+        verdict = VerifierVerdict(verdict="blocked", reason="modal in the way")
+
+        replan = await session._ask_continue_or_replan(_step("step_1"), verdict)
+
+        self.assertFalse(replan)
+        self.assertIsNone(session.awaiting_hint_response)
 
 
 class HintEventWireFormatTests(unittest.TestCase):

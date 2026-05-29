@@ -919,11 +919,13 @@ struct ChatPopupView: View {
         .padding(.bottom, 4)
     }
 
-    /// Soft, non-modal toast for verifier hints. Tap "Something looks off"
-    /// to acknowledge (forces a replan); tap X to dismiss (overrides the
-    /// verifier and keeps the current step); no interaction auto-dismisses
-    /// after `hintAutoDismissSeconds` — behavior on timeout is verdict-
-    /// dependent on the backend, see backend/tutorial_session.handle_user_hint_response.
+    /// Decision modal for a verifier hint. The verifier is advisory: it flags
+    /// that the current screen may not match the next step, and the user owns
+    /// the call. "I'm on track" (`dismiss`) overrides the verifier and keeps
+    /// the step; "Replan from here" (`acknowledgeOff`) truncates and re-plans.
+    /// No interaction auto-resolves to "continue" (`timeout`) after
+    /// `hintDecisionTimeoutSeconds` — we never yank the user out of a flow they
+    /// may still be working through. See backend/tutorial_session.handle_user_hint_response.
     private func verificationHintCard(_ hint: PendingVerificationHint) -> some View {
         let title: String = {
             switch hint.verdict {
@@ -940,23 +942,15 @@ struct ChatPopupView: View {
             }
         }()
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Image(systemName: hint.autoReplanning ? "arrow.triangle.2.circlepath" : "questionmark.circle")
+                Image(systemName: "questionmark.circle")
                     .font(.system(size: 11, weight: .medium))
                 Text(title)
                     .font(.system(size: 10.5, weight: .medium))
                     .tracking(0.42)
                     .textCase(.uppercase)
                 Spacer(minLength: 0)
-                Button {
-                    Task { await sessionController.respondToHint(action: .dismiss) }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(OverlayTheme.tertiaryText)
-                }
-                .buttonStyle(.plain)
             }
             .foregroundStyle(OverlayTheme.tertiaryText)
 
@@ -967,18 +961,35 @@ struct ChatPopupView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button {
-                Task { await sessionController.respondToHint(action: .acknowledgeOff) }
-            } label: {
-                Text(hint.autoReplanning ? "Confirm something's off" : "Something looks off")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(OverlayTheme.invertedForeground)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(OverlayTheme.invertedAccent)
-                    .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+            HStack(spacing: 8) {
+                Button {
+                    Task { await sessionController.respondToHint(action: .dismiss) }
+                } label: {
+                    Text("I'm on track")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(OverlayTheme.primaryText)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous)
+                                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await sessionController.respondToHint(action: .acknowledgeOff) }
+                } label: {
+                    Text("Replan from here")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(OverlayTheme.invertedForeground)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .background(OverlayTheme.invertedAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             .padding(.top, 2)
         }
         .padding(.horizontal, 14)
@@ -994,10 +1005,11 @@ struct ChatPopupView: View {
         .padding(.top, 10)
         .padding(.bottom, 4)
         .task(id: hint.stepID) {
-            // Auto-dismiss after a few seconds. .task(id:) is cancelled
-            // when the hint goes away (acknowledge/dismiss clear the slot)
-            // or when a new hint replaces it, so this won't fire late.
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            // Auto-resolve to "continue" if the user doesn't decide. .task(id:)
+            // is cancelled when the hint goes away (a tap clears the slot) or
+            // when a new hint replaces it, so this won't fire late. Kept under
+            // the backend's gate-decision backstop so the client drives timeout.
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
             await sessionController.respondToHint(action: .timeout)
         }
     }

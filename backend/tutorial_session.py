@@ -1291,12 +1291,15 @@ class TutorialSession:
     async def _plan_or_gate(self, *, user_initiated: bool = False) -> None:
         """Decide whether to run the planner this iteration.
 
-        Strict-gate semantics: on iterations where an existing plan still
-        has unwalked steps and we have a screen, run the verifier on the
-        next unwalked step. "Yes" → skip the planner entirely and let the
-        walk advance. "No" (or no plan yet / no screen) → run the planner.
-        On "no" the plan tail is truncated to the completed prefix so the
-        planner regenerates from scratch.
+        Non-blocking gate: when an existing plan still has unwalked steps
+        and we have a screen, present the next step immediately and verify
+        the screen in the *background* — the user never waits on the
+        verifier round-trip to begin the step. The verifier is advisory: a
+        not-ok verdict surfaces the decision modal (VerificationHintEvent),
+        and only if the user chooses "Replan" does the walk truncate the
+        tail and regenerate (handle_user_hint_response stages the replan,
+        which _await_action consumes). With no plan yet, no screen, or a
+        user message, we run the planner directly.
         """
         unwalked = self._unwalked_steps()
         if user_initiated or not self.plan_steps or not unwalked or self.latest_screen is None:
@@ -1324,137 +1327,11 @@ class TutorialSession:
                 },
             )
             return
-        verdict = await self._verify_step_blocking(next_step)
-        if verdict.ok:
-            logger.info(
-                "[session] gate accepted; skipping planner",
-                extra={
-                    "session_id": self.session_id,
-                    "step_id": next_step.step_id,
-                    "reason": verdict.reason,
-                },
-            )
-            return
-        # Not ok: the verifier is advisory, not authoritative. Surface the
-        # doubt as a decision the user owns rather than silently replanning.
-        # No response defaults to "continue" — we never yank the user out of
-        # a flow they may still be working through.
-        if not await self._ask_continue_or_replan(next_step, verdict):
-            logger.info(
-                "[session] user kept current step past gate",
-                extra={
-                    "session_id": self.session_id,
-                    "step_id": next_step.step_id,
-                    "verdict": verdict.verdict,
-                },
-            )
-            return
-        logger.info(
-            "[session] gate rejected; truncating tail and replanning",
-            extra={
-                "session_id": self.session_id,
-                "step_id": next_step.step_id,
-                "verdict": verdict.verdict,
-                "reason": verdict.reason,
-            },
-        )
-        if verdict.verdict == "diverged":
-            note = (
-                f"Screen does not match step {next_step.step_id} "
-                f"({next_step.instruction!r}): {verdict.reason}. The user "
-                "appears to be elsewhere in (or past) this flow. Re-plan "
-                "from the current screen — drop steps the user has already "
-                "completed, and adapt to where they actually are."
-            )
-        else:
-            note = (
-                f"Screen blocks step {next_step.step_id}: "
-                f"{verdict.reason}. Re-plan from the current screen."
-            )
-        self.history.append(HistoryEntry(role="user", content=note))
-        completed = set(self.completed_step_ids)
-        self.plan_steps = [s for s in self.plan_steps if s.step_id in completed]
-        self.prev_active_step_id = None
-        await self._run_agent_loop()
-
-    async def _verify_step_blocking(self, step: TutorialStep) -> VerifierVerdict:
-        """Synchronous gate verification: emit start/verdict events, log,
-        return the verdict. Fail-open on errors via classify_screen."""
-        screen = self.latest_screen
-        if screen is None:
-            return VerifierVerdict(verdict="unsure", reason="no_screen")
-        verifier_llm = self.verifier_llm or self.fast_llm or self.llm
-        prev_instruction = self._last_completed_instruction()
-        verifier_screen = await asyncio.to_thread(downscale_for_verifier, screen)
-        await self.emit(InstructionVerificationStartedEvent(step_id=step.step_id))
-        started_at = time.perf_counter()
-        logger.info(
-            "[verifier] gate start",
-            extra={
-                "session_id": self.session_id,
-                "step_id": step.step_id,
-                "instruction": step.instruction[:120],
-                "previous_instruction": (prev_instruction or "")[:120],
-                "goal": (self.goal or "")[:120],
-                "screen_bytes": len(verifier_screen.data),
-                "screen_bytes_original": len(screen.data),
-                "screen_captured_at": (
-                    self.screen_captured_at.isoformat()
-                    if self.screen_captured_at else None
-                ),
-                "llm": "fast" if self.fast_llm is not None else "main",
-            },
-        )
-        try:
-            verdict = await asyncio.to_thread(
-                classify_screen,
-                verifier_llm,
-                step.instruction,
-                verifier_screen,
-                self.goal,
-                prev_instruction,
-            )
-        except asyncio.CancelledError:
-            logger.info(
-                "[verifier] gate cancelled",
-                extra={
-                    "session_id": self.session_id,
-                    "step_id": step.step_id,
-                    "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
-                },
-            )
-            raise
-        except Exception:
-            logger.exception(
-                "[verifier] gate crashed",
-                extra={"session_id": self.session_id, "step_id": step.step_id},
-            )
-            # Fail-open: don't lock the user out on a verifier glitch.
-            return VerifierVerdict(verdict="unsure", reason="gate_error")
-        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        self._last_gate_elapsed_ms = elapsed_ms
-        verdict = self._maybe_promote_via_expected_summary(step, verdict)
-        logger.info(
-            "[verifier] gate verdict",
-            extra={
-                "session_id": self.session_id,
-                "step_id": step.step_id,
-                "verdict": verdict.verdict,
-                "ok": verdict.ok,
-                "reason": verdict.reason,
-                "elapsed_ms": elapsed_ms,
-            },
-        )
-        await self.emit(
-            InstructionVerifiedEvent(
-                step_id=step.step_id,
-                ok=verdict.ok,
-                reason=verdict.reason,
-                verdict=verdict.verdict,
-                screen_summary=verdict.screen_summary or None,
-            )
-        )
-        return verdict
+        # Launch verification in the background and return so the walk can
+        # present the step now. _start_verification cancels any in-flight
+        # verifier for an earlier step (only the current step matters).
+        self._start_verification(next_step)
+        return
 
     def _maybe_promote_via_expected_summary(
         self, step: TutorialStep, verdict: VerifierVerdict
@@ -1517,83 +1394,29 @@ class TutorialSession:
             screen_summary=verdict.screen_summary,
         )
 
-    # How long the gate waits for the user's continue/replan decision before
-    # defaulting to "continue". A backstop only — the overlay normally resolves
-    # the modal well within this window (user tap or its own auto-dismiss). Kept
-    # generous so a slow-to-decide user is never replanned out from under.
-    _GATE_DECISION_TIMEOUT_S = 12.0
-
-    async def _ask_continue_or_replan(
-        self, step: TutorialStep, verdict: VerifierVerdict
-    ) -> bool:
-        """Surface a not-ok verdict as a user decision and wait for the call.
-
-        Emits a ``VerificationHintEvent`` and awaits the user's response via
-        ``step_event``. The decision is recorded by ``handle_user_hint_response``
-        as ``pending_verification_replan`` (set => replan, unset => continue);
-        a user action on the step also wakes us and leaves the slot unset.
-
-        Returns ``True`` if the plan should be truncated and re-planned,
-        ``False`` to continue the walk. No response within the backstop window
-        defaults to ``False`` — the verifier only advises; it never commands.
-        """
-        self.pending_verification_replan = None
-        self.awaiting_hint_response = step.step_id
-        # auto_replanning is False: nothing is staged until the user chooses,
-        # so timeout/no-response continues rather than replans.
-        await self.emit(
-            VerificationHintEvent(
-                step_id=step.step_id,
-                verdict=verdict.verdict,  # type: ignore[arg-type]
-                reason=verdict.reason or "",
-                auto_replanning=False,
-            )
-        )
-        self.step_event.clear()
-        try:
-            await asyncio.wait_for(
-                self.step_event.wait(), timeout=self._GATE_DECISION_TIMEOUT_S
-            )
-        except asyncio.TimeoutError:
-            logger.info(
-                "[session] gate decision timed out; continuing",
-                extra={
-                    "session_id": self.session_id,
-                    "step_id": step.step_id,
-                    "verdict": verdict.verdict,
-                },
-            )
-        self.step_event.clear()
-        self.awaiting_hint_response = None
-        return self._consume_verification_replan() is not None
-
-    # -------- Legacy parallel verifier (kept for cancellation API) --------
+    # -------- Background per-step verifier --------
 
     def _start_verification(self, step: TutorialStep) -> None:
-        """Spawn a per-instruction verification job.
+        """Spawn a background verification job for ``step``.
 
-        Uses ``latest_screen`` as captured at instruction entry — the
-        main agent loop has already refreshed it. Running a parallel
-        ``_request_screen`` would clobber the shared ``pending_screen``
-        slot, so we deliberately reuse the latest frame.
+        Uses ``latest_screen`` as captured at step entry — the main agent
+        loop has already refreshed it. Running a parallel ``_request_screen``
+        would clobber the shared ``pending_screen`` slot, so we deliberately
+        reuse the latest frame. Returns immediately so the walk can present
+        the step without waiting on the verifier round-trip.
         """
         if self.latest_screen is None:
             return
-        # Supersede any in-flight verification (e.g. previous instruction
-        # entered and finished before its verdict landed). Also drop any
-        # open hint slot from the previous instruction — a late toast tap
-        # on the old step shouldn't mutate the new instruction's replan
-        # state. handle_user_hint_response's step_id check then drops the
-        # late tap as stale.
+        # Supersede any in-flight verification for an earlier step — only the
+        # current step matters. Also drop any open hint slot from the previous
+        # step: a late modal tap on the old step shouldn't mutate the new
+        # step's replan state (handle_user_hint_response's step_id check then
+        # drops the late tap as stale).
         if self.verification_task is not None and not self.verification_task.done():
             self.verification_task.cancel()
         self.awaiting_hint_response = None
         self.verifying_step_id = step.step_id
-        screen = self.latest_screen
-        instruction = step.instruction
-        self.verification_task = asyncio.create_task(
-            self._run_verification(step.step_id, instruction, screen)
-        )
+        self.verification_task = asyncio.create_task(self._run_verification(step))
 
     # Max times we'll re-classify a `pending` (mid-transition) screen
     # before giving up and treating it as `unsure`. Total wall-clock cost
@@ -1603,13 +1426,14 @@ class TutorialSession:
     _PENDING_MAX_RETRIES = 3
     _PENDING_RETRY_DELAY_S = 1.5
 
-    async def _run_verification(
-        self,
-        step_id: str,
-        instruction: str,
-        screen: UploadedImage,
-    ) -> None:
+    async def _run_verification(self, step: TutorialStep) -> None:
+        screen = self.latest_screen
+        if screen is None:
+            return
+        step_id = step.step_id
+        instruction = step.instruction
         verifier_llm = self.verifier_llm or self.fast_llm or self.llm
+        current_screen = await asyncio.to_thread(downscale_for_verifier, screen)
         await self.emit(InstructionVerificationStartedEvent(step_id=step_id))
         started_at = time.perf_counter()
         logger.info(
@@ -1618,7 +1442,8 @@ class TutorialSession:
                 "session_id": self.session_id,
                 "step_id": step_id,
                 "instruction": instruction[:120],
-                "screen_bytes": len(screen.data),
+                "screen_bytes": len(current_screen.data),
+                "screen_bytes_original": len(screen.data),
                 "screen_captured_at": (
                     self.screen_captured_at.isoformat()
                     if self.screen_captured_at else None
@@ -1626,7 +1451,6 @@ class TutorialSession:
                 "llm": "fast" if self.fast_llm is not None else "main",
             },
         )
-        current_screen = screen
         try:
             verdict: VerifierVerdict | None = None
             for attempt in range(1, self._PENDING_MAX_RETRIES + 1):
@@ -1666,7 +1490,9 @@ class TutorialSession:
                     # User moved on while we were waiting; drop silently.
                     return
                 if self.latest_screen is not None:
-                    current_screen = self.latest_screen
+                    current_screen = await asyncio.to_thread(
+                        downscale_for_verifier, self.latest_screen
+                    )
             assert verdict is not None
         except asyncio.CancelledError:
             logger.info(
@@ -1685,6 +1511,8 @@ class TutorialSession:
             )
             return
         elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        self._last_gate_elapsed_ms = elapsed_ms
+        verdict = self._maybe_promote_via_expected_summary(step, verdict)
         superseded = self.awaiting_step_id != step_id
         logger.info(
             "[verifier] verdict",
@@ -1698,37 +1526,34 @@ class TutorialSession:
                 "superseded": superseded,
             },
         )
-        # If the user moved on (or the instruction was replaced) while we
-        # were waiting on the LLM, the verdict is stale — drop silently.
+        # If the user moved on (or the step was replaced) while we were
+        # waiting on the LLM, the verdict is stale — drop silently.
         if superseded:
             return
         await self.emit(
             InstructionVerifiedEvent(
-                step_id=step_id, ok=verdict.ok, reason=verdict.reason
+                step_id=step_id,
+                ok=verdict.ok,
+                reason=verdict.reason,
+                verdict=verdict.verdict,  # type: ignore[arg-type]
+                screen_summary=verdict.screen_summary or None,
             )
         )
         if verdict.ok:
             return
-        # "no" verdict. For diverged/blocked the verifier is high-confidence
-        # wrong, so we stage the replan and only surface the hint so the user
-        # can interject ("dismiss" to override). For unsure we hold the
-        # replan back and require the user to acknowledge before mutating
-        # the plan — verifier hunches alone aren't enough to interrupt.
-        auto_replanning = verdict.verdict in ("diverged", "blocked")
-        if auto_replanning and self.pending_verification_replan is None:
-            # Do not overwrite an existing note (a user rejection is more
-            # specific than a verifier hunch).
-            self.pending_verification_replan = (
-                f"Screen verification failed for {step_id}: {verdict.reason}. "
-                "Re-plan from the current screen."
-            )
+        # Not ok: the verifier is advisory, not authoritative. Surface the
+        # decision modal and let the user own the call. We do NOT stage a
+        # replan here — handle_user_hint_response stages it iff the user taps
+        # "Replan", which _await_action then consumes. No response (the modal
+        # auto-resolves to "continue") leaves the walk untouched, so we never
+        # yank the user out of a flow they may still be working through.
         self.awaiting_hint_response = step_id
         await self.emit(
             VerificationHintEvent(
                 step_id=step_id,
                 verdict=verdict.verdict,  # type: ignore[arg-type]
                 reason=verdict.reason or "",
-                auto_replanning=auto_replanning,
+                auto_replanning=False,
             )
         )
         self.step_event.set()

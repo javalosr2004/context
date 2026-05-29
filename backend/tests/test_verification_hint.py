@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import unittest
 from collections.abc import Iterator
 from typing import Any
+from unittest import mock
 
 from backend.instruction_verifier import VerifierVerdict
 from backend.llm import LLMRequest, LLMStreamEvent
@@ -177,60 +177,100 @@ def _step(step_id: str) -> TutorialStep:
     )
 
 
-async def _wait_for_open_hint(session: TutorialSession, step_id: str) -> None:
-    # Spin until the gate has emitted the hint and is parked on step_event.
-    for _ in range(1000):
-        if session.awaiting_hint_response == step_id:
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("hint never opened")
+class _FakeScreen:
+    """Minimal stand-in for UploadedImage — only ``.data`` is read (for log
+    byte counts). downscale_for_verifier is patched to identity in tests."""
+
+    data = b""
 
 
-class GateDecisionTests(unittest.IsolatedAsyncioTestCase):
-    """The gate surfaces a not-ok verdict as a user decision and returns
-    True only when a replan is wanted. The verifier is advisory: no response
-    defaults to continue (False)."""
+async def _run_verification_with_verdict(
+    verdict: VerifierVerdict,
+    *,
+    step_id: str = "step_1",
+) -> tuple[TutorialSession, list[Any]]:
+    """Run the background verifier against a stubbed classifier and return the
+    session plus every event it emitted."""
+    events: list[Any] = []
 
-    async def test_dismiss_continues(self) -> None:
-        session = _fresh_session()
-        verdict = VerifierVerdict(verdict="diverged", reason="elsewhere")
+    async def record(event: Any) -> None:
+        events.append(event)
 
-        async def respond() -> None:
-            await _wait_for_open_hint(session, "step_1")
-            session.handle_user_hint_response("step_1", "dismiss")
+    session = TutorialSession(
+        session_id="s_verify",
+        llm=_InertLLM(),  # type: ignore[arg-type]
+        emit=record,
+    )
+    session.latest_screen = _FakeScreen()  # type: ignore[assignment]
+    # The verifier drops its verdict as stale unless the walk is still on this
+    # step; mimic that the walk has entered the step.
+    session.awaiting_step_id = step_id
 
-        replan, _ = await asyncio.gather(
-            session._ask_continue_or_replan(_step("step_1"), verdict),
-            respond(),
+    with mock.patch(
+        "backend.tutorial_session.downscale_for_verifier", lambda screen: screen
+    ), mock.patch(
+        "backend.tutorial_session.classify_screen",
+        lambda *_args, **_kwargs: verdict,
+    ):
+        await session._run_verification(_step(step_id))
+    return session, events
+
+
+class BackgroundVerifierTests(unittest.IsolatedAsyncioTestCase):
+    """The verifier runs in the background (the walk never waits on it) and is
+    advisory: a not-ok verdict surfaces the decision modal but stages NO
+    replan. The replan is staged only when the user taps "Replan"
+    (handle_user_hint_response), which _await_action then consumes."""
+
+    async def test_not_ok_surfaces_modal_without_staging_replan(self) -> None:
+        session, events = await _run_verification_with_verdict(
+            VerifierVerdict(verdict="diverged", reason="elsewhere")
         )
-        self.assertFalse(replan)
+        self.assertEqual(session.awaiting_hint_response, "step_1")
+        # Crucial: no replan is staged, so the walk continues until the user
+        # explicitly chooses to replan. The verifier never yanks the user out.
+        self.assertIsNone(session.pending_verification_replan)
+        hints = [e for e in events if isinstance(e, VerificationHintEvent)]
+        self.assertEqual(len(hints), 1)
+        self.assertEqual(hints[0].verdict, "diverged")
+        self.assertFalse(hints[0].auto_replanning)
+
+    async def test_ok_verdict_surfaces_no_modal(self) -> None:
+        session, events = await _run_verification_with_verdict(
+            VerifierVerdict(verdict="on_track", reason="looks right")
+        )
         self.assertIsNone(session.awaiting_hint_response)
         self.assertIsNone(session.pending_verification_replan)
+        hints = [e for e in events if isinstance(e, VerificationHintEvent)]
+        self.assertEqual(len(hints), 0)
 
-    async def test_acknowledge_off_replans(self) -> None:
-        session = _fresh_session()
-        verdict = VerifierVerdict(verdict="diverged", reason="elsewhere")
+    async def test_stale_verdict_is_dropped(self) -> None:
+        # User advanced to another step before the verdict landed: the verifier
+        # for the old step must not surface a modal against the new screen.
+        events: list[Any] = []
 
-        async def respond() -> None:
-            await _wait_for_open_hint(session, "step_1")
-            session.handle_user_hint_response("step_1", "acknowledge_off")
+        async def record(event: Any) -> None:
+            events.append(event)
 
-        replan, _ = await asyncio.gather(
-            session._ask_continue_or_replan(_step("step_1"), verdict),
-            respond(),
+        session = TutorialSession(
+            session_id="s_verify_stale",
+            llm=_InertLLM(),  # type: ignore[arg-type]
+            emit=record,
         )
-        self.assertTrue(replan)
+        session.latest_screen = _FakeScreen()  # type: ignore[assignment]
+        session.awaiting_step_id = "a_different_step"
+        with mock.patch(
+            "backend.tutorial_session.downscale_for_verifier", lambda screen: screen
+        ), mock.patch(
+            "backend.tutorial_session.classify_screen",
+            lambda *_args, **_kwargs: VerifierVerdict(
+                verdict="diverged", reason="elsewhere"
+            ),
+        ):
+            await session._run_verification(_step("step_1"))
         self.assertIsNone(session.awaiting_hint_response)
-
-    async def test_no_response_defaults_to_continue(self) -> None:
-        session = _fresh_session()
-        session._GATE_DECISION_TIMEOUT_S = 0.05
-        verdict = VerifierVerdict(verdict="blocked", reason="modal in the way")
-
-        replan = await session._ask_continue_or_replan(_step("step_1"), verdict)
-
-        self.assertFalse(replan)
-        self.assertIsNone(session.awaiting_hint_response)
+        hints = [e for e in events if isinstance(e, VerificationHintEvent)]
+        self.assertEqual(len(hints), 0)
 
 
 class HintEventWireFormatTests(unittest.TestCase):

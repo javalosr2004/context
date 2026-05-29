@@ -524,8 +524,16 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
         )
         # Outer loop fires fresh screen after the screen-changing click.
         await send_next_requested_screen(session, events)
-        # Gate verifies step_002, accepts, skips planner — walk continues.
+        # Non-blocking gate: step_002 is presented immediately and verified in
+        # the background. Wait for the (ok) verdict to land before acting —
+        # acting first would simply cancel the verifier (the user moved on).
         await wait_until(lambda: session.awaiting_step_id == "step_002")
+        await wait_until(
+            lambda: any(
+                isinstance(e, InstructionVerifiedEvent) and e.step_id == "step_002"
+                for e in events
+            )
+        )
         await session.handle_step_started("step_002", action_index=0)
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation(
@@ -548,13 +556,13 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
             session.completed_step_ids, ["step_001", "step_002"]
         )
 
-    async def test_gate_rejects_truncates_tail_and_replans(self) -> None:
+    async def test_gate_rejects_surfaces_modal_then_user_replans(self) -> None:
         events: list[Any] = []
         llm = ScriptedLLM(
             [
                 [LLMToolCallEvent(tool_call=TWO_STEP_PLAN_CALL)],
-                # After gate rejects, planner re-runs with replan note;
-                # we just emit text to end the session cleanly.
+                # After the user taps "Replan", the planner re-runs with the
+                # acknowledgement note; emit text to end the session cleanly.
                 [LLMTextDelta(text="Replanning.")],
             ]
         )
@@ -575,22 +583,36 @@ class StrictGateTests(unittest.IsolatedAsyncioTestCase):
             "step_001", action_index=0, confirmed=True, note=None
         )
         await send_next_requested_screen(session, events)
+
+        # Non-blocking gate: step_002 is presented while the verifier runs in
+        # the background. The "no" verdict surfaces the decision modal but does
+        # NOT replan on its own — the walk keeps waiting on step_002, and the
+        # tail is still intact (we never yank the user out without their call).
+        await wait_until(lambda: session.awaiting_hint_response == "step_002")
+        await wait_until(lambda: session.awaiting_step_id == "step_002")
+        verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
+        self.assertTrue(verified and not verified[-1].ok)
+        self.assertEqual(
+            [s.step_id for s in session.plan_steps], ["step_001", "step_002"]
+        )
+
+        # User taps "Replan from here". Now the walk consumes the staged
+        # replan, truncates the tail, re-plans, and (no steps left) completes.
+        session.handle_user_hint_response("step_002", "acknowledge_off")
+        await send_next_requested_screen(session, events)
         await wait_until(
             lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
         )
         await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
-        # Plan tail trimmed to completed prefix after gate rejection.
+        # Plan tail trimmed to completed prefix only after the user chose to.
         self.assertEqual(
             [s.step_id for s in session.plan_steps], ["step_001"]
         )
-        verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
-        self.assertTrue(verified)
-        self.assertFalse(verified[-1].ok)
         self.assertTrue(
             any(
-                "Screen blocks step step_002" in entry.content
+                "step step_002" in entry.content
                 for entry in session.history
                 if entry.role == "user"
             )

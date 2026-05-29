@@ -227,6 +227,36 @@ final class TutorialSessionAPIClientTests: XCTestCase {
         XCTAssertEqual(text, "RunPod")
     }
 
+    func testServerEventDecodingPlanStepPreview() throws {
+        let data = Data("""
+        {
+          "type": "plan_step_preview",
+          "index": 2,
+          "instruction": "Enter the repository name.",
+          "confidence": 0.93
+        }
+        """.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .planStepPreview(let index, let instruction, let confidence) = event else {
+            return XCTFail("Expected planStepPreview, got \(event)")
+        }
+        XCTAssertEqual(index, 2)
+        XCTAssertEqual(instruction, "Enter the repository name.")
+        XCTAssertEqual(confidence, 0.93, accuracy: 0.0001)
+    }
+
+    func testServerEventDecodingPlanStreamReset() throws {
+        let data = Data(#"{ "type": "plan_stream_reset" }"#.utf8)
+
+        let event = try JSONDecoder().decode(TutorialSessionServerEvent.self, from: data)
+
+        guard case .planStreamReset = event else {
+            return XCTFail("Expected planStreamReset, got \(event)")
+        }
+    }
+
     func testStatusLabelsAndBusyStates() {
         XCTAssertEqual(TutorialSessionUIStatus.preparingScreen.label, "Preparing screen")
         XCTAssertTrue(TutorialSessionUIStatus.sending.isBusy)

@@ -27,6 +27,9 @@ services:
     environment:
       - LOG_LEVEL=INFO
       - ENRICHMENT_URL=http://enrichment-layer:8000
+      - CONTEXT_SESSIONS_DIR=/data/sessions
+    volumes:
+      - backend_sessions:/data/sessions
     depends_on:
       enrichment-layer:
         condition: service_healthy
@@ -78,3 +81,4 @@ services:
 volumes:
   enrichment_data:
   recording_enrichment_data:
+  backend_sessions:

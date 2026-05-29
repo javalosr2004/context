@@ -79,3 +79,6 @@ Package.resolved
 *.pth
 *.onnx
 *.safetensors
+
+# Local copy-out of Docker session capture files (docker compose cp)
+.sessions-dump/

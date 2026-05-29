@@ -318,6 +318,20 @@ final class TutorialSessionController: ObservableObject {
         return nil
     }
 
+    /// Steps streamed by the planner before the full plan is merged. Drives
+    /// the step area so the guide visibly fills in while planning, instead
+    /// of only living in the chat history. Empty once `plan_ready` lands and
+    /// the authoritative plan takes over. Derived from `messages` (published)
+    /// so SwiftUI updates as previews stream in.
+    var planPreviewSteps: [PlanPreviewStep] {
+        for message in messages.reversed() {
+            if case .tutorialPlanPreview(let preview) = message.content {
+                return preview.steps
+            }
+        }
+        return []
+    }
+
     func appendTutorialText(_ text: String) {
         guard messageStore.appendTutorialText(text) != nil else { return }
         messages = messageStore.messages

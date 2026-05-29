@@ -208,6 +208,10 @@ struct ChatPopupView: View {
                     tutorialMeta
                 }
 
+                if !sessionController.planPreviewSteps.isEmpty {
+                    streamingPreviewSteps(sessionController.planPreviewSteps)
+                }
+
                 if let prompt = sessionController.pendingCompletionPrompt {
                     completionPromptCard(prompt)
                 }
@@ -1845,6 +1849,30 @@ struct ChatPopupView: View {
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 9)
+    }
+
+    private func streamingPreviewSteps(_ steps: [PlanPreviewStep]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(steps) { step in
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Text("\(step.index + 1).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary.opacity(0.8))
+                        .frame(width: 18, alignment: .trailing)
+
+                    Text(step.instruction)
+                        .font(.system(size: 13))
+                        .foregroundStyle(OverlayTheme.primaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeOut(duration: 0.18), value: steps.count)
     }
 
     private func upcomingStepList(_ steps: [TutorialStepDisplayItem]) -> some View {

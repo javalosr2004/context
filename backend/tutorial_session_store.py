@@ -44,6 +44,7 @@ class TutorialSessionStore:
         embeddings_client: EmbeddingsClient | None = None,
         step_tools_enabled: bool = True,
         grounding_strategy: Literal["parallel", "planner"] = "parallel",
+        plan_stream_preview: bool = True,
     ) -> None:
         self._llm = llm
         self._fast_llm = fast_llm or llm
@@ -53,6 +54,7 @@ class TutorialSessionStore:
         self._web_ground = web_ground or NullWebGroundProducer()
         self._step_tools_enabled = step_tools_enabled
         self._grounding_strategy = grounding_strategy
+        self._plan_stream_preview = plan_stream_preview
         self._reserved: set[str] = set()
         self._live: dict[str, TutorialSession] = {}
 
@@ -96,6 +98,7 @@ class TutorialSessionStore:
                 "capped_head" if self._step_tools_enabled else "full_plan"
             ),
             grounding_strategy=self._grounding_strategy,
+            plan_stream_preview=self._plan_stream_preview,
             llm_call_sink=llm_call_sink,
         )
         self._live[session_id] = session

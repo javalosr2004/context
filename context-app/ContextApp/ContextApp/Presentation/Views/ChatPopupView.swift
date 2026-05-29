@@ -1616,7 +1616,52 @@ struct ChatPopupView: View {
         case .tutorialPlan(let plan):
             tutorialPlanRow(plan)
                 .id(message.id)
+        case .tutorialPlanPreview(let preview):
+            tutorialPlanPreviewRow(preview)
+                .id(message.id)
         }
+    }
+
+    private func tutorialPlanPreviewRow(_ preview: PlanPreview) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Building tutorial…")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                }
+
+                ForEach(preview.steps) { step in
+                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                        Text("\(step.index + 1)")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, alignment: .trailing)
+                        Text(step.instruction)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(OverlayTheme.assistantBubble)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                    .stroke(OverlayTheme.hairline, lineWidth: 1)
+            )
+            .animation(.easeOut(duration: 0.18), value: preview.steps.count)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func textMessageRow(_ text: String, role: ChatMessageRole) -> some View {

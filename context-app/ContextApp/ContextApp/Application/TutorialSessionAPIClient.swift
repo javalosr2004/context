@@ -306,6 +306,8 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case textResponse(String)
     case planReady(TutorialPlan)
     case planUpdated(TutorialPlan)
+    case planStepPreview(index: Int, instruction: String, confidence: Double)
+    case planStreamReset
     case draftPlanReady(DraftPlan)
     case tutorialAction(TutorialStep)
     case unknown(type: String)
@@ -361,6 +363,9 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case questions
         case verdict
         case autoReplanning = "auto_replanning"
+        case index
+        case instruction
+        case confidence
     }
 
     init(from decoder: Decoder) throws {
@@ -383,6 +388,14 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .planReady(try container.decode(TutorialPlan.self, forKey: .plan))
         case "plan_updated":
             self = .planUpdated(try container.decode(TutorialPlan.self, forKey: .plan))
+        case "plan_step_preview":
+            self = .planStepPreview(
+                index: try container.decode(Int.self, forKey: .index),
+                instruction: try container.decode(String.self, forKey: .instruction),
+                confidence: try container.decode(Double.self, forKey: .confidence)
+            )
+        case "plan_stream_reset":
+            self = .planStreamReset
         case "draft_plan_ready":
             self = .draftPlanReady(try container.decode(DraftPlan.self, forKey: .plan))
         case "tutorial_action":
@@ -494,6 +507,13 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case .planUpdated(let plan):
             try container.encode("plan_updated", forKey: .type)
             try container.encode(plan, forKey: .plan)
+        case .planStepPreview(let index, let instruction, let confidence):
+            try container.encode("plan_step_preview", forKey: .type)
+            try container.encode(index, forKey: .index)
+            try container.encode(instruction, forKey: .instruction)
+            try container.encode(confidence, forKey: .confidence)
+        case .planStreamReset:
+            try container.encode("plan_stream_reset", forKey: .type)
         case .draftPlanReady(let plan):
             try container.encode("draft_plan_ready", forKey: .type)
             try container.encode(plan, forKey: .plan)

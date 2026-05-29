@@ -212,6 +212,26 @@ class PlanUpdatedEvent(TutorialSessionEventModel):
     plan: TutorialPlan
 
 
+class PlanStreamResetEvent(TutorialSessionEventModel):
+    """A fresh tutorial_update_plan call started streaming; the overlay
+    should drop any preview rows emitted for an earlier call this turn.
+    Cosmetic — the authoritative plan still arrives via plan_ready/updated."""
+
+    type: Literal["plan_stream_reset"] = "plan_stream_reset"
+
+
+class PlanStepPreviewEvent(TutorialSessionEventModel):
+    """One step instruction parsed from the still-streaming update_plan
+    arguments, rendered ahead of the merged plan for a no-wait feel. Carries
+    only what a row needs; the full step (actions, real step_id) arrives in
+    the authoritative plan, which REPLACES these previews."""
+
+    type: Literal["plan_step_preview"] = "plan_step_preview"
+    index: int = Field(ge=0)
+    instruction: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class TutorialActionEvent(TutorialSessionEventModel):
     type: Literal["tutorial_action"] = "tutorial_action"
     step: TutorialStep
@@ -400,6 +420,8 @@ ServerSessionEvent = (
     | DraftPlanReadyEvent
     | PlanReadyEvent
     | PlanUpdatedEvent
+    | PlanStreamResetEvent
+    | PlanStepPreviewEvent
     | TutorialActionEvent
     | TutorialActionDeltaEvent
     | TutorialTextDeltaEvent

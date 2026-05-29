@@ -75,6 +75,17 @@ def _step_tools_enabled_from_env() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _plan_stream_preview_from_env() -> bool:
+    """Read the PLAN_STREAM_PREVIEW flag. Defaults to True: parse the
+    streaming update_plan tool args and emit per-step previews so the
+    overlay renders the guide as it is generated. Set to a falsy value to
+    fall back to emitting the plan only once it is fully merged."""
+    raw = os.environ.get("PLAN_STREAM_PREVIEW")
+    if raw is None:
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _grounding_strategy_from_env() -> str:
     """Read the GROUNDING_STRATEGY flag. ``parallel`` (default) runs the
     enrichment service + draft plan pre-pipeline; ``planner`` skips the
@@ -383,6 +394,7 @@ def get_tutorial_session_store(
     if store is None:
         step_tools_enabled = _step_tools_enabled_from_env()
         grounding_strategy = _grounding_strategy_from_env()
+        plan_stream_preview = _plan_stream_preview_from_env()
         logging.getLogger(__name__).info(
             "[startup] tutorial_session_store config",
             extra={
@@ -391,6 +403,7 @@ def get_tutorial_session_store(
                     "capped_head" if step_tools_enabled else "full_plan"
                 ),
                 "grounding_strategy": grounding_strategy,
+                "plan_stream_preview": plan_stream_preview,
                 "llm_provider": (
                     os.environ.get("LLM_PROVIDER") or "gemini"
                 ).lower(),
@@ -404,6 +417,7 @@ def get_tutorial_session_store(
             web_ground=web_ground_producer_from_environment(),
             step_tools_enabled=step_tools_enabled,
             grounding_strategy=grounding_strategy,
+            plan_stream_preview=plan_stream_preview,
         )
         connection.app.state.tutorial_session_store = store
     return store

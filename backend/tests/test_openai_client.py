@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Sequence
 from types import SimpleNamespace
 
 from backend.llm import (
+    LLMRequest,
     LLMTextDelta,
+    LLMToolCallArgsDelta,
     LLMToolCallEvent,
     LLMWebSearchCompleted,
     LLMWebSearchStarted,
 )
 from backend.openai_client import (
+    OpenAIClient,
     build_response_params,
     build_text_format,
     stream_event_from_response_event,
@@ -161,6 +165,110 @@ class OpenAIClientSchemaTests(unittest.TestCase):
 
         self.assertIsInstance(stream_event, LLMWebSearchStarted)
         self.assertEqual(stream_event.query, "")
+
+
+class _FakeResponses:
+    def __init__(self, events: Sequence[object]) -> None:
+        self._events = events
+
+    def create(self, **kwargs: object) -> object:
+        return iter(self._events)
+
+
+class _FakeClient:
+    def __init__(self, events: Sequence[object]) -> None:
+        self.responses = _FakeResponses(events)
+
+
+class OpenAIClientArgsDeltaStreamingTests(unittest.TestCase):
+    def _client_with_events(self, events: Sequence[object]) -> OpenAIClient:
+        client = OpenAIClient(api_key="test", model="gpt-test")
+        client._client = _FakeClient(events)
+        return client
+
+    def _request(self) -> LLMRequest:
+        return LLMRequest(system_prompt="sys", user_text="hi", images=[])
+
+    def test_streams_update_plan_args_and_emits_final_tool_call(self) -> None:
+        full_args = '{"plan_reasoning":"x","plan":[{"human_text":"Go."}]}'
+        events = [
+            SimpleNamespace(
+                type="response.output_item.added",
+                item=SimpleNamespace(
+                    type="function_call", id="fc_1", name="tutorial_update_plan"
+                ),
+            ),
+            SimpleNamespace(
+                type="response.function_call_arguments.delta",
+                item_id="fc_1",
+                delta='{"plan_reasoning":"x","plan":[',
+            ),
+            SimpleNamespace(
+                type="response.function_call_arguments.delta",
+                item_id="fc_1",
+                delta='{"human_text":"Go."}]}',
+            ),
+            SimpleNamespace(
+                type="response.output_item.done",
+                item=SimpleNamespace(
+                    type="function_call",
+                    name="tutorial_update_plan",
+                    arguments=full_args,
+                ),
+            ),
+        ]
+        out = list(self._client_with_events(events).stream_tutorial_events(self._request()))
+
+        arg_deltas = [e for e in out if isinstance(e, LLMToolCallArgsDelta)]
+        tool_calls = [e for e in out if isinstance(e, LLMToolCallEvent)]
+        self.assertEqual(len(arg_deltas), 2)
+        self.assertTrue(all(d.name == "tutorial_update_plan" for d in arg_deltas))
+        self.assertTrue(all(d.call_id == "fc_1" for d in arg_deltas))
+        self.assertEqual("".join(d.delta for d in arg_deltas), full_args)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0].tool_call.name, "tutorial_update_plan")
+
+    def test_ignores_args_deltas_for_other_tools(self) -> None:
+        events = [
+            SimpleNamespace(
+                type="response.output_item.added",
+                item=SimpleNamespace(
+                    type="function_call", id="fc_2", name="tutorial_request_screen"
+                ),
+            ),
+            SimpleNamespace(
+                type="response.function_call_arguments.delta",
+                item_id="fc_2",
+                delta='{"reason":"need a fresh screen"}',
+            ),
+            SimpleNamespace(
+                type="response.output_item.done",
+                item=SimpleNamespace(
+                    type="function_call",
+                    name="tutorial_request_screen",
+                    arguments='{"reason":"need a fresh screen"}',
+                ),
+            ),
+        ]
+        out = list(self._client_with_events(events).stream_tutorial_events(self._request()))
+
+        self.assertFalse(any(isinstance(e, LLMToolCallArgsDelta) for e in out))
+        self.assertEqual(
+            sum(isinstance(e, LLMToolCallEvent) for e in out), 1
+        )
+
+    def test_unknown_item_id_delta_is_dropped(self) -> None:
+        # An args delta whose item_id was never announced (no name known)
+        # must not be attributed to update_plan.
+        events = [
+            SimpleNamespace(
+                type="response.function_call_arguments.delta",
+                item_id="ghost",
+                delta='{"plan":[',
+            ),
+        ]
+        out = list(self._client_with_events(events).stream_tutorial_events(self._request()))
+        self.assertEqual(out, [])
 
 
 def assert_openai_strict_objects(value: object) -> None:

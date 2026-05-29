@@ -30,6 +30,18 @@ class LLMToolCallEvent:
 
 
 @dataclass(frozen=True)
+class LLMToolCallArgsDelta:
+    """A fragment of a tool call's arguments JSON, streamed as it is
+    generated. Purely additive: the authoritative ``LLMToolCallEvent`` still
+    arrives when the call completes. Used to preview the plan before the
+    whole ``tutorial_update_plan`` call finishes. ``name`` is the tool name,
+    ``call_id`` distinguishes concurrent/sequential calls in one turn."""
+    name: str
+    delta: str
+    call_id: str
+
+
+@dataclass(frozen=True)
 class LLMWebSearchStarted:
     """The model invoked a native web_search tool. ``query`` may be empty
     if the provider hasn't surfaced it yet — the started event fires on
@@ -46,7 +58,11 @@ class LLMWebSearchCompleted:
 
 
 LLMStreamEvent = (
-    LLMTextDelta | LLMToolCallEvent | LLMWebSearchStarted | LLMWebSearchCompleted
+    LLMTextDelta
+    | LLMToolCallEvent
+    | LLMToolCallArgsDelta
+    | LLMWebSearchStarted
+    | LLMWebSearchCompleted
 )
 
 

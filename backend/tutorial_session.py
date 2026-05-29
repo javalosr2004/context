@@ -48,11 +48,13 @@ from backend.llm import (
     LLMRequest,
     LLMStreamEvent,
     LLMTextDelta,
+    LLMToolCallArgsDelta,
     LLMToolCallEvent,
     LLMWebSearchCompleted,
     LLMWebSearchStarted,
     MultimodalLLM,
 )
+from backend.plan_arg_stream import IncrementalPlanPreview
 from backend.enrichment_client import EnrichmentSnippetsProducer
 from backend.tutorial_guide import (
     TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
@@ -73,6 +75,8 @@ from backend.tutorial_session_events import (
     InstructionVerifiedEvent,
     PlanDiffEvent,
     PlanReadyEvent,
+    PlanStepPreviewEvent,
+    PlanStreamResetEvent,
     PlanUpdatedEvent,
     ScreenRequestedEvent,
     ScreenSnapshot,
@@ -241,6 +245,13 @@ class TutorialSession:
     # backend/tutorial_guide.tool_stream_system_prompt for the prompt
     # block surfaced under planner mode.
     grounding_strategy: Literal["parallel", "planner"] = "parallel"
+    # PLAN_STREAM_PREVIEW: when True, parse the streaming update_plan tool
+    # arguments and emit per-step previews (PlanStepPreviewEvent) so the
+    # overlay can render the guide as it is generated instead of waiting
+    # for the full plan. Cosmetic only — the authoritative plan still
+    # arrives via plan_ready/plan_updated. Providers that don't stream tool
+    # args (Gemini/Holo) simply never emit previews. See backend/main.py.
+    plan_stream_preview: bool = True
     # Bound for the capped_head replan-on-exhaustion loop: how many
     # times in a row may the outer loop regrow the head without any
     # newly-walked step before falling through to a completion proposal.
@@ -1014,6 +1025,9 @@ class TutorialSession:
         tool_calls: list[TutorialToolCall] = []
         text_parts: list[str] = []
         queue_wait_ms_total = 0.0
+        plan_preview = IncrementalPlanPreview()
+        preview_call_id: str | None = None
+        preview_count = 0
 
         try:
             while True:
@@ -1027,6 +1041,27 @@ class TutorialSession:
                 if isinstance(event, LLMTextDelta):
                     text_parts.append(event.text)
                     await self.emit(TutorialTextDeltaEvent(text=event.text))
+                elif isinstance(event, LLMToolCallArgsDelta):
+                    if self.plan_stream_preview:
+                        # A new tool-call id mid-turn means an earlier
+                        # update_plan is being superseded; drop its preview
+                        # rows. Only the last call is authoritative anyway.
+                        if (
+                            preview_call_id is not None
+                            and event.call_id != preview_call_id
+                        ):
+                            plan_preview.reset()
+                            await self.emit(PlanStreamResetEvent())
+                        preview_call_id = event.call_id
+                        for preview in plan_preview.feed(event.delta):
+                            preview_count += 1
+                            await self.emit(
+                                PlanStepPreviewEvent(
+                                    index=preview.index,
+                                    instruction=preview.instruction,
+                                    confidence=preview.confidence,
+                                )
+                            )
                 elif isinstance(event, LLMToolCallEvent):
                     tool_calls.append(event.tool_call)
                 elif isinstance(event, LLMWebSearchStarted):
@@ -1051,6 +1086,7 @@ class TutorialSession:
                 "queue_wait_ms_total": round(queue_wait_ms_total, 2),
                 "text_delta_count": len(text_parts),
                 "tool_call_count": len(tool_calls),
+                "plan_preview_count": preview_count,
             },
         )
 

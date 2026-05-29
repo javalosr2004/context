@@ -13,11 +13,16 @@ from backend.llm import (
     LLMRequest,
     LLMStreamEvent,
     LLMTextDelta,
+    LLMToolCallArgsDelta,
     LLMToolCallEvent,
     LLMWebSearchCompleted,
     LLMWebSearchStarted,
 )
-from backend.tutorial_tools import TutorialToolCall, openai_tutorial_tool_definitions
+from backend.tutorial_tools import (
+    UPDATE_PLAN_TOOL_NAME,
+    TutorialToolCall,
+    openai_tutorial_tool_definitions,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -110,8 +115,13 @@ class OpenAIClient:
         first_event_logged = False
         text_delta_count = 0
         tool_call_count = 0
+        tool_args_delta_count = 0
         web_search_count = 0
         other_count = 0
+        # Function-call argument deltas arrive without the tool name; only
+        # the output_item.added event carries it. Map item_id -> name so we
+        # can attribute streamed args to the right tool.
+        function_call_names: dict[str, str] = {}
         # When the planner runs web_search the API streams Started before
         # Completed; we stamp elapsed_ms here because it's the only place
         # both timestamps are visible. Track the last Started across all
@@ -128,6 +138,22 @@ class OpenAIClient:
                     },
                 )
                 first_event_logged = True
+            event_type = getattr(event, "type", "")
+            if event_type == "response.output_item.added":
+                item = getattr(event, "item", None)
+                if getattr(item, "type", "") == "function_call":
+                    item_id = getattr(item, "id", "") or ""
+                    if item_id:
+                        function_call_names[item_id] = getattr(item, "name", "") or ""
+            elif event_type == "response.function_call_arguments.delta":
+                delta = getattr(event, "delta", None)
+                item_id = getattr(event, "item_id", "") or ""
+                if delta and function_call_names.get(item_id) == UPDATE_PLAN_TOOL_NAME:
+                    tool_args_delta_count += 1
+                    yield LLMToolCallArgsDelta(
+                        name=UPDATE_PLAN_TOOL_NAME, delta=delta, call_id=item_id
+                    )
+                continue
             stream_event = stream_event_from_response_event(event)
             if stream_event is None:
                 other_count += 1
@@ -157,6 +183,7 @@ class OpenAIClient:
                 "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
                 "text_delta_count": text_delta_count,
                 "tool_call_count": tool_call_count,
+                "tool_args_delta_count": tool_args_delta_count,
                 "web_search_count": web_search_count,
                 "other_event_count": other_count,
             },

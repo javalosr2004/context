@@ -502,6 +502,10 @@ final class TutorialSessionController: ObservableObject {
         case .planUpdated(let plan):
             replaceLatestTutorialPlan(plan)
             status = .ready
+        case .planStepPreview(let index, let instruction, let confidence):
+            appendPlanPreviewStep(index: index, instruction: instruction, confidence: confidence)
+        case .planStreamReset:
+            clearPlanPreview()
         case .draftPlanReady(let plan):
             draftPlan = plan
         case .unknown(let type):
@@ -542,6 +546,7 @@ final class TutorialSessionController: ObservableObject {
             pendingCompletionPrompt = nil
             pendingQuestionBatch = nil
             awaitingHintResponse = nil
+            clearPlanPreview()
             appendTutorialText("Tutorial completed.")
             status = .completed
         case .instructionVerificationStarted:
@@ -599,12 +604,35 @@ final class TutorialSessionController: ObservableObject {
     }
 
     private func appendTutorialPlan(_ plan: TutorialPlan) {
-        guard messageStore.appendTutorialPlan(plan) != nil else { return }
+        // The authoritative plan supersedes any streamed preview rows.
+        messageStore.clearPlanPreview()
+        guard messageStore.appendTutorialPlan(plan) != nil else {
+            messages = messageStore.messages
+            return
+        }
         messages = messageStore.messages
     }
 
     private func replaceLatestTutorialPlan(_ plan: TutorialPlan) {
-        guard messageStore.replaceLatestTutorialPlan(plan) != nil else { return }
+        messageStore.clearPlanPreview()
+        guard messageStore.replaceLatestTutorialPlan(plan) != nil else {
+            messages = messageStore.messages
+            return
+        }
+        messages = messageStore.messages
+    }
+
+    private func appendPlanPreviewStep(index: Int, instruction: String, confidence: Double) {
+        guard messageStore.appendPlanPreviewStep(
+            index: index,
+            instruction: instruction,
+            confidence: confidence
+        ) != nil else { return }
+        messages = messageStore.messages
+    }
+
+    private func clearPlanPreview() {
+        guard messageStore.clearPlanPreview() else { return }
         messages = messageStore.messages
     }
 
@@ -656,6 +684,7 @@ final class TutorialSessionController: ObservableObject {
 
     private func applyFailure(_ message: String) {
         logger.error("\(message, privacy: .public)")
+        clearPlanPreview()
         status = .failed(message)
     }
 

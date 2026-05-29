@@ -125,7 +125,45 @@ struct ChatHistoryView: View {
             textRow(text, role: message.role)
         case .tutorialPlan(let plan):
             planRow(plan)
+        case .tutorialPlanPreview(let preview):
+            planPreviewRow(preview)
         }
+    }
+
+    private func planPreviewRow(_ preview: PlanPreview) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Building tutorial…")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .tracking(0.5)
+                        .textCase(.uppercase)
+                        .foregroundStyle(OverlayTheme.tertiaryText)
+                    Spacer(minLength: 0)
+                }
+
+                ForEach(preview.steps) { step in
+                    Text(step.instruction)
+                        .font(.system(size: 13))
+                        .foregroundStyle(OverlayTheme.primaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(OverlayTheme.assistantBubble)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                    .stroke(OverlayTheme.hairline, lineWidth: 1)
+            )
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func textRow(_ text: String, role: ChatMessageRole) -> some View {

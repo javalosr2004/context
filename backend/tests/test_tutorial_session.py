@@ -10,6 +10,7 @@ from backend.llm import (
     LLMRequest,
     LLMStreamEvent,
     LLMTextDelta,
+    LLMToolCallArgsDelta,
     LLMToolCallEvent,
     LLMWebSearchCompleted,
     LLMWebSearchStarted,
@@ -20,6 +21,8 @@ from backend.tutorial_session_events import (
     CompletionProposedEvent,
     InstructionVerifiedEvent,
     PlanReadyEvent,
+    PlanStepPreviewEvent,
+    PlanStreamResetEvent,
     PlanUpdatedEvent,
     ScreenRequestedEvent,
     ScreenSnapshot,
@@ -852,6 +855,116 @@ class WebSearchOverlayEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(completed[0].query, "set up Stripe webhook")
         self.assertAlmostEqual(completed[0].elapsed_ms, 123.4)
         self.assertEqual(completed[0].source_count, 0)
+
+
+def _split(text: str, parts: int) -> list[str]:
+    size = max(1, len(text) // parts)
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def _streamed_update_plan_turn(
+    *items: dict[str, Any], call_id: str = "c1", parts: int = 3
+) -> list[LLMStreamEvent]:
+    """One agent turn whose update_plan args stream as deltas, followed by
+    the authoritative tool call — mirroring the real OpenAI event order."""
+    args = json.dumps({"plan_reasoning": "x", "plan": list(items)})
+    deltas: list[LLMStreamEvent] = [
+        LLMToolCallArgsDelta(name="tutorial_update_plan", delta=chunk, call_id=call_id)
+        for chunk in _split(args, parts)
+    ]
+    call = TutorialToolCall(name="tutorial_update_plan", arguments=args)
+    return [*deltas, LLMToolCallEvent(tool_call=call)]
+
+
+class PlanStreamPreviewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_previews_stream_before_plan_ready(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                _streamed_update_plan_turn(
+                    click_item("Open Settings.", confidence=0.9),
+                    click_item("Click Billing.", confidence=0.6),
+                ),
+                [LLMTextDelta(text="Looks done.")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Open settings then billing.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: any(isinstance(e, PlanReadyEvent) for e in events))
+
+        previews = [e for e in events if isinstance(e, PlanStepPreviewEvent)]
+        self.assertEqual(
+            [(p.index, p.instruction, p.confidence) for p in previews],
+            [(0, "Open Settings.", 0.9), (1, "Click Billing.", 0.6)],
+        )
+        # Every preview must arrive before the authoritative plan.
+        first_plan = next(
+            i for i, e in enumerate(events) if isinstance(e, PlanReadyEvent)
+        )
+        last_preview = max(
+            i for i, e in enumerate(events) if isinstance(e, PlanStepPreviewEvent)
+        )
+        self.assertLess(last_preview, first_plan)
+
+        # The authoritative plan is unaffected by previewing.
+        plan = next(e for e in events if isinstance(e, PlanReadyEvent)).plan
+        self.assertEqual(
+            [s.instruction for s in plan.steps],
+            ["Open Settings.", "Click Billing."],
+        )
+
+    async def test_no_previews_when_flag_disabled(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                _streamed_update_plan_turn(click_item("Open Settings.")),
+                [LLMTextDelta(text="Looks done.")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            emit=await collect_events(events),
+            plan_stream_preview=False,
+        )
+
+        await session.handle_user_message("Open settings.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: any(isinstance(e, PlanReadyEvent) for e in events))
+
+        self.assertFalse(any(isinstance(e, PlanStepPreviewEvent) for e in events))
+        plan = next(e for e in events if isinstance(e, PlanReadyEvent)).plan
+        self.assertEqual([s.instruction for s in plan.steps], ["Open Settings."])
+
+    async def test_new_call_id_resets_preview(self) -> None:
+        events: list[Any] = []
+        # Two update_plan calls in one turn with different ids: the second
+        # supersedes the first, so a reset must fire and only the last plan
+        # is authoritative.
+        turn = [
+            *_streamed_update_plan_turn(
+                click_item("Stale step."), call_id="c1"
+            )[:-1],
+            *_streamed_update_plan_turn(
+                click_item("Real step."), call_id="c2"
+            ),
+        ]
+        llm = ScriptedLLM([turn, [LLMTextDelta(text="Looks done.")]])
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Do the thing.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: any(isinstance(e, PlanReadyEvent) for e in events))
+
+        self.assertTrue(any(isinstance(e, PlanStreamResetEvent) for e in events))
+        plan = next(e for e in events if isinstance(e, PlanReadyEvent)).plan
+        self.assertEqual([s.instruction for s in plan.steps], ["Real step."])
 
 
 if __name__ == "__main__":

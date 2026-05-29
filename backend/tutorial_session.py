@@ -177,14 +177,14 @@ class TutorialSession:
     pending_completion_response: (
         asyncio.Future[tuple[bool, str | None]] | None
     ) = None
-    # Turn-0 clarifying-question flow. ``tutorial_ask_user`` is valid
-    # only on the very first agent turn of a goal; once we commit to a
-    # plan (or successfully ask once) the gate flips closed and any
-    # later ask_user call is rejected as a tool-role message.
+    # Clarifying-question flow. ``tutorial_ask_user`` may be called on any
+    # planning turn whenever the goal is genuinely ambiguous. It must be
+    # the sole tool call in its turn: it is recorded as assistant/user
+    # dialogue, not a tool-call pair, so it cannot be interleaved with
+    # other tool calls in the same turn.
     pending_question_batch_id: str | None = None
     pending_question_ids: tuple[str, ...] | None = None
     pending_question_response: asyncio.Future[dict[str, str]] | None = None
-    turn_zero_consumed: bool = False
     pending_step_starts: set[tuple[str, int]] = field(default_factory=set)
     pending_step_confirmations: dict[tuple[str, int], tuple[bool, str]] = field(
         default_factory=dict
@@ -331,7 +331,6 @@ class TutorialSession:
         self.prev_active_step_id = None
         self.last_action_kind = None
         self.screen_is_stale = False
-        self.turn_zero_consumed = False
         self.pending_question_batch_id = None
         self.pending_question_ids = None
         self.pending_question_response = None
@@ -732,7 +731,6 @@ class TutorialSession:
                 "screen_is_stale": self.screen_is_stale,
                 "grounding_strategy": self.grounding_strategy,
                 "step_tools_mode": self.step_tools_mode,
-                "turn_zero_consumed": self.turn_zero_consumed,
             },
         )
 
@@ -859,30 +857,18 @@ class TutorialSession:
                     )
                 )
 
-            # tutorial_ask_user is a turn-0 gate: it must be the sole
-            # tool call, and it cannot appear after the planner has
-            # already committed (turn_zero_consumed=True). When rejected,
-            # we drop it and let the rest of the turn proceed normally.
+            # tutorial_ask_user must be the sole tool call in its turn: it
+            # is recorded as assistant/user dialogue, not a tool-call pair,
+            # so it cannot be interleaved with other tool calls. When it
+            # shares a turn with another tool, we drop it and let the rest
+            # of the turn proceed normally.
             if ask_user_call is not None:
                 other_calls_present = (
                     bool(update_plan_calls)
                     or request_screen_call is not None
                     or request_completion_call is not None
                 )
-                if self.turn_zero_consumed:
-                    self.history.append(
-                        HistoryEntry(
-                            role="tool",
-                            content=(
-                                f"{ASK_USER_TOOL_NAME} rejected: valid only "
-                                "on the first turn, before any "
-                                f"{UPDATE_PLAN_TOOL_NAME}. Proceed with "
-                                "your plan using the information you have."
-                            ),
-                        )
-                    )
-                    ask_user_call = None
-                elif other_calls_present:
+                if other_calls_present:
                     self.history.append(
                         HistoryEntry(
                             role="tool",
@@ -920,10 +906,9 @@ class TutorialSession:
                         )
                     )
                 _log_turn_summary()
-                # Either the question was answered (history now has the
-                # Q&A) or the call was rejected with a tool note. Either
-                # way the gate is closed for this goal.
-                self.turn_zero_consumed = True
+                # The question was answered (history now has the Q&A) or
+                # the call was rejected with a tool note. Loop again so the
+                # planner can ask more, plan, or act on the answers.
                 continue
 
             # Only the most recent update_plan in a turn is honored; earlier
@@ -946,9 +931,6 @@ class TutorialSession:
                     await self._execute_plan_update_call(update_plan_calls[-1])
                 finally:
                     merge_elapsed_ms = (time.perf_counter() - merge_started_at) * 1000.0
-                # Once the planner has emitted any plan, the turn-0
-                # clarifying-question gate is closed for this goal.
-                self.turn_zero_consumed = True
 
             if request_screen_call is not None:
                 try:
@@ -980,6 +962,17 @@ class TutorialSession:
             "[session] agent_loop hit MAX_AGENT_TURNS",
             extra={"session_id": self.session_id},
         )
+        # Every other loop exit emits a terminal status; this one must too,
+        # or the overlay is left spinning on "Thinking" with no signal to
+        # leave it (e.g. a planner that keeps asking instead of planning).
+        message = (
+            "I wasn't able to finish planning this. Tell me a bit more and "
+            "I'll try again."
+        )
+        self.history.append(HistoryEntry(role="assistant", content=message))
+        await self.emit(TextResponseEventLike(text=message))
+        self.status = "ready"
+        await self.emit(StatusChangedEvent(status="ready", label="Ready"))
 
     async def _emit_screen_request_stall(self, reason: str) -> None:
         reason = reason.strip()

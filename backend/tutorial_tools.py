@@ -357,9 +357,9 @@ class TutorialAskUserArguments(_StrictModel):
         max_length=4,
         description=(
             "1-4 independent clarifying questions to ask in a single "
-            "batch. Bundle related decisions instead of chaining multiple "
-            "ask_user calls -- you only get one shot at the user before "
-            "planning. Each question must have a unique question_id."
+            "batch. Bundle related decisions into one batch rather than "
+            "drip-feeding them one at a time -- every batch costs the user "
+            "a round-trip. Each question must have a unique question_id."
         ),
     )
 
@@ -447,12 +447,13 @@ def openai_tutorial_tool_definitions() -> list[dict[str, Any]]:
         _build_openai_tool(
             name=ASK_USER_TOOL_NAME,
             description=(
-                "Ask the user 1-4 clarifying questions BEFORE planning when "
-                "their stated goal is genuinely ambiguous and multiple "
-                "reasonable workflows fit. Valid ONLY on the first turn, "
-                "before any tutorial_update_plan. Bundle independent "
-                "questions into a single call (up to 4) rather than "
-                "chaining ask_user calls -- every call costs a human "
+                "Ask the user 1-4 clarifying questions when their goal is "
+                "genuinely ambiguous and multiple reasonable workflows "
+                "fit. You may ask on any turn, as often as the workflow "
+                "genuinely needs it -- but must be the sole tool call in "
+                "its turn, and never re-ask something already answered. "
+                "Bundle independent questions into a single call (up to 4) "
+                "rather than chaining calls -- every batch costs a human "
                 "round-trip. Prefer response_mode='options' with 2-4 "
                 "mutually exclusive suggestions; the user can always "
                 "supply their own answer. Do not use this to confirm "

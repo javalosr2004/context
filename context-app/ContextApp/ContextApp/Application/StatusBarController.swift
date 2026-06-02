@@ -1,22 +1,44 @@
 import AppKit
+import Combine
 
 @MainActor
 final class StatusBarController {
+    private static let evalModeDefaultsKey = "eval_mode_enabled"
+    static let groundingAutoFireDefaultsKey = "gui_fire_auto"
+
+    /// Whether the grounding agent should fire automatically when the
+    /// backend signals a new step. When off, grounding only runs after the
+    /// user explicitly presses a step in the overlay.
+    nonisolated static func isGroundingAutoFireEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: groundingAutoFireDefaultsKey)
+    }
+
     private let endpointStore: GroundingEndpointStore
+    private let onShowOverlay: () -> Void
     private let onTestBbox: () -> Void
     private let statusItem: NSStatusItem
     private let tutorialEndpointStore: TutorialAPIEndpointStore
+    private let recordingController: RecordingController
+    private lazy var recordingsWindow = RecordingsWindowController(controller: recordingController)
+    private var recordingCancellable: AnyCancellable?
 
     init(
         endpointStore: GroundingEndpointStore,
         tutorialEndpointStore: TutorialAPIEndpointStore,
+        recordingController: RecordingController,
+        onShowOverlay: @escaping () -> Void,
         onTestBbox: @escaping () -> Void
     ) {
         self.endpointStore = endpointStore
+        self.onShowOverlay = onShowOverlay
         self.onTestBbox = onTestBbox
         self.tutorialEndpointStore = tutorialEndpointStore
+        self.recordingController = recordingController
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         configureStatusItem()
+        recordingCancellable = recordingController.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildMenu() }
     }
 
     func stop() {
@@ -34,6 +56,18 @@ final class StatusBarController {
 
     private func rebuildMenu() {
         let menu = NSMenu()
+        menu.addItem(CallbackMenuItem(title: "Show Overlay", actionHandler: { [weak self] in
+            self?.showOverlay()
+        }))
+        menu.addItem(NSMenuItem.separator())
+        let recordTitle = recordingController.isRecording ? "Stop Recording" : "Record..."
+        menu.addItem(CallbackMenuItem(title: recordTitle, actionHandler: { [weak self] in
+            self?.recordingController.toggleRecording()
+        }))
+        menu.addItem(CallbackMenuItem(title: "Show Recordings...", actionHandler: { [weak self] in
+            self?.recordingsWindow.show()
+        }))
+        menu.addItem(NSMenuItem.separator())
         let endpointItem = NSMenuItem(title: endpointTitle(), action: nil, keyEquivalent: "")
         endpointItem.isEnabled = false
         menu.addItem(endpointItem)
@@ -57,6 +91,22 @@ final class StatusBarController {
         }))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(CallbackMenuItem(title: "Test green bbox", actionHandler: onTestBbox))
+        menu.addItem(NSMenuItem.separator())
+        let evalItem = CallbackMenuItem(
+            title: "Eval Mode: \(isEvalModeEnabled() ? "On" : "Off")",
+            actionHandler: { [weak self] in self?.toggleEvalMode() }
+        )
+        evalItem.toolTip = "When on, the overlay shows ✓/✗ buttons next to each step so you can label runs for eval extraction."
+        evalItem.state = isEvalModeEnabled() ? .on : .off
+        menu.addItem(evalItem)
+        let autoFire = StatusBarController.isGroundingAutoFireEnabled()
+        let groundingAutoFireItem = CallbackMenuItem(
+            title: "Auto-fire Grounding: \(autoFire ? "On" : "Off")",
+            actionHandler: { [weak self] in self?.toggleGroundingAutoFire() }
+        )
+        groundingAutoFireItem.toolTip = "When off, the grounding agent only runs after you press a step in the overlay. When on, it fires automatically on every step_ready."
+        groundingAutoFireItem.state = autoFire ? .on : .off
+        menu.addItem(groundingAutoFireItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(CallbackMenuItem(title: "Quit Context", actionHandler: quitApplication))
         statusItem.menu = menu
@@ -150,7 +200,32 @@ final class StatusBarController {
         alert.runModal()
     }
 
+    private func showOverlay() {
+        NSApp.activate(ignoringOtherApps: true)
+        onShowOverlay()
+    }
+
+    private func isEvalModeEnabled() -> Bool {
+        UserDefaults.standard.bool(forKey: StatusBarController.evalModeDefaultsKey)
+    }
+
+    private func toggleEvalMode() {
+        let next = !isEvalModeEnabled()
+        UserDefaults.standard.set(next, forKey: StatusBarController.evalModeDefaultsKey)
+        rebuildMenu()
+    }
+
+    private func toggleGroundingAutoFire() {
+        let next = !StatusBarController.isGroundingAutoFireEnabled()
+        UserDefaults.standard.set(next, forKey: StatusBarController.groundingAutoFireDefaultsKey)
+        rebuildMenu()
+    }
+
     private func quitApplication() {
         NSApplication.shared.terminate(nil)
+    }
+
+    func showRecordings() {
+        recordingsWindow.show()
     }
 }

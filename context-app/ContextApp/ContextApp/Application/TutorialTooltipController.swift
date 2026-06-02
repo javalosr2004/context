@@ -4,26 +4,47 @@ import SwiftUI
 @MainActor
 final class TutorialTooltipController {
     private let screenProvider: () -> NSScreen?
+    private let onNextProvider: () -> (() -> Void)?
     private var panel: TutorialTooltipPanel?
 
-    init(screenProvider: @escaping () -> NSScreen?) {
+    private static let contentWidth: CGFloat = 280
+
+    /// The interactive panel currently on screen, or nil if hidden. Exposed
+    /// so the focus-mask click classifier can treat clicks on the tooltip
+    /// (e.g. on its Next button) as ignored rather than outside-cutout.
+    var interactiveWindow: NSWindow? { panel }
+
+    init(
+        screenProvider: @escaping () -> NSScreen?,
+        onNextProvider: @escaping () -> (() -> Void)? = { nil }
+    ) {
         self.screenProvider = screenProvider
+        self.onNextProvider = onNextProvider
     }
 
-    func show(beside rect: CGRect, message: String) {
+    func show(beside rect: CGRect, message: String, keys: String? = nil) {
         guard let screen = screenProvider(), !message.isEmpty else { return }
         hide()
 
-        let size = CGSize(width: 280, height: 96)
+        let onNext = onNextProvider()
+        let hostingView = NSHostingView(rootView: TutorialTooltipView(
+            message: message,
+            keys: keys,
+            onNext: onNext
+        )
+        .frame(width: Self.contentWidth))
+
+        let fittingHeight = max(hostingView.fittingSize.height, 1)
+        let size = CGSize(width: Self.contentWidth, height: fittingHeight)
         let frame = TutorialTooltipController.frame(
             for: size,
             anchor: rect,
             in: screen.frame
         )
 
-        let newPanel = TutorialTooltipPanel(frame: frame)
+        let newPanel = TutorialTooltipPanel(frame: frame, allowsMouseEvents: onNext != nil)
         newPanel.hasShadow = true
-        newPanel.contentView = NSHostingView(rootView: TutorialTooltipView(message: message))
+        newPanel.contentView = hostingView
         newPanel.orderFrontRegardless()
         panel = newPanel
     }
@@ -72,7 +93,7 @@ final class TutorialTooltipController {
 }
 
 final class TutorialTooltipPanel: NSPanel {
-    init(frame: NSRect) {
+    init(frame: NSRect, allowsMouseEvents: Bool = false) {
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -82,7 +103,10 @@ final class TutorialTooltipPanel: NSPanel {
         acceptsMouseMovedEvents = false
         backgroundColor = .clear
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        ignoresMouseEvents = true
+        // When the tooltip carries a Next button it must accept clicks;
+        // otherwise it stays click-through so the user can interact with
+        // the underlying app freely.
+        ignoresMouseEvents = !allowsMouseEvents
         isOpaque = false
         level = .screenSaver
         titleVisibility = .hidden
@@ -94,23 +118,54 @@ final class TutorialTooltipPanel: NSPanel {
 
 struct TutorialTooltipView: View {
     let message: String
+    let keys: String?
+    let onNext: (() -> Void)?
+
+    init(message: String, keys: String? = nil, onNext: (() -> Void)? = nil) {
+        self.message = message
+        self.keys = keys
+        self.onNext = onNext
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "hand.point.up.left.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.tint)
-                .padding(.top, 1)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "hand.point.up.left.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .padding(.top, 1)
 
-            Text(message)
-                .font(.system(size: 12.5))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(message)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let keys, !keys.isEmpty {
+                KeyChordView(chord: keys)
+                    .padding(.leading, 24)
+            }
+
+            if let onNext {
+                HStack {
+                    Spacer()
+                    Button(action: onNext) {
+                        Text("Next")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.panelCornerRadius, style: .continuous))
         .overlay(
@@ -118,5 +173,83 @@ struct TutorialTooltipView: View {
                 .stroke(OverlayTheme.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
+    }
+}
+
+struct KeyChordView: View {
+    let chord: String
+
+    var body: some View {
+        let tokens = KeyChordParser.tokens(from: chord)
+        HStack(spacing: 6) {
+            ForEach(Array(tokens.enumerated()), id: \.offset) { index, token in
+                if index > 0 {
+                    Text("+")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                KeycapChip(label: token)
+            }
+        }
+    }
+}
+
+private struct KeycapChip: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .frame(minWidth: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.white.opacity(0.16))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(Color.white.opacity(0.35), lineWidth: 0.75)
+            )
+            .shadow(color: .black.opacity(0.25), radius: 1, y: 1)
+    }
+}
+
+enum KeyChordParser {
+    /// Split a chord like "command+shift+k" into display tokens.
+    static func tokens(from chord: String) -> [String] {
+        chord
+            .split(whereSeparator: { $0 == "+" || $0 == "-" })
+            .map { displayToken(for: String($0).trimmingCharacters(in: .whitespaces)) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func displayToken(for raw: String) -> String {
+        switch raw.lowercased() {
+        case "cmd", "command", "meta", "super": return "⌘"
+        case "ctrl", "control": return "⌃"
+        case "alt", "option", "opt": return "⌥"
+        case "shift": return "⇧"
+        case "fn": return "fn"
+        case "return", "enter": return "⏎"
+        case "esc", "escape": return "⎋"
+        case "tab": return "⇥"
+        case "delete", "del", "backspace": return "⌫"
+        case "forwarddelete", "fwddel": return "⌦"
+        case "space", "spacebar": return "Space"
+        case "up", "arrowup": return "↑"
+        case "down", "arrowdown": return "↓"
+        case "left", "arrowleft": return "←"
+        case "right", "arrowright": return "→"
+        case "pageup": return "PgUp"
+        case "pagedown": return "PgDn"
+        case "home": return "Home"
+        case "end": return "End"
+        case "capslock": return "⇪"
+        default:
+            if raw.count == 1 { return raw.uppercased() }
+            return raw.prefix(1).uppercased() + raw.dropFirst()
+        }
     }
 }

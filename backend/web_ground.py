@@ -169,8 +169,102 @@ def web_ground_producer_from_environment(
     environment: Mapping[str, str] | None = None,
 ) -> WebGroundProducer:
     env = environment if environment is not None else os.environ
+
+    enrichment_url = env.get("ENRICHMENT_LAYER_URL", "").strip()
+    if enrichment_url:
+        from backend.enrichment_client import EnrichmentSnippetsProducer
+
+        try:
+            num_sources = int(env.get("ENRICHMENT_NUM_SOURCES", "5"))
+        except ValueError:
+            num_sources = 5
+        inner = EnrichmentSnippetsProducer(
+            base_url=enrichment_url, num_sources=num_sources,
+        )
+        return _maybe_wrap_with_cache(inner, env)
+
     api_key = env.get("TAVILY_API_KEY", "").strip()
     if not api_key:
         return NullWebGroundProducer()
     search_depth = env.get("TAVILY_SEARCH_DEPTH", "basic").strip() or "basic"
     return TavilyWebGroundProducer(api_key=api_key, search_depth=search_depth)
+
+
+def _maybe_wrap_with_cache(
+    inner: WebGroundProducer,
+    env: Mapping[str, str],
+) -> WebGroundProducer:
+    """Wrap the enrichment producer with a semantic cache if the
+    feature flag is on AND embedding credentials are available.
+
+    Failure-isolated: any setup error returns the raw producer so a
+    misconfigured cache cannot break grounding.
+    """
+    if env.get("ENRICHMENT_CACHE_ENABLED", "").strip().lower() not in (
+        "1", "true", "yes", "on",
+    ):
+        return inner
+
+    openai_key = (
+        env.get("EMBEDDINGS_API_KEY", "").strip()
+        or env.get("OPENAI_API_KEY", "").strip()
+    )
+    if not openai_key:
+        logger.info(
+            "[cache] disabled — ENRICHMENT_CACHE_ENABLED set but no "
+            "EMBEDDINGS_API_KEY/OPENAI_API_KEY found; running uncached",
+        )
+        return inner
+
+    try:
+        from backend.cached_enrichment_client import (
+            CachedEnrichmentSnippetsProducer,
+        )
+        from backend.embeddings_client import OpenAIEmbeddingsClient
+        from backend.grounding_cache import (
+            CacheStats, NegativeCache, QueryCache,
+        )
+
+        embeddings = OpenAIEmbeddingsClient(api_key=openai_key)
+        stats = CacheStats()
+        query_cache = QueryCache(
+            embeddings=embeddings,
+            stats=stats,
+            ttl_seconds=_float_env(env, "ENRICHMENT_CACHE_QUERY_TTL", 24 * 3600),
+            similarity_threshold=_float_env(
+                env, "ENRICHMENT_CACHE_SIMILARITY", 0.88,
+            ),
+        )
+        negative_cache = NegativeCache(
+            embeddings=embeddings,
+            stats=stats,
+            ttl_seconds=_float_env(env, "ENRICHMENT_CACHE_NEG_TTL", 600),
+        )
+        wrapped = CachedEnrichmentSnippetsProducer(
+            inner=inner,
+            query_cache=query_cache,
+            negative_cache=negative_cache,
+            stats=stats,
+        )
+        logger.info("[cache] enrichment grounding wrapped with semantic cache")
+        return wrapped
+    except Exception:
+        logger.exception(
+            "[cache] failed to construct cache wrapper; falling back to raw "
+            "enrichment producer",
+        )
+        return inner
+
+
+def _float_env(env: Mapping[str, str], key: str, default: float) -> float:
+    raw = env.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "[cache] ignoring non-numeric env value",
+            extra={"key": key, "value": raw, "fallback": default},
+        )
+        return default

@@ -1,0 +1,32 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+:8080 {
+	handle /recordings* {
+		reverse_proxy recording-enrichment:8000
+	}
+
+	handle_path /grounding/* {
+		reverse_proxy gui-grounding:8080
+	}
+
+	handle {
+		reverse_proxy backend:8000
+	}
+
+	# Gzip buffers writes until a compressed block can be emitted, which
+	# breaks per-event flushing on Server-Sent Events. Exclude SSE paths.
+	@compressible {
+		not path /recordings/*/events/stream
+		not path /conversations/stream
+	}
+	encode @compressible gzip
+
+	log {
+		output stdout
+		format console
+	}
+}

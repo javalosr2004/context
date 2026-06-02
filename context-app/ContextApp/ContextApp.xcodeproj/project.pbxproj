@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2D9F89B82FC7E96300412555 /* IvanWebpage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D9F89B72FC7E95F00412555 /* IvanWebpage.swift */; };
+		2D9F89BA2FC7E9A700412555 /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = 2D9F89B92FC7E9A700412555 /* index.html */; };
 		A20000000000000000000001 /* ContextAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* ContextAppApp.swift */; };
 		A20000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* AppDelegate.swift */; };
 		A20000000000000000000003 /* PopupState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* PopupState.swift */; };
@@ -16,15 +18,14 @@
 		A20000000000000000000007 /* ChatMessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000037 /* ChatMessageStore.swift */; };
 		A20000000000000000000008 /* OverlayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000038 /* OverlayCoordinator.swift */; };
 		A20000000000000000000009 /* PopupController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000039 /* PopupController.swift */; };
-		A2000000000000000000000A /* IconMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003A /* IconMenuController.swift */; };
 		A2000000000000000000000B /* DebugBboxController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003B /* DebugBboxController.swift */; };
 		A2000000000000000000000C /* PopupPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003C /* PopupPanel.swift */; };
-		A2000000000000000000000D /* IconPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003D /* IconPanel.swift */; };
+		B10000000000000000000001 /* ChatHistoryPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* ChatHistoryPanel.swift */; };
+		B10000000000000000000002 /* ChatHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* ChatHistoryView.swift */; };
+		B10000000000000000000003 /* ChatHistoryController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* ChatHistoryController.swift */; };
 		A2000000000000000000000E /* DebugBboxPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003E /* DebugBboxPanel.swift */; };
 		A2000000000000000000000F /* ChatPopupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000003F /* ChatPopupView.swift */; };
-		A20000000000000000000010 /* IconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* IconView.swift */; };
 		A20000000000000000000011 /* DebugBboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* DebugBboxView.swift */; };
-		A20000000000000000000012 /* IconContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000042 /* IconContextMenu.swift */; };
 		A20000000000000000000013 /* PopupStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000043 /* PopupStateTests.swift */; };
 		A20000000000000000000014 /* ScreenBoundsKeeperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000044 /* ScreenBoundsKeeperTests.swift */; };
 		A20000000000000000000015 /* BboxPositionGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000045 /* BboxPositionGeneratorTests.swift */; };
@@ -33,10 +34,6 @@
 		A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000048 /* GroundingBoundingBox.swift */; };
 		A20000000000000000000019 /* GroundingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000049 /* GroundingClient.swift */; };
 		A2000000000000000000001A /* ScreenFrameCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004A /* ScreenFrameCapture.swift */; };
-		AC0000000000000000000001 /* ScreenStabilityWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000011 /* ScreenStabilityWatcher.swift */; };
-		AC0000000000000000000002 /* StabilityIndicatorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000012 /* StabilityIndicatorController.swift */; };
-		AC0000000000000000000004 /* ErrorIndicatorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000014 /* ErrorIndicatorController.swift */; };
-		AC0000000000000000000003 /* ScreenStabilityWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000013 /* ScreenStabilityWatcherTests.swift */; };
 		A2000000000000000000001B /* ScreenGroundingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004B /* ScreenGroundingController.swift */; };
 		A2000000000000000000001C /* GroundingBoundingBoxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004C /* GroundingBoundingBoxTests.swift */; };
 		A2000000000000000000001D /* GroundingEndpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000004D /* GroundingEndpointStore.swift */; };
@@ -47,6 +44,7 @@
 		A30000000000000000000002 /* ScreenFrameMaskerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000052 /* ScreenFrameMaskerTests.swift */; };
 		A40000000000000000000001 /* OverlayTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000003 /* OverlayTheme.swift */; };
 		A40000000000000000000002 /* ContextIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000004 /* ContextIcon.png */; };
+		A40000000000000000000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000007 /* Assets.xcassets */; };
 		A50000000000000000000001 /* FocusMaskLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000011 /* FocusMaskLayout.swift */; };
 		A50000000000000000000002 /* FocusMaskController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000012 /* FocusMaskController.swift */; };
 		A50000000000000000000003 /* FocusMaskPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50000000000000000000013 /* FocusMaskPanel.swift */; };
@@ -74,6 +72,44 @@
 		AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* ApplicationMenuController.swift */; };
 		AB0000000000000000000001 /* MarkdownTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000011 /* MarkdownTextView.swift */; };
 		AB0000000000000000000002 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000000000000000000013 /* Markdown */; };
+		AC0000000000000000000001 /* ScreenStabilityWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000011 /* ScreenStabilityWatcher.swift */; };
+		AC0000000000000000000002 /* StabilityIndicatorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000012 /* StabilityIndicatorController.swift */; };
+		AC0000000000000000000003 /* ScreenStabilityWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000013 /* ScreenStabilityWatcherTests.swift */; };
+		AC0000000000000000000004 /* ErrorIndicatorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000014 /* ErrorIndicatorController.swift */; };
+		AC0000000000000000000005 /* SystemDialogPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC0000000000000000000015 /* SystemDialogPresenter.swift */; };
+		AD0000000000000000000001 /* EdgeTabAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000011 /* EdgeTabAnchor.swift */; };
+		AD0000000000000000000002 /* EdgeTabPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000012 /* EdgeTabPanel.swift */; };
+		AD0000000000000000000003 /* EdgeTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000013 /* EdgeTabView.swift */; };
+		AD0000000000000000000004 /* EdgeTabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000014 /* EdgeTabController.swift */; };
+		AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000015 /* EdgeTabAnchorTests.swift */; };
+		AE0000000000000000000001 /* WebGroundingEndpointStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000011 /* WebGroundingEndpointStore.swift */; };
+		AE0000000000000000000002 /* DevSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000012 /* DevSettingsView.swift */; };
+		AE0000000000000000000003 /* DevSettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000013 /* DevSettingsWindowController.swift */; };
+		AF0000000000000000000001 /* ClipboardPopoverController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0000000000000000000011 /* ClipboardPopoverController.swift */; };
+		B00000000000000000000001 /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* Schema.swift */; };
+		B00000000000000000000002 /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* Permissions.swift */; };
+		B00000000000000000000003 /* MonotonicClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* MonotonicClock.swift */; };
+		B00000000000000000000004 /* ContinuousFrameStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ContinuousFrameStream.swift */; };
+		B00000000000000000000005 /* InputEventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* InputEventTap.swift */; };
+		B00000000000000000000006 /* GoalSheetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* GoalSheetController.swift */; };
+		B00000000000000000000007 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* RecordingSession.swift */; };
+		B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* RecordingSchemaTests.swift */; };
+		B00000000000000000000009 /* ScrollSessionizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* ScrollSessionizer.swift */; };
+		B0000000000000000000000A /* Cropper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* Cropper.swift */; };
+		B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* ScrollSessionizerTests.swift */; };
+		B0000000000000000000000C /* CropperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* CropperTests.swift */; };
+		B0000000000000000000000D /* EnrichmentUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D /* EnrichmentUploader.swift */; };
+		B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* EnrichmentUploaderTests.swift */; };
+		B0000000000000000000000F /* EnrichmentStatusStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F /* EnrichmentStatusStream.swift */; };
+		B00000000000000000000010 /* SSEParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* SSEParserTests.swift */; };
+		B00000000000000000000030 /* RecordingsIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040 /* RecordingsIndex.swift */; };
+		B00000000000000000000031 /* RecordingsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000041 /* RecordingsListView.swift */; };
+		B00000000000000000000032 /* RecordingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000042 /* RecordingsWindowController.swift */; };
+		B00000000000000000000033 /* RecordingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000043 /* RecordingController.swift */; };
+		B00000000000000000000034 /* RecordingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000044 /* RecordingDetailView.swift */; };
+		B00000000000000000000050 /* KeyTypingSessionizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* KeyTypingSessionizer.swift */; };
+		B00000000000000000000051 /* KeyTypingSessionizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* KeyTypingSessionizerTests.swift */; };
+		B00000000000000000000070 /* RecordingStatusClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000071 /* RecordingStatusClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +123,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		2D9F89B72FC7E95F00412555 /* IvanWebpage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IvanWebpage.swift; sourceTree = "<group>"; };
+		2D9F89B92FC7E9A700412555 /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
 		A10000000000000000000004 /* ContextApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ContextApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000005 /* ContextAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ContextAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -100,15 +138,14 @@
 		A20000000000000000000037 /* ChatMessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageStore.swift; sourceTree = "<group>"; };
 		A20000000000000000000038 /* OverlayCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayCoordinator.swift; sourceTree = "<group>"; };
 		A20000000000000000000039 /* PopupController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupController.swift; sourceTree = "<group>"; };
-		A2000000000000000000003A /* IconMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconMenuController.swift; sourceTree = "<group>"; };
 		A2000000000000000000003B /* DebugBboxController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxController.swift; sourceTree = "<group>"; };
 		A2000000000000000000003C /* PopupPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupPanel.swift; sourceTree = "<group>"; };
-		A2000000000000000000003D /* IconPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPanel.swift; sourceTree = "<group>"; };
+		B10000000000000000000011 /* ChatHistoryPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryPanel.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* ChatHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryView.swift; sourceTree = "<group>"; };
+		B10000000000000000000013 /* ChatHistoryController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryController.swift; sourceTree = "<group>"; };
 		A2000000000000000000003E /* DebugBboxPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxPanel.swift; sourceTree = "<group>"; };
 		A2000000000000000000003F /* ChatPopupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPopupView.swift; sourceTree = "<group>"; };
-		A20000000000000000000040 /* IconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconView.swift; sourceTree = "<group>"; };
 		A20000000000000000000041 /* DebugBboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugBboxView.swift; sourceTree = "<group>"; };
-		A20000000000000000000042 /* IconContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconContextMenu.swift; sourceTree = "<group>"; };
 		A20000000000000000000043 /* PopupStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupStateTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000044 /* ScreenBoundsKeeperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenBoundsKeeperTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000045 /* BboxPositionGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BboxPositionGeneratorTests.swift; sourceTree = "<group>"; };
@@ -117,10 +154,6 @@
 		A20000000000000000000048 /* GroundingBoundingBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingBoundingBox.swift; sourceTree = "<group>"; };
 		A20000000000000000000049 /* GroundingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingClient.swift; sourceTree = "<group>"; };
 		A2000000000000000000004A /* ScreenFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameCapture.swift; sourceTree = "<group>"; };
-		AC0000000000000000000011 /* ScreenStabilityWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenStabilityWatcher.swift; sourceTree = "<group>"; };
-		AC0000000000000000000012 /* StabilityIndicatorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StabilityIndicatorController.swift; sourceTree = "<group>"; };
-		AC0000000000000000000014 /* ErrorIndicatorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorIndicatorController.swift; sourceTree = "<group>"; };
-		AC0000000000000000000013 /* ScreenStabilityWatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenStabilityWatcherTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000004B /* ScreenGroundingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGroundingController.swift; sourceTree = "<group>"; };
 		A2000000000000000000004C /* GroundingBoundingBoxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingBoundingBoxTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000004D /* GroundingEndpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundingEndpointStore.swift; sourceTree = "<group>"; };
@@ -131,6 +164,7 @@
 		A20000000000000000000052 /* ScreenFrameMaskerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameMaskerTests.swift; sourceTree = "<group>"; };
 		A40000000000000000000003 /* OverlayTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayTheme.swift; sourceTree = "<group>"; };
 		A40000000000000000000004 /* ContextIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = ContextIcon.png; sourceTree = "<group>"; };
+		A40000000000000000000007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A50000000000000000000011 /* FocusMaskLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskLayout.swift; sourceTree = "<group>"; };
 		A50000000000000000000012 /* FocusMaskController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskController.swift; sourceTree = "<group>"; };
 		A50000000000000000000013 /* FocusMaskPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusMaskPanel.swift; sourceTree = "<group>"; };
@@ -157,6 +191,44 @@
 		A90000000000000000000011 /* TutorialTooltipController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialTooltipController.swift; sourceTree = "<group>"; };
 		AA0000000000000000000011 /* ApplicationMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationMenuController.swift; sourceTree = "<group>"; };
 		AB0000000000000000000011 /* MarkdownTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextView.swift; sourceTree = "<group>"; };
+		AC0000000000000000000011 /* ScreenStabilityWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenStabilityWatcher.swift; sourceTree = "<group>"; };
+		AC0000000000000000000012 /* StabilityIndicatorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StabilityIndicatorController.swift; sourceTree = "<group>"; };
+		AC0000000000000000000013 /* ScreenStabilityWatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenStabilityWatcherTests.swift; sourceTree = "<group>"; };
+		AC0000000000000000000014 /* ErrorIndicatorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorIndicatorController.swift; sourceTree = "<group>"; };
+		AC0000000000000000000015 /* SystemDialogPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemDialogPresenter.swift; sourceTree = "<group>"; };
+		AD0000000000000000000011 /* EdgeTabAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchor.swift; sourceTree = "<group>"; };
+		AD0000000000000000000012 /* EdgeTabPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabPanel.swift; sourceTree = "<group>"; };
+		AD0000000000000000000013 /* EdgeTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabView.swift; sourceTree = "<group>"; };
+		AD0000000000000000000014 /* EdgeTabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabController.swift; sourceTree = "<group>"; };
+		AD0000000000000000000015 /* EdgeTabAnchorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeTabAnchorTests.swift; sourceTree = "<group>"; };
+		AE0000000000000000000011 /* WebGroundingEndpointStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebGroundingEndpointStore.swift; sourceTree = "<group>"; };
+		AE0000000000000000000012 /* DevSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevSettingsView.swift; sourceTree = "<group>"; };
+		AE0000000000000000000013 /* DevSettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevSettingsWindowController.swift; sourceTree = "<group>"; };
+		AF0000000000000000000011 /* ClipboardPopoverController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardPopoverController.swift; sourceTree = "<group>"; };
+		B00000000000000000000011 /* Schema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schema.swift; sourceTree = "<group>"; };
+		B00000000000000000000012 /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
+		B00000000000000000000013 /* MonotonicClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonotonicClock.swift; sourceTree = "<group>"; };
+		B00000000000000000000014 /* ContinuousFrameStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuousFrameStream.swift; sourceTree = "<group>"; };
+		B00000000000000000000015 /* InputEventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputEventTap.swift; sourceTree = "<group>"; };
+		B00000000000000000000016 /* GoalSheetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalSheetController.swift; sourceTree = "<group>"; };
+		B00000000000000000000017 /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
+		B00000000000000000000018 /* RecordingSchemaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSchemaTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000019 /* ScrollSessionizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSessionizer.swift; sourceTree = "<group>"; };
+		B0000000000000000000001A /* Cropper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cropper.swift; sourceTree = "<group>"; };
+		B0000000000000000000001B /* ScrollSessionizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSessionizerTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001C /* CropperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CropperTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001D /* EnrichmentUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentUploader.swift; sourceTree = "<group>"; };
+		B0000000000000000000001E /* EnrichmentUploaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentUploaderTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001F /* EnrichmentStatusStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentStatusStream.swift; sourceTree = "<group>"; };
+		B00000000000000000000021 /* SSEParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParserTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000040 /* RecordingsIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsIndex.swift; sourceTree = "<group>"; };
+		B00000000000000000000041 /* RecordingsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsListView.swift; sourceTree = "<group>"; };
+		B00000000000000000000042 /* RecordingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingsWindowController.swift; sourceTree = "<group>"; };
+		B00000000000000000000043 /* RecordingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingController.swift; sourceTree = "<group>"; };
+		B00000000000000000000044 /* RecordingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDetailView.swift; sourceTree = "<group>"; };
+		B00000000000000000000060 /* KeyTypingSessionizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTypingSessionizer.swift; sourceTree = "<group>"; };
+		B00000000000000000000061 /* KeyTypingSessionizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyTypingSessionizerTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000071 /* RecordingStatusClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStatusClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -219,6 +291,13 @@
 				A70000000000000000000015 /* TutorialPlanAPIClientTests.swift */,
 				A70000000000000000000016 /* TutorialActionConsumerTests.swift */,
 				A80000000000000000000013 /* TutorialSessionAPIClientTests.swift */,
+				AD0000000000000000000015 /* EdgeTabAnchorTests.swift */,
+				B00000000000000000000018 /* RecordingSchemaTests.swift */,
+				B0000000000000000000001B /* ScrollSessionizerTests.swift */,
+				B00000000000000000000061 /* KeyTypingSessionizerTests.swift */,
+				B0000000000000000000001C /* CropperTests.swift */,
+				B0000000000000000000001E /* EnrichmentUploaderTests.swift */,
+				B00000000000000000000021 /* SSEParserTests.swift */,
 			);
 			path = ContextAppTests;
 			sourceTree = "<group>";
@@ -256,6 +335,8 @@
 				A60000000000000000000011 /* TutorialPlan.swift */,
 				A60000000000000000000015 /* TutorialPlanDisplay.swift */,
 				A70000000000000000000011 /* TutorialAPIEndpointStore.swift */,
+				AD0000000000000000000011 /* EdgeTabAnchor.swift */,
+				AE0000000000000000000011 /* WebGroundingEndpointStore.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -263,16 +344,18 @@
 		A10000000000000000000010 /* Application */ = {
 			isa = PBXGroup;
 			children = (
+				2D9F89B72FC7E95F00412555 /* IvanWebpage.swift */,
+				2D9F89B92FC7E9A700412555 /* index.html */,
 				A20000000000000000000038 /* OverlayCoordinator.swift */,
 				AA0000000000000000000011 /* ApplicationMenuController.swift */,
 				A20000000000000000000039 /* PopupController.swift */,
-				A2000000000000000000003A /* IconMenuController.swift */,
 				A2000000000000000000003B /* DebugBboxController.swift */,
 				A20000000000000000000049 /* GroundingClient.swift */,
 				A2000000000000000000004A /* ScreenFrameCapture.swift */,
 				AC0000000000000000000011 /* ScreenStabilityWatcher.swift */,
 				AC0000000000000000000012 /* StabilityIndicatorController.swift */,
 				AC0000000000000000000014 /* ErrorIndicatorController.swift */,
+				AC0000000000000000000015 /* SystemDialogPresenter.swift */,
 				A20000000000000000000051 /* ScreenFrameMasker.swift */,
 				A2000000000000000000004B /* ScreenGroundingController.swift */,
 				A2000000000000000000004F /* StatusBarController.swift */,
@@ -283,6 +366,11 @@
 				A70000000000000000000012 /* TutorialPlanController.swift */,
 				A80000000000000000000012 /* TutorialSessionController.swift */,
 				A90000000000000000000011 /* TutorialTooltipController.swift */,
+				AD0000000000000000000014 /* EdgeTabController.swift */,
+				AE0000000000000000000013 /* DevSettingsWindowController.swift */,
+				AF0000000000000000000011 /* ClipboardPopoverController.swift */,
+				B10000000000000000000013 /* ChatHistoryController.swift */,
+				B00000000000000000000020 /* Recording */,
 			);
 			path = Application;
 			sourceTree = "<group>";
@@ -304,8 +392,48 @@
 				A10000000000000000000006 /* Info.plist */,
 				A10000000000000000000007 /* ContextApp.entitlements */,
 				A40000000000000000000004 /* ContextIcon.png */,
+				A40000000000000000000007 /* Assets.xcassets */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000021 /* Panels */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000003C /* PopupPanel.swift */,
+				A2000000000000000000003E /* DebugBboxPanel.swift */,
+				A50000000000000000000013 /* FocusMaskPanel.swift */,
+				AD0000000000000000000012 /* EdgeTabPanel.swift */,
+				B10000000000000000000011 /* ChatHistoryPanel.swift */,
+			);
+			path = Panels;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000022 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000003F /* ChatPopupView.swift */,
+				B10000000000000000000012 /* ChatHistoryView.swift */,
+				A20000000000000000000041 /* DebugBboxView.swift */,
+				A50000000000000000000014 /* FocusMaskView.swift */,
+				A50000000000000000000015 /* FocusExitView.swift */,
+				A70000000000000000000013 /* TutorialAPISettingsView.swift */,
+				AB0000000000000000000011 /* MarkdownTextView.swift */,
+				AD0000000000000000000013 /* EdgeTabView.swift */,
+				AE0000000000000000000012 /* DevSettingsView.swift */,
+				B00000000000000000000041 /* RecordingsListView.swift */,
+				B00000000000000000000042 /* RecordingsWindowController.swift */,
+				B00000000000000000000044 /* RecordingDetailView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000023 /* Menu */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000004E /* CallbackMenuItem.swift */,
+			);
+			path = Menu;
 			sourceTree = "<group>";
 		};
 		A40000000000000000000005 /* Design */ = {
@@ -316,38 +444,26 @@
 			path = Design;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000021 /* Panels */ = {
+		B00000000000000000000020 /* Recording */ = {
 			isa = PBXGroup;
 			children = (
-				A2000000000000000000003C /* PopupPanel.swift */,
-				A2000000000000000000003D /* IconPanel.swift */,
-				A2000000000000000000003E /* DebugBboxPanel.swift */,
-				A50000000000000000000013 /* FocusMaskPanel.swift */,
+				B00000000000000000000011 /* Schema.swift */,
+				B00000000000000000000012 /* Permissions.swift */,
+				B00000000000000000000013 /* MonotonicClock.swift */,
+				B00000000000000000000014 /* ContinuousFrameStream.swift */,
+				B00000000000000000000015 /* InputEventTap.swift */,
+				B00000000000000000000016 /* GoalSheetController.swift */,
+				B00000000000000000000017 /* RecordingSession.swift */,
+				B00000000000000000000019 /* ScrollSessionizer.swift */,
+				B00000000000000000000060 /* KeyTypingSessionizer.swift */,
+				B0000000000000000000001A /* Cropper.swift */,
+				B0000000000000000000001D /* EnrichmentUploader.swift */,
+				B0000000000000000000001F /* EnrichmentStatusStream.swift */,
+				B00000000000000000000040 /* RecordingsIndex.swift */,
+				B00000000000000000000043 /* RecordingController.swift */,
+				B00000000000000000000071 /* RecordingStatusClient.swift */,
 			);
-			path = Panels;
-			sourceTree = "<group>";
-		};
-		A20000000000000000000022 /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				A2000000000000000000003F /* ChatPopupView.swift */,
-				A20000000000000000000040 /* IconView.swift */,
-				A20000000000000000000041 /* DebugBboxView.swift */,
-				A50000000000000000000014 /* FocusMaskView.swift */,
-				A50000000000000000000015 /* FocusExitView.swift */,
-				A70000000000000000000013 /* TutorialAPISettingsView.swift */,
-				AB0000000000000000000011 /* MarkdownTextView.swift */,
-			);
-			path = Views;
-			sourceTree = "<group>";
-		};
-		A20000000000000000000023 /* Menu */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000042 /* IconContextMenu.swift */,
-				A2000000000000000000004E /* CallbackMenuItem.swift */,
-			);
-			path = Menu;
+			path = Recording;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -438,6 +554,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A40000000000000000000002 /* ContextIcon.png in Resources */,
+				A40000000000000000000006 /* Assets.xcassets in Resources */,
+				2D9F89BA2FC7E9A700412555 /* index.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -464,15 +582,14 @@
 				A20000000000000000000007 /* ChatMessageStore.swift in Sources */,
 				A20000000000000000000008 /* OverlayCoordinator.swift in Sources */,
 				A20000000000000000000009 /* PopupController.swift in Sources */,
-				A2000000000000000000000A /* IconMenuController.swift in Sources */,
 				A2000000000000000000000B /* DebugBboxController.swift in Sources */,
 				A2000000000000000000000C /* PopupPanel.swift in Sources */,
-				A2000000000000000000000D /* IconPanel.swift in Sources */,
 				A2000000000000000000000E /* DebugBboxPanel.swift in Sources */,
 				A2000000000000000000000F /* ChatPopupView.swift in Sources */,
-				A20000000000000000000010 /* IconView.swift in Sources */,
+				B10000000000000000000001 /* ChatHistoryPanel.swift in Sources */,
+				B10000000000000000000002 /* ChatHistoryView.swift in Sources */,
+				B10000000000000000000003 /* ChatHistoryController.swift in Sources */,
 				A20000000000000000000011 /* DebugBboxView.swift in Sources */,
-				A20000000000000000000012 /* IconContextMenu.swift in Sources */,
 				A40000000000000000000001 /* OverlayTheme.swift in Sources */,
 				A20000000000000000000018 /* GroundingBoundingBox.swift in Sources */,
 				A20000000000000000000019 /* GroundingClient.swift in Sources */,
@@ -480,6 +597,7 @@
 				AC0000000000000000000001 /* ScreenStabilityWatcher.swift in Sources */,
 				AC0000000000000000000002 /* StabilityIndicatorController.swift in Sources */,
 				AC0000000000000000000004 /* ErrorIndicatorController.swift in Sources */,
+				AC0000000000000000000005 /* SystemDialogPresenter.swift in Sources */,
 				A30000000000000000000001 /* ScreenFrameMasker.swift in Sources */,
 				A2000000000000000000001B /* ScreenGroundingController.swift in Sources */,
 				A2000000000000000000001D /* GroundingEndpointStore.swift in Sources */,
@@ -495,6 +613,7 @@
 				A60000000000000000000005 /* TutorialPlanDisplay.swift in Sources */,
 				A60000000000000000000002 /* TutorialPlanAPIClient.swift in Sources */,
 				A80000000000000000000001 /* TutorialSessionAPIClient.swift in Sources */,
+				2D9F89B82FC7E96300412555 /* IvanWebpage.swift in Sources */,
 				A60000000000000000000003 /* TutorialActionConsumer.swift in Sources */,
 				A70000000000000000000001 /* TutorialAPIEndpointStore.swift in Sources */,
 				A70000000000000000000002 /* TutorialPlanController.swift in Sources */,
@@ -503,6 +622,32 @@
 				A70000000000000000000003 /* TutorialAPISettingsView.swift in Sources */,
 				AA0000000000000000000001 /* ApplicationMenuController.swift in Sources */,
 				AB0000000000000000000001 /* MarkdownTextView.swift in Sources */,
+				AD0000000000000000000001 /* EdgeTabAnchor.swift in Sources */,
+				AD0000000000000000000002 /* EdgeTabPanel.swift in Sources */,
+				AD0000000000000000000003 /* EdgeTabView.swift in Sources */,
+				AD0000000000000000000004 /* EdgeTabController.swift in Sources */,
+				AE0000000000000000000001 /* WebGroundingEndpointStore.swift in Sources */,
+				AE0000000000000000000002 /* DevSettingsView.swift in Sources */,
+				AE0000000000000000000003 /* DevSettingsWindowController.swift in Sources */,
+				AF0000000000000000000001 /* ClipboardPopoverController.swift in Sources */,
+				B00000000000000000000001 /* Schema.swift in Sources */,
+				B00000000000000000000002 /* Permissions.swift in Sources */,
+				B00000000000000000000003 /* MonotonicClock.swift in Sources */,
+				B00000000000000000000004 /* ContinuousFrameStream.swift in Sources */,
+				B00000000000000000000005 /* InputEventTap.swift in Sources */,
+				B00000000000000000000006 /* GoalSheetController.swift in Sources */,
+				B00000000000000000000007 /* RecordingSession.swift in Sources */,
+				B00000000000000000000009 /* ScrollSessionizer.swift in Sources */,
+				B00000000000000000000050 /* KeyTypingSessionizer.swift in Sources */,
+				B0000000000000000000000A /* Cropper.swift in Sources */,
+				B0000000000000000000000D /* EnrichmentUploader.swift in Sources */,
+				B0000000000000000000000F /* EnrichmentStatusStream.swift in Sources */,
+				B00000000000000000000030 /* RecordingsIndex.swift in Sources */,
+				B00000000000000000000031 /* RecordingsListView.swift in Sources */,
+				B00000000000000000000032 /* RecordingsWindowController.swift in Sources */,
+				B00000000000000000000033 /* RecordingController.swift in Sources */,
+				B00000000000000000000034 /* RecordingDetailView.swift in Sources */,
+				B00000000000000000000070 /* RecordingStatusClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -527,6 +672,13 @@
 				A70000000000000000000005 /* TutorialPlanAPIClientTests.swift in Sources */,
 				A70000000000000000000006 /* TutorialActionConsumerTests.swift in Sources */,
 				A80000000000000000000003 /* TutorialSessionAPIClientTests.swift in Sources */,
+				AD0000000000000000000005 /* EdgeTabAnchorTests.swift in Sources */,
+				B00000000000000000000008 /* RecordingSchemaTests.swift in Sources */,
+				B0000000000000000000000B /* ScrollSessionizerTests.swift in Sources */,
+				B00000000000000000000051 /* KeyTypingSessionizerTests.swift in Sources */,
+				B0000000000000000000000C /* CropperTests.swift in Sources */,
+				B0000000000000000000000E /* EnrichmentUploaderTests.swift in Sources */,
+				B00000000000000000000010 /* SSEParserTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -661,13 +813,14 @@
 		A1000000000000000000001E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ContextApp/Resources/ContextApp.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = JLFN9SLALB;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ContextApp/Resources/Info.plist;
@@ -688,13 +841,14 @@
 		A1000000000000000000001F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ContextApp/Resources/ContextApp.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = JLFN9SLALB;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ContextApp/Resources/Info.plist;

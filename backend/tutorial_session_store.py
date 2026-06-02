@@ -9,10 +9,12 @@ WebSocket disconnects the live session is removed.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Literal
 from uuid import uuid4
 
+from backend.embeddings_client import EmbeddingsClient, NullEmbeddingsClient
 from backend.llm import MultimodalLLM
+from backend.llm_recording import LLMCallSink
 from backend.tutorial_session import EventSink, TutorialSession
 from backend.web_ground import NullWebGroundProducer, WebGroundProducer
 from backend.tutorial_session_events import (
@@ -37,10 +39,22 @@ class TutorialSessionStore:
         llm: MultimodalLLM,
         session_id_factory: Callable[[], str] | None = None,
         web_ground: WebGroundProducer | None = None,
+        fast_llm: MultimodalLLM | None = None,
+        verifier_llm: MultimodalLLM | None = None,
+        embeddings_client: EmbeddingsClient | None = None,
+        step_tools_enabled: bool = True,
+        grounding_strategy: Literal["parallel", "planner"] = "parallel",
+        plan_stream_preview: bool = True,
     ) -> None:
         self._llm = llm
+        self._fast_llm = fast_llm or llm
+        self._verifier_llm = verifier_llm or self._fast_llm
+        self._embeddings_client = embeddings_client or NullEmbeddingsClient()
         self._session_id_factory = session_id_factory or (lambda: str(uuid4()))
         self._web_ground = web_ground or NullWebGroundProducer()
+        self._step_tools_enabled = step_tools_enabled
+        self._grounding_strategy = grounding_strategy
+        self._plan_stream_preview = plan_stream_preview
         self._reserved: set[str] = set()
         self._live: dict[str, TutorialSession] = {}
 
@@ -60,7 +74,12 @@ class TutorialSessionStore:
             f"Tutorial session does not exist: {session_id}",
         )
 
-    def attach(self, session_id: str, emit: EventSink) -> TutorialSession:
+    def attach(
+        self,
+        session_id: str,
+        emit: EventSink,
+        llm_call_sink: LLMCallSink | None = None,
+    ) -> TutorialSession:
         if session_id not in self._reserved and session_id not in self._live:
             raise TutorialSessionError(
                 SESSION_NOT_FOUND,
@@ -70,8 +89,17 @@ class TutorialSessionStore:
         session = TutorialSession(
             session_id=session_id,
             llm=self._llm,
+            fast_llm=self._fast_llm,
+            verifier_llm=self._verifier_llm,
+            embeddings_client=self._embeddings_client,
             emit=emit,
             web_ground=self._web_ground,
+            step_tools_mode=(
+                "capped_head" if self._step_tools_enabled else "full_plan"
+            ),
+            grounding_strategy=self._grounding_strategy,
+            plan_stream_preview=self._plan_stream_preview,
+            llm_call_sink=llm_call_sink,
         )
         self._live[session_id] = session
         return session

@@ -5,9 +5,26 @@ enum ChatMessageRole: Equatable {
     case tutorial
 }
 
+/// One instruction streamed from the planner ahead of the merged plan.
+/// `index` is the step's position in the streaming tail and doubles as a
+/// stable identity for row animation.
+struct PlanPreviewStep: Equatable, Identifiable {
+    let index: Int
+    let instruction: String
+    let confidence: Double
+    var id: Int { index }
+}
+
+/// A plan still being streamed. Replaced wholesale by the authoritative
+/// `.tutorialPlan` once `plan_ready`/`plan_updated` arrives.
+struct PlanPreview: Equatable {
+    var steps: [PlanPreviewStep]
+}
+
 enum ChatMessageContent: Equatable {
     case text(String)
     case tutorialPlan(TutorialPlan)
+    case tutorialPlanPreview(PlanPreview)
 }
 
 struct ChatMessage: Equatable, Identifiable {
@@ -128,6 +145,60 @@ final class ChatMessageStore {
         return updated
     }
 
+    /// Append (or update by index) a streamed preview step, coalescing into
+    /// the trailing preview message so the plan card grows in place.
+    @discardableResult
+    func appendPlanPreviewStep(
+        index: Int,
+        instruction: String,
+        confidence: Double,
+        now: () -> Date = Date.init
+    ) -> ChatMessage? {
+        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let step = PlanPreviewStep(index: index, instruction: trimmed, confidence: confidence)
+
+        guard
+            let lastIndex = messages.indices.last,
+            messages[lastIndex].role == .tutorial,
+            case .tutorialPlanPreview(var preview) = messages[lastIndex].content
+        else {
+            return append(
+                role: .tutorial,
+                content: .tutorialPlanPreview(PlanPreview(steps: [step])),
+                now: now
+            )
+        }
+
+        if let existing = preview.steps.firstIndex(where: { $0.index == step.index }) {
+            preview.steps[existing] = step
+        } else {
+            preview.steps.append(step)
+            preview.steps.sort { $0.index < $1.index }
+        }
+        let existing = messages[lastIndex]
+        let updated = ChatMessage(
+            id: existing.id,
+            role: .tutorial,
+            content: .tutorialPlanPreview(preview),
+            createdAt: existing.createdAt
+        )
+        messages[lastIndex] = updated
+        return updated
+    }
+
+    /// Drop any streamed preview messages. Called when the authoritative
+    /// plan lands, a new plan starts streaming, or the session resets.
+    @discardableResult
+    func clearPlanPreview() -> Bool {
+        let before = messages.count
+        messages.removeAll { message in
+            if case .tutorialPlanPreview = message.content { return true }
+            return false
+        }
+        return messages.count != before
+    }
+
     func removeAll() {
         messages.removeAll()
     }
@@ -143,7 +214,7 @@ final class ChatMessageStore {
                 return .text(trimmedText)
             }
             return .text(text)
-        case .tutorialPlan:
+        case .tutorialPlan, .tutorialPlanPreview:
             return content
         }
     }

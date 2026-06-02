@@ -12,8 +12,8 @@ from backend.tutorial_guide import (
     TutorialGuide,
     TutorialPlanRequest,
     TutorialStreamRequest,
-    plan_generation_prompt,
 )
+from backend.tutorial_schema import TutorialPlanValidationError
 
 VALID_PLAN_JSON = """
 {
@@ -85,12 +85,13 @@ class TutorialGuideTests(unittest.TestCase):
         self.assertIn("not only a tutorial generator", TUTORIAL_CREATOR_SYSTEM_PROMPT)
         self.assertIn("Never announce or describe the internal route", TUTORIAL_CREATOR_SYSTEM_PROMPT)
 
-    def test_tool_stream_prompt_describes_loop_and_tool_rules(self) -> None:
-        self.assertIn("agent loop", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+    def test_tool_stream_prompt_lists_core_tools(self) -> None:
         self.assertIn("tutorial_update_plan", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertIn("tutorial_request_screen", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn("COMPLETED", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("tutorial_request_completion", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("tutorial_ask_user", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
         self.assertIn("refines_current", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("user_choice", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
 
     def test_stream_tutorial_maps_domain_request_to_llm_request(self) -> None:
         llm = FakeLLM()
@@ -137,35 +138,21 @@ class TutorialGuideTests(unittest.TestCase):
         self.assertIsNotNone(llm.requests[0].response_schema)
         self.assertEqual(llm.requests[0].temperature, 0)
 
-    def test_create_plan_retries_with_validation_error_context(self) -> None:
-        llm = FakeLLM(complete_responses=["not-json", VALID_PLAN_JSON])
+    def test_create_plan_raises_on_invalid_json_without_retrying(self) -> None:
+        llm = FakeLLM(complete_responses=["not-json"])
         guide = TutorialGuide(llm)
 
-        with self.assertLogs("backend.tutorial_guide", level="WARNING"):
-            plan = guide.create_plan(
-                TutorialPlanRequest(
-                    conversation_id="conversation-1",
-                    text="Show me how to create a repo.",
-                    images=[],
+        with self.assertLogs("backend.tutorial_guide", level="ERROR"):
+            with self.assertRaises(TutorialPlanValidationError):
+                guide.create_plan(
+                    TutorialPlanRequest(
+                        conversation_id="conversation-1",
+                        text="Show me how to create a repo.",
+                        images=[],
+                    )
                 )
-            )
 
-        self.assertEqual(plan.schema_version, "tutorial_plan.v1")
-        self.assertEqual(len(llm.requests), 2)
-        self.assertIn("Fix the previous JSON", llm.requests[1].user_text)
-        self.assertIn("not-json", llm.requests[1].user_text)
-        self.assertIsNotNone(llm.requests[1].response_schema)
-
-    def test_plan_generation_prompt_does_not_duplicate_json_schema(self) -> None:
-        prompt = plan_generation_prompt(
-            prompt="Create a tutorial plan.",
-            attempt=0,
-            error_text="",
-            last_text="",
-        )
-
-        self.assertEqual(prompt, "Create a tutorial plan.")
-        self.assertNotIn("schema_version", TUTORIAL_PLAN_SYSTEM_PROMPT)
+        self.assertEqual(len(llm.requests), 1)
 
 
 if __name__ == "__main__":

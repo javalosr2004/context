@@ -29,7 +29,41 @@ class LLMToolCallEvent:
     tool_call: TutorialToolCall
 
 
-LLMStreamEvent = LLMTextDelta | LLMToolCallEvent
+@dataclass(frozen=True)
+class LLMToolCallArgsDelta:
+    """A fragment of a tool call's arguments JSON, streamed as it is
+    generated. Purely additive: the authoritative ``LLMToolCallEvent`` still
+    arrives when the call completes. Used to preview the plan before the
+    whole ``tutorial_update_plan`` call finishes. ``name`` is the tool name,
+    ``call_id`` distinguishes concurrent/sequential calls in one turn."""
+    name: str
+    delta: str
+    call_id: str
+
+
+@dataclass(frozen=True)
+class LLMWebSearchStarted:
+    """The model invoked a native web_search tool. ``query`` may be empty
+    if the provider hasn't surfaced it yet — the started event fires on
+    output_item.added, which can precede the query being known."""
+    query: str = ""
+
+
+@dataclass(frozen=True)
+class LLMWebSearchCompleted:
+    """The model's native web_search tool finished. ``elapsed_ms`` is
+    measured from the matching ``LLMWebSearchStarted`` event."""
+    query: str = ""
+    elapsed_ms: float = 0.0
+
+
+LLMStreamEvent = (
+    LLMTextDelta
+    | LLMToolCallEvent
+    | LLMToolCallArgsDelta
+    | LLMWebSearchStarted
+    | LLMWebSearchCompleted
+)
 
 
 class MultimodalLLM(Protocol):

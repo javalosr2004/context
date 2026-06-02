@@ -7,15 +7,9 @@ from backend.tutorial_session import HistoryEntry, render_history
 
 
 class TutorialScreenRequestPolicyTests(unittest.TestCase):
-    def test_tool_prompt_encourages_fresh_screen_when_visual_context_helps(self) -> None:
-        self.assertIn(
-            "fresh visual context",
-            TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT,
-        )
-        self.assertIn("no screen is attached", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
-        self.assertIn(
-            "ONLY way to get a fresh screen", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT
-        )
+    def test_tool_prompt_exposes_fresh_screen_tool(self) -> None:
+        self.assertIn("tutorial_request_screen", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
+        self.assertIn("fresh screenshot", TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT)
 
     def test_render_history_makes_missing_screen_state_explicit(self) -> None:
         text = render_history(

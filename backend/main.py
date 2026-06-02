@@ -16,6 +16,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from backend.conversations import ConversationRepository, InMemoryConversationRepository
 from backend.images import read_uploaded_images
+from backend.embeddings_client import EmbeddingsClient
 from backend.llm import MultimodalLLM
 from backend.llm_provider import LLMProvider, LLMProviderConfigurationError
 from backend.web_ground import web_ground_producer_from_environment
@@ -31,12 +32,17 @@ from backend.tutorial_session_events import (
     ServerSessionEvent,
     SessionReadyEvent,
     StepStartedEvent,
+    UserAnswerEvent,
     TutorialSessionResponse,
+    UserCompletionResponseEvent,
     UserConfirmationEvent,
+    UserHintResponseEvent,
     UserMessageEvent,
     UserScreenEvent,
+    UserStepAnnotationEvent,
     client_session_event_adapter,
 )
+from backend.session_event_log import SessionEventLog
 from backend.tutorial_session_store import TutorialSessionError, TutorialSessionStore
 
 logger = logging.getLogger(__name__)
@@ -57,6 +63,56 @@ class ExtraFieldsFormatter(logging.Formatter):
             return base
         formatted_extras = " ".join(f"{key}={value!r}" for key, value in extras.items())
         return f"{base} | {formatted_extras}"
+
+
+def _step_tools_enabled_from_env() -> bool:
+    """Read the STEP_TOOLS_ENABLED A/B flag. Defaults to True (capped-head
+    is now the default mode); set the env var to a falsy value to opt
+    back into the full-plan emission mode."""
+    raw = os.environ.get("STEP_TOOLS_ENABLED")
+    if raw is None:
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _plan_stream_preview_from_env() -> bool:
+    """Read the PLAN_STREAM_PREVIEW flag. Defaults to True: parse the
+    streaming update_plan tool args and emit per-step previews so the
+    overlay renders the guide as it is generated. Set to a falsy value to
+    fall back to emitting the plan only once it is fully merged."""
+    raw = os.environ.get("PLAN_STREAM_PREVIEW")
+    if raw is None:
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _grounding_strategy_from_env() -> str:
+    """Read the GROUNDING_STRATEGY flag. ``parallel`` (default) runs the
+    enrichment service + draft plan pre-pipeline; ``planner`` skips the
+    pre-pipeline and exposes web_search as a planner tool instead.
+
+    Planner mode currently requires the OpenAI provider — Gemini's native
+    search tool is not yet wired through. We fail-fast here so the
+    misconfig is visible at startup rather than silently producing a
+    planner with no search capability."""
+    raw = os.environ.get("GROUNDING_STRATEGY")
+    if raw is None:
+        return "parallel"
+    value = raw.strip().lower()
+    if value not in {"parallel", "planner"}:
+        raise RuntimeError(
+            f"GROUNDING_STRATEGY must be 'parallel' or 'planner', got {raw!r}"
+        )
+    if value == "planner":
+        provider = (
+            os.environ.get("LLM_PROVIDER") or "gemini"
+        ).strip().lower()
+        if provider != "openai":
+            raise RuntimeError(
+                "GROUNDING_STRATEGY=planner requires LLM_PROVIDER=openai; "
+                f"got {provider!r}"
+            )
+    return value
 
 
 def configure_logging() -> None:
@@ -180,13 +236,17 @@ def create_app() -> FastAPI:
             return
 
         send_lock = asyncio.Lock()
+        event_log = SessionEventLog(session_id)
 
         async def emit(event: ServerSessionEvent) -> None:
+            event_log.write("server", event)
             async with send_lock:
                 await send_server_event(websocket, event)
 
         try:
-            session = sessions.attach(session_id, emit)
+            session = sessions.attach(
+                session_id, emit, llm_call_sink=event_log.write_llm_call
+            )
         except TutorialSessionError as error:
             await send_server_event(
                 websocket,
@@ -215,6 +275,8 @@ def create_app() -> FastAPI:
                 except ValueError as error:
                     await emit(ErrorEvent(code="invalid_event", message=str(error)))
                     continue
+
+                event_log.write("client", event)
 
                 try:
                     await dispatch_client_event(session, event)
@@ -255,8 +317,31 @@ async def dispatch_client_event(session, event) -> None:  # type: ignore[no-unty
         return
     if isinstance(event, UserConfirmationEvent):
         await session.handle_user_confirmation(
-            event.step_id, event.action_index, event.confirmed, event.note
+            event.step_id,
+            event.action_index,
+            event.confirmed,
+            event.note,
+            screen=event.screen,
         )
+        return
+    if isinstance(event, UserCompletionResponseEvent):
+        await session.handle_user_completion_response(
+            event.confirmed,
+            event.note,
+        )
+        return
+    if isinstance(event, UserAnswerEvent):
+        await session.handle_user_answer(
+            event.batch_id,
+            [(answer.question_id, answer.text) for answer in event.answers],
+        )
+        return
+    if isinstance(event, UserStepAnnotationEvent):
+        # Eval annotations don't drive session state — they're persisted by
+        # the event log sink and extracted into fixtures offline.
+        return
+    if isinstance(event, UserHintResponseEvent):
+        session.handle_user_hint_response(event.step_id, event.action)
         return
 
 
@@ -271,6 +356,27 @@ def get_multimodal_llm() -> MultimodalLLM:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
+def get_fast_multimodal_llm() -> MultimodalLLM:
+    try:
+        return LLMProvider.from_environment().create_fast_llm()
+    except LLMProviderConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+def get_verifier_llm() -> MultimodalLLM:
+    try:
+        return LLMProvider.from_environment().create_verifier_llm()
+    except LLMProviderConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+def get_embeddings_client() -> EmbeddingsClient:
+    try:
+        return LLMProvider.from_environment().create_embeddings_client()
+    except LLMProviderConfigurationError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 def get_tutorial_guide(
     llm: MultimodalLLM = Depends(get_multimodal_llm),
 ) -> TutorialGuide:
@@ -280,12 +386,38 @@ def get_tutorial_guide(
 def get_tutorial_session_store(
     connection: HTTPConnection,
     llm: MultimodalLLM = Depends(get_multimodal_llm),
+    fast_llm: MultimodalLLM = Depends(get_fast_multimodal_llm),
+    verifier_llm: MultimodalLLM = Depends(get_verifier_llm),
+    embeddings_client: EmbeddingsClient = Depends(get_embeddings_client),
 ) -> TutorialSessionStore:
     store = getattr(connection.app.state, "tutorial_session_store", None)
     if store is None:
+        step_tools_enabled = _step_tools_enabled_from_env()
+        grounding_strategy = _grounding_strategy_from_env()
+        plan_stream_preview = _plan_stream_preview_from_env()
+        logging.getLogger(__name__).info(
+            "[startup] tutorial_session_store config",
+            extra={
+                "step_tools_enabled": step_tools_enabled,
+                "step_tools_mode": (
+                    "capped_head" if step_tools_enabled else "full_plan"
+                ),
+                "grounding_strategy": grounding_strategy,
+                "plan_stream_preview": plan_stream_preview,
+                "llm_provider": (
+                    os.environ.get("LLM_PROVIDER") or "gemini"
+                ).lower(),
+            },
+        )
         store = TutorialSessionStore(
             llm,
+            fast_llm=fast_llm,
+            verifier_llm=verifier_llm,
+            embeddings_client=embeddings_client,
             web_ground=web_ground_producer_from_environment(),
+            step_tools_enabled=step_tools_enabled,
+            grounding_strategy=grounding_strategy,
+            plan_stream_preview=plan_stream_preview,
         )
         connection.app.state.tutorial_session_store = store
     return store

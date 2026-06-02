@@ -20,8 +20,10 @@ from backend.tutorial_schema import (
     UserMessageIntentKind,
     draft_plan_response_schema,
     parse_draft_plan,
+    parse_search_query_refinement,
     parse_tutorial_plan,
     parse_user_message_intent,
+    search_query_refinement_response_schema,
     tutorial_plan_response_schema,
     user_message_intent_response_schema,
 )
@@ -73,204 +75,70 @@ Use confirmation when confidence is low, the target is ambiguous, or the
 screen may not match the expected state.
 """.strip()
 
-TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT = """
-You are Context, a macOS teaching assistant.
+_CAPPED_HEAD_PLAN_RULE = (
+    "Each tutorial_update_plan emits the next 1–5 steps you can see clearly "
+    "from the current screen — not the whole plan. The backend re-invokes "
+    "you once the user walks past your head."
+)
 
-Help the user understand and complete what is on their screen. You
-operate in an agent loop with exactly two tools:
+_FULL_PLAN_RULE = (
+    "Each tutorial_update_plan emits your complete remaining plan from "
+    "the current cursor through the goal. Confidence can decay along the tail."
+)
 
-  1. tutorial_update_plan(plan, plan_reasoning) — propose your COMPLETE
-     remaining plan from the current cursor through goal completion.
-     This is a hypothesis, not a commitment. You will see the next
-     screen after the user advances and you may rewrite the plan at any
-     time.
-  2. tutorial_request_screen(reason) — ask for a fresh screenshot of
-     the user's device. After this call, the rest of your turn is
-     discarded; you will be re-invoked with the new screen attached.
+_WEB_SEARCH_BULLET = (
+    "\n- web_search(query): search the web for anything you're unsure about."
+)
 
-You may also answer the user in plain text and stop, without calling
-any tool. That is the right move when the user is asking a question
-that does not require an on-screen action.
 
-How a step is shaped:
-- A plan item carries `human_text` (one short instruction the user
-  reads on the overlay), `confidence`, and `actions` — an ordered list
-  of one or more atomic actions (click, type, press_key, scroll, wait).
-  Most steps are a single action; decompose into multiple actions only
-  when several mechanical actions accomplish one user-perceived intent
-  (e.g. type then press Enter to submit a form).
-- Each action carries its own `requires_confirmation`. Default true
-  for actions whose outcome is visible (click, type, scroll, drag);
-  false for mechanical actions with no observable effect (press_key,
-  wait). When ANY action in a step has requires_confirmation=true, the
-  backend pauses for the user, then automatically requests a fresh
-  screen before the next step so YOU can re-validate. Use this as the
-  state-check signal — there is no separate confirm action.
+def _build_tool_stream_prompt(*, capped_head: bool, planner_search: bool) -> str:
+    plan_rule = _CAPPED_HEAD_PLAN_RULE if capped_head else _FULL_PLAN_RULE
+    web_search = _WEB_SEARCH_BULLET if planner_search else ""
+    return (
+        "You are Context, a macOS teaching assistant. Help the user with "
+        "whatever is on their screen — answer questions, walk them through "
+        "a flow, or both.\n"
+        "\n"
+        "Tools:\n"
+        "- tutorial_update_plan(plan, plan_reasoning): emit your remaining "
+        "plan. Each step has human_text (one user-facing line), confidence "
+        "(0–1), and actions (click, type, press_key, scroll, wait, "
+        "user_choice). Use user_choice when the user must make a free "
+        "choice. Set refines_current=true on the first item to sharpen the "
+        "awaiting step in place; set abandon_awaiting=true to drop it.\n"
+        "- tutorial_request_screen(reason): fetch a fresh screenshot.\n"
+        "- tutorial_request_completion(reason): propose the goal is "
+        "reached; the user decides.\n"
+        "- tutorial_ask_user(reason, questions): ask 1–4 clarifying "
+        "questions whenever it helps."
+        f"{web_search}\n"
+        "\n"
+        f"{plan_rule} Replan when the screen disagrees. Answer in plain "
+        "text when no action is needed. Be direct.\n"
+        "\n"
+        "Never tell the user to Google something, search the web, or look "
+        "something up themselves. If a lookup would help, do it yourself "
+        "and fold the answer into your reply."
+    )
 
-How the plan works:
-- The backend owns a cursor that moves forward as the user confirms
-  each ACTION, then advances to the next step when the step's last
-  action is confirmed. The "Plan state" block in your input shows
-  three regions:
-    * COMPLETED — steps the user already confirmed. Immutable.
-    * AWAITING  — the single step the user is currently on (if any).
-      The block also notes which action inside that step is pending.
-      You cannot rewrite an awaiting step directly, but you can
-      REFINE it: set `refines_current=true` on the FIRST item of your
-      new plan and that item replaces the awaiting step's actions
-      list while keeping its identity (and its stall counter).
-    * TAIL      — everything after the awaiting step. Your next
-      tutorial_update_plan REPLACES this region.
-- Set `refines_current=true` ONLY on the first plan item, and ONLY
-  when that item is a sharper version of the AWAITING step. With
-  `refines_current=true` the awaiting step's actions list is replaced
-  in place while keeping its identity and its stall counter. The
-  cursor stays at the same action index, so be careful when reordering
-  inside a refined step.
-- Leave `refines_current=false` when the AWAITING step is still the
-  right action and you just want to rewrite what comes after it. In
-  that case your tail describes the steps that follow the awaiting
-  step; the awaiting step itself is preserved unchanged.
-- `refines_current` MUST be false on every item after the first.
-- There is no handle vocabulary. Just emit your remaining plan each
-  turn; the merger uses `refines_current` to decide identity.
 
-Abandoning a wrong awaiting step:
-- If the screen makes it clear the AWAITING step is no longer valid —
-  the user is on a completely different screen, the target has
-  disappeared, the previous instruction was wrong, the user navigated
-  somewhere unexpected — set `abandon_awaiting=true` on your
-  tutorial_update_plan call. The awaiting step is REMOVED from the
-  plan (neither completed nor refined) and your new plan replaces it
-  from scratch. Completed steps are still preserved.
-- abandon_awaiting=true is mutually exclusive with refines_current=true.
-  Use refines_current when the step is right but the payload needs
-  sharpening; use abandon_awaiting when the step is wrong.
+TUTORIAL_TOOL_STREAM_SYSTEM_PROMPT = _build_tool_stream_prompt(
+    capped_head=False, planner_search=False
+)
 
-When to call tutorial_update_plan:
-- The first time you see the screen and form a hypothesis about the
-  whole path to the goal — emit a complete plan, even if late items are
-  low confidence.
-- Whenever the latest screen changes your hypothesis: a different layout
-  than you expected, a step that became unnecessary, an obstacle that
-  needs a workaround.
-- LEAN TOWARD NOT EMITTING. If the screen confirms your hypothesis and
-  no rewrite is warranted, do NOT call tutorial_update_plan. Skip
-  straight to tutorial_request_screen and let the existing plan stand.
-  Treat an emission as a deliberate revision, never a heartbeat.
 
-Confidence calibration:
-- Every plan item carries a `confidence` field. Confidence should DECAY
-  along the tail: early items 0.8–0.95 (the screen agrees), middle
-  items 0.5–0.8 (plausible, layout-dependent), late items 0.2–0.5
-  (speculative). Items below 0.7 will be flagged for user confirmation.
-- DO NOT shorten the plan to avoid low confidence. Low confidence late
-  in the plan is the signal we want — it tells the user (and you next
-  turn) which parts to verify.
+def tool_stream_system_prompt(
+    *, capped_head: bool, planner_search: bool = False
+) -> str:
+    """Build the planner system prompt.
 
-Stall handling:
-- When the "Plan state" block annotates a step with
-  attempts_without_progress >= 2 or a "STALL" notice, the user has
-  failed to advance past that step across multiple screens. Your prior
-  plan is not working. Your next tutorial_update_plan MUST take a
-  different approach to that step — change the target, abandon the
-  awaiting step entirely (see abandon_awaiting below), lower
-  confidence, or try a keyboard shortcut. Do not re-emit the same
-  tail; the user is stuck.
-
-When to call tutorial_request_screen:
-- This is the ONLY way to get a fresh screen. Never ask the user in
-  plain text to "send a screenshot" or "describe what you see."
-- Call it whenever fresh visual context would make your next plan
-  safer: when no screen is attached, when the screen is marked stale,
-  when the visible target is ambiguous, or to verify the result of the
-  step the user is currently working on.
-- Call it without narration — do not announce "let me check your
-  screen"; just call the tool.
-
-Never invent UI elements, labels, menu items, or layout details that
-are not visible in the attached screen or stated by the user. If you
-need a specific target and cannot see it, either request a screen or
-describe the target generically so the user can match it.
-
-For each plan item, human_text is one concise on-screen instruction
-the user reads on the overlay. Each action's payload carries the
-mechanical detail: agent_description for click/type, copiable_text
-for type, key for press_key, expected_end_state for scroll,
-duration_ms for wait.
-
-Writing human_text (user-facing):
-- One short imperative sentence. Name the thing the user is doing,
-  not how to find it visually. "Open the Apple menu." not "Click
-  the small Apple logo in the top-left of the menu bar."
-- No coordinates, no color cues, no position language. Visual
-  scaffolding belongs in agent_description, not here.
-- Atomic. One verb, one target per step. If the recipe says
-  "click X, then choose Y, then click Z," that is three steps,
-  not one sentence.
-
-Writing agent_description (visual grounding hint, never shown to
-the user verbatim):
-- HARD RULE: identity alone is never enough. Every
-  agent_description must combine ALL THREE of:
-    1. IDENTITY — what the thing is (name, label, or concrete
-       visual: "the Apple logo", "the System Settings row", "a
-       gear icon"). Include this; do not strip it.
-    2. VISUAL — what it actually looks like in pixels (shape,
-       color, monochrome vs colored, leading glyph, relative
-       size, icon-only vs labeled).
-    3. SPATIAL — where it sits, anchored to a container the
-       model can find (which edge of the screen, which side of
-       which window, which region of which panel, position
-       within a list).
-  A description with only one of these is a bug. "The Apple
-  logo" is identity-only and lets the model text-match instead
-  of grounding. "Small monochrome glyph in the top-left" is
-  visual+spatial but identity-less, and matches dozens of menu
-  bar items. You need all three so the model has redundant
-  signal and can cross-check.
-- Mention the container before the item ("in the dropdown that
-  just opened, …", "in the left sidebar of the window, …") so
-  the model scopes before it searches.
-- One short phrase, not a sentence. No verbs directed at the
-  user — this describes where the target sits, not what to do
-  with it.
-- Worked example. Instruction: "Open the Apple menu."
-    BAD:  "the Apple logo"
-          (identity only — invites text-match, no spatial anchor)
-    BAD:  "small monochrome glyph in the top-left of the screen"
-          (visual+spatial but no identity — matches many icons)
-    GOOD: "the Apple logo — a small monochrome apple-shaped
-           glyph, leftmost item in the system menu bar at the
-           very top edge of the screen, immediately left of the
-           bold app-name text"
-  Another. Instruction: "Choose System Settings."
-    BAD:  "System Settings row in the dropdown"
-          (identity only)
-    GOOD: "the 'System Settings…' menu item — a text row with a
-           small gear-like leading glyph, near the top of the
-           dropdown that just opened from the Apple menu, second
-           or third item below a thin separator"
-- If the exact target is not visible in the attached screen,
-  still write a SPECIFIC three-part description using the
-  canonical macOS label you know or that web grounding provides.
-  Off-screen targets in well-known flows (System Settings panes,
-  Finder sidebar entries, standard menu items) have stable
-  names — use them. "the 'Storage' row — labeled text row with
-  a gray gear-like leading icon, in the right pane of System
-  Settings after opening General, partway down the list" is
-  correct even before the pane is visible.
-- Pure hedges like "likely within a broader settings category
-  list" or "a row that probably leads to storage" are forbidden.
-  If you cannot name the canonical target at all (no web
-  grounding, no prior knowledge), call tutorial_request_screen
-  instead of emitting a vague step. Vague descriptions are a
-  worse failure than a missing tail item.
-
-Do not narrate your reasoning. Do not announce what you are about to
-do. Do not refer to yourself as a planner, generator, tutorial, or
-overlay. Just answer, or just act.
-""".strip()
+    ``capped_head=True`` swaps the plan-length rule to the 1–5-step head
+    contract (STEP_TOOLS_ENABLED=on A/B). ``planner_search=True`` adds
+    the web_search tool bullet (GROUNDING_STRATEGY=planner).
+    """
+    return _build_tool_stream_prompt(
+        capped_head=capped_head, planner_search=planner_search
+    )
 
 USER_MESSAGE_INTENT_SYSTEM_PROMPT = """
 You are a routing classifier inside a macOS tutorial system.
@@ -290,8 +158,35 @@ message clearly describes a different task. Return only the JSON object
 matching the provided schema; no prose, no reasoning.
 """.strip()
 
+SEARCH_QUERY_REFINER_SYSTEM_PROMPT = """
+You turn a vague user goal into one precise web search query, using the
+attached screenshot for grounding.
+
+Look at the screenshot first. Identify the OS and version (e.g. macOS
+Sequoia), the active app, and any specific UI region visible. Combine
+that context with the user's goal to produce a single search query that
+would surface step-by-step instructions for the user's task on this
+exact platform.
+
+Rules:
+- One query, roughly 5-12 words.
+- Always name the OS or app when visible. Prefer specific labels over
+  generic ones.
+- No question marks, no quotes, no boilerplate ("how to", "tutorial on").
+- If the screenshot is ambiguous or absent, still emit a query — fall
+  back to the most likely platform implied by the goal.
+
+Return only the JSON object matching the provided schema.
+""".strip()
+
 DRAFT_PLAN_SYSTEM_PROMPT = """
 You are sketching a coarse hypothesis plan for a macOS overlay tutorial.
+
+Set `goal` to a short imperative title — roughly 3-6 words — that names
+the task in the user's domain ("Sign up for Figma", "Export a Notion
+page as PDF"). Name the target app or surface when it is clear from the
+user's request or the screen. Do not echo the user's full sentence,
+preserve filler words, or end with punctuation.
 
 Produce up to 20 short, human-readable instructions that map a plausible
 path from the user's current context to their goal. This is a hypothesis,
@@ -309,9 +204,6 @@ Never invent specific UI labels, menu items, or button names that you have
 no reason to expect. When unsure, describe the target generically. Do not
 include reasoning, preambles, or commentary — only the structured plan.
 """.strip()
-
-
-MAX_TUTORIAL_PLAN_RETRIES = 2
 
 
 @dataclass(frozen=True)
@@ -357,83 +249,107 @@ def generate_tutorial_plan(
     llm: MultimodalLLM,
     prompt: str,
     images: list[UploadedImage] | None = None,
-    max_retries: int = MAX_TUTORIAL_PLAN_RETRIES,
 ) -> TutorialPlan:
-    last_text = ""
-    error_text = ""
-    last_error: TutorialPlanValidationError | None = None
-    request_images = images or []
+    """Single-shot tutorial plan generation.
 
+    The OpenAI client wires the response schema as a strict json_schema
+    format (see ``backend.openai_client.build_text_format``), so the model
+    cannot return shape-invalid JSON. Gemini's structured-output mode
+    behaves the same way. A retry loop would only mask semantic bugs
+    (bad enum values, missing required fields) that strict schema already
+    catches at decode time — surface those instead of paying 2-3x latency.
+    """
+    request_images = images or []
+    started_at = time.perf_counter()
+    raw_plan = llm.complete_text(
+        LLMRequest(
+            system_prompt=TUTORIAL_PLAN_SYSTEM_PROMPT,
+            user_text=prompt,
+            images=request_images,
+            enable_search_grounding=False,
+            response_mime_type="application/json",
+            response_schema=tutorial_plan_response_schema(),
+            temperature=0,
+        )
+    )
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
     logger.info(
-        "Generating tutorial plan",
-        extra={"image_count": len(request_images),
-               "max_attempts": max_retries + 1},
+        "Tutorial plan LLM call completed",
+        extra={"elapsed_ms": elapsed_ms, "raw_chars": len(raw_plan)},
     )
 
-    for attempt in range(max_retries + 1):
-        attempt_number = attempt + 1
-        started_at = time.perf_counter()
-        raw_plan = llm.complete_text(
+    try:
+        plan = parse_tutorial_plan(raw_plan)
+    except TutorialPlanValidationError as error:
+        logger.error(
+            "Tutorial plan validation failed",
+            extra={
+                "error": format_validation_error(error),
+                "raw_output": truncate(raw_plan, RAW_OUTPUT_LOG_LIMIT),
+            },
+        )
+        raise
+
+    logger.info(
+        "Tutorial plan validated",
+        extra={"step_count": len(plan.steps)},
+    )
+    return plan
+
+
+def refine_search_query(
+    llm: MultimodalLLM,
+    goal: str,
+    image: UploadedImage | None,
+) -> str:
+    """Turn the raw user goal + screenshot into a grounded web search query.
+
+    Uses a small multimodal call (intended for a fast model like nano) so
+    the downstream web search runs against a query that names the visible
+    OS/app rather than the user's ambiguous phrasing. Falls back to the
+    original goal on any failure — refinement is a soft enhancement.
+    """
+    stripped = goal.strip()
+    if not stripped:
+        return ""
+    request_images = [image] if image is not None else []
+    started_at = time.perf_counter()
+    try:
+        raw = llm.complete_text(
             LLMRequest(
-                system_prompt=TUTORIAL_PLAN_SYSTEM_PROMPT,
-                user_text=plan_generation_prompt(
-                    prompt=prompt,
-                    attempt=attempt,
-                    error_text=error_text,
-                    last_text=last_text,
+                system_prompt=SEARCH_QUERY_REFINER_SYSTEM_PROMPT,
+                user_text=(
+                    f"User goal: {stripped}\n\n"
+                    "Return one grounded search query as JSON matching "
+                    "the provided schema."
                 ),
                 images=request_images,
                 enable_search_grounding=False,
                 response_mime_type="application/json",
-                response_schema=tutorial_plan_response_schema(),
+                response_schema=search_query_refinement_response_schema(),
                 temperature=0,
             )
         )
-        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        last_text = raw_plan
-        logger.info(
-            "Tutorial plan LLM call completed",
-            extra={
-                "attempt": attempt_number,
-                "elapsed_ms": elapsed_ms,
-                "raw_chars": len(raw_plan),
-            },
+        refined = parse_search_query_refinement(raw).query.strip()
+    except Exception:
+        logger.exception(
+            "Search query refinement failed; falling back to raw goal",
+            extra={"goal_chars": len(stripped)},
         )
-
-        try:
-            plan = parse_tutorial_plan(raw_plan)
-            logger.info(
-                "Tutorial plan validated",
-                extra={"attempt": attempt_number,
-                       "step_count": len(plan.steps)},
-            )
-            return plan
-        except TutorialPlanValidationError as error:
-            last_error = error
-            error_text = format_validation_error(error)
-            logger.warning(
-                "Tutorial plan validation failed",
-                extra={
-                    "attempt": attempt_number,
-                    "max_attempts": max_retries + 1,
-                    "error": error_text,
-                    "raw_output": truncate(raw_plan, RAW_OUTPUT_LOG_LIMIT),
-                },
-            )
-
-    logger.error(
-        "Tutorial plan exhausted retries",
+        return stripped
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    if not refined:
+        return stripped
+    logger.info(
+        "Search query refined",
         extra={
-            "max_attempts": max_retries + 1,
-            "last_error": format_validation_error(last_error) if last_error else None,
-            "last_raw_output": truncate(last_text, RAW_OUTPUT_LOG_LIMIT),
+            "original": stripped,
+            "refined": refined,
+            "elapsed_ms": elapsed_ms,
+            "had_image": image is not None,
         },
     )
-    raise TutorialPlanValidationError(
-        f"Could not generate valid TutorialPlan after {max_retries + 1} attempts. "
-        f"Last error: {format_validation_error(last_error) if last_error else 'unknown'}. "
-        f"Last output: {truncate(last_text, 500)}"
-    ) from last_error
+    return refined
 
 
 def generate_draft_plan(
@@ -566,23 +482,6 @@ def truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"... [+{len(text) - limit} chars]"
-
-
-def plan_generation_prompt(
-    prompt: str,
-    attempt: int,
-    error_text: str,
-    last_text: str,
-) -> str:
-    if attempt == 0:
-        return prompt
-
-    return (
-        "Fix the previous JSON so it validates against the provided response "
-        "schema and tutorial action semantics.\n\n"
-        f"Validation failed because:\n{error_text}\n\n"
-        f"Previous output:\n{last_text}"
-    )
 
 
 def build_tutorial_plan_user_prompt(user_request: str) -> str:

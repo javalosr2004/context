@@ -67,6 +67,103 @@ class FactoryTests(unittest.TestCase):
         producer = web_ground_producer_from_environment({"TAVILY_API_KEY": "secret"})
         self.assertNotIsInstance(producer, NullWebGroundProducer)
 
+    def test_enrichment_url_wins_over_tavily(self):
+        from backend.enrichment_client import EnrichmentSnippetsProducer
+
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "TAVILY_API_KEY": "secret",
+            }
+        )
+        self.assertIsInstance(producer, EnrichmentSnippetsProducer)
+
+    def test_enrichment_num_sources_invalid_falls_back_to_default(self):
+        from backend.enrichment_client import EnrichmentSnippetsProducer
+
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "ENRICHMENT_NUM_SOURCES": "not-a-number",
+            }
+        )
+        self.assertIsInstance(producer, EnrichmentSnippetsProducer)
+
+    def test_cache_flag_off_returns_raw_producer(self):
+        from backend.cached_enrichment_client import (
+            CachedEnrichmentSnippetsProducer,
+        )
+
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "OPENAI_API_KEY": "sk-test",
+            }
+        )
+        self.assertNotIsInstance(producer, CachedEnrichmentSnippetsProducer)
+
+    def test_cache_flag_on_without_embeddings_key_returns_raw(self):
+        from backend.cached_enrichment_client import (
+            CachedEnrichmentSnippetsProducer,
+        )
+
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "ENRICHMENT_CACHE_ENABLED": "true",
+            }
+        )
+        self.assertNotIsInstance(producer, CachedEnrichmentSnippetsProducer)
+
+    def test_cache_flag_on_with_key_returns_cached_wrapper(self):
+        from backend.cached_enrichment_client import (
+            CachedEnrichmentSnippetsProducer,
+        )
+
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "ENRICHMENT_CACHE_ENABLED": "1",
+                "OPENAI_API_KEY": "sk-test",
+            }
+        )
+        self.assertIsInstance(producer, CachedEnrichmentSnippetsProducer)
+
+    def test_cache_flag_accepts_various_truthy_values(self):
+        from backend.cached_enrichment_client import (
+            CachedEnrichmentSnippetsProducer,
+        )
+
+        for value in ("true", "True", "TRUE", "yes", "on", "1"):
+            producer = web_ground_producer_from_environment(
+                {
+                    "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                    "ENRICHMENT_CACHE_ENABLED": value,
+                    "OPENAI_API_KEY": "sk-test",
+                }
+            )
+            self.assertIsInstance(
+                producer, CachedEnrichmentSnippetsProducer,
+                f"truthy value {value!r} should enable cache",
+            )
+
+    def test_dedicated_embeddings_key_preferred_over_openai_key(self):
+        # If both are set, EMBEDDINGS_API_KEY wins so a teammate can
+        # route embeddings to a separate billing key without affecting
+        # the chat-completion path.
+        producer = web_ground_producer_from_environment(
+            {
+                "ENRICHMENT_LAYER_URL": "http://localhost:8001",
+                "ENRICHMENT_CACHE_ENABLED": "1",
+                "EMBEDDINGS_API_KEY": "sk-embeddings",
+                "OPENAI_API_KEY": "sk-chat",
+            }
+        )
+        from backend.cached_enrichment_client import (
+            CachedEnrichmentSnippetsProducer,
+        )
+        self.assertIsInstance(producer, CachedEnrichmentSnippetsProducer)
+
 
 if __name__ == "__main__":
     unittest.main()

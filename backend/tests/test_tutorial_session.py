@@ -6,11 +6,23 @@ import unittest
 from collections.abc import Iterator
 from typing import Any
 
-from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
+from backend.llm import (
+    LLMRequest,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMToolCallArgsDelta,
+    LLMToolCallEvent,
+    LLMWebSearchCompleted,
+    LLMWebSearchStarted,
+)
 from backend.tutorial_session import TutorialSession
 from backend.tutorial_session_events import (
     AwaitingConfirmationEvent,
+    CompletionProposedEvent,
+    InstructionVerifiedEvent,
     PlanReadyEvent,
+    PlanStepPreviewEvent,
+    PlanStreamResetEvent,
     PlanUpdatedEvent,
     ScreenRequestedEvent,
     ScreenSnapshot,
@@ -18,6 +30,8 @@ from backend.tutorial_session_events import (
     StepReadyEvent,
     TextResponseEventLike,
     TutorialTextDeltaEvent,
+    WebSearchCompletedEvent,
+    WebSearchStartedEvent,
     client_session_event_adapter,
 )
 from backend.tutorial_tools import TutorialToolCall
@@ -48,6 +62,10 @@ CLICK_PLAN_CALL = update_plan_call(click_item())
 REQUEST_SCREEN_CALL = TutorialToolCall(
     name="tutorial_request_screen",
     arguments='{"reason": "Need to see current screen."}',
+)
+REQUEST_COMPLETION_CALL = TutorialToolCall(
+    name="tutorial_request_completion",
+    arguments='{"reason": "Goal screen visible."}',
 )
 
 
@@ -183,9 +201,96 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         ))
         await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
         await send_next_requested_screen(session, events)
+        # Plan tail is now empty; the backend should ASK the user instead
+        # of auto-completing.
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        self.assertNotIn(SessionCompletedEvent(), events)
+        proposal = next(e for e in events if isinstance(e, CompletionProposedEvent))
+        self.assertEqual(proposal.source, "backend")
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
-
         self.assertIn(SessionCompletedEvent(), events)
+
+    async def test_llm_completion_request_is_user_gated(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
+                [LLMToolCallEvent(tool_call=REQUEST_COMPLETION_CALL)],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: any(
+            isinstance(e, AwaitingConfirmationEvent) for e in events
+        ))
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        proposal = next(e for e in events if isinstance(e, CompletionProposedEvent))
+        self.assertEqual(proposal.source, "llm")
+        self.assertIn("Goal screen visible.", proposal.reason)
+        self.assertNotIn(SessionCompletedEvent(), events)
+        await session.handle_user_completion_response(confirmed=True, note=None)
+        await wait_for_idle(session)
+        self.assertIn(SessionCompletedEvent(), events)
+
+    async def test_completion_rejection_replans_instead_of_ending(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=CLICK_PLAN_CALL)],
+                [LLMToolCallEvent(tool_call=REQUEST_COMPLETION_CALL)],
+                # After rejection, planner is re-engaged with the user's
+                # note and emits a fresh step.
+                [LLMToolCallEvent(tool_call=update_plan_call(
+                    click_item(human_text="Click Save.", description="Save button.")
+                ))],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Click New.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: any(
+            isinstance(e, AwaitingConfirmationEvent) for e in events
+        ))
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(
+            confirmed=False, note="I still need to save the file."
+        )
+        # Rejection triggers a fresh screen + replan.
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(
+                isinstance(e, PlanUpdatedEvent)
+                and any(s.instruction == "Click Save." for s in e.plan.steps)
+                for e in events
+            )
+        )
+        self.assertNotIn(SessionCompletedEvent(), events)
 
     async def test_completed_screen_changing_step_triggers_fresh_screen(self) -> None:
         events: list[Any] = []
@@ -211,6 +316,10 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(llm.requests), 1)
         await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertEqual(len(llm.requests), 2)
@@ -246,6 +355,10 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         await wait_until(lambda: session.status == "awaiting_confirmation")
         await session.handle_user_confirmation("step_001", action_index=0, confirmed=True, note=None)
         await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertGreaterEqual(len(llm.requests), 2)
@@ -318,6 +431,12 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
             "step_001", action_index=0, confirmed=False, note="That button is gone."
         )
         await send_next_requested_screen(session, events)
+        # Plan was cleared on rejection and the planner returned text-only,
+        # so the backend asks the user before terminating.
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
         await wait_for_idle(session)
 
         self.assertEqual(len(llm.requests), 2)
@@ -370,6 +489,275 @@ class TutorialSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan_ready, [])
 
 
+TWO_STEP_PLAN_CALL = update_plan_call(
+    click_item(human_text="Click A.", description="Button A."),
+    click_item(human_text="Click B.", description="Button B."),
+)
+
+
+class StrictGateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gate_accepts_skips_planner_between_steps(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=TWO_STEP_PLAN_CALL)],
+                # Only one more agent_loop call expected — the final
+                # cleanup pass after step_002 with nothing unwalked.
+                [LLMTextDelta(text="All done.")],
+            ]
+        )
+        fast_llm = _FixedTextLLM('{"verdict":"yes","reason":"on track"}')
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+        )
+
+        await session.handle_user_message("Walk me through it.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        # Outer loop fires fresh screen after the screen-changing click.
+        await send_next_requested_screen(session, events)
+        # Non-blocking gate: step_002 is presented immediately and verified in
+        # the background. Wait for the (ok) verdict to land before acting —
+        # acting first would simply cancel the verifier (the user moved on).
+        await wait_until(lambda: session.awaiting_step_id == "step_002")
+        await wait_until(
+            lambda: any(
+                isinstance(e, InstructionVerifiedEvent) and e.step_id == "step_002"
+                for e in events
+            )
+        )
+        await session.handle_step_started("step_002", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_002", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
+        await wait_for_idle(session)
+
+        # 2 planner calls: initial plan + post-step_002 cleanup.
+        # No planner call was made between step_001 and step_002 — the
+        # gate skipped it. (Without the gate this would be 3.)
+        self.assertEqual(len(llm.requests), 2)
+        verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
+        self.assertTrue(verified and verified[0].ok)
+        self.assertEqual(
+            session.completed_step_ids, ["step_001", "step_002"]
+        )
+
+    async def test_gate_rejects_surfaces_modal_then_user_replans(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=TWO_STEP_PLAN_CALL)],
+                # After the user taps "Replan", the planner re-runs with the
+                # acknowledgement note; emit text to end the session cleanly.
+                [LLMTextDelta(text="Replanning.")],
+            ]
+        )
+        fast_llm = _FixedTextLLM('{"verdict":"no","reason":"wrong screen"}')
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+        )
+
+        await session.handle_user_message("Walk me through it.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+
+        # Non-blocking gate: step_002 is presented while the verifier runs in
+        # the background. The "no" verdict surfaces the decision modal but does
+        # NOT replan on its own — the walk keeps waiting on step_002, and the
+        # tail is still intact (we never yank the user out without their call).
+        await wait_until(lambda: session.awaiting_hint_response == "step_002")
+        await wait_until(lambda: session.awaiting_step_id == "step_002")
+        verified = [e for e in events if isinstance(e, InstructionVerifiedEvent)]
+        self.assertTrue(verified and not verified[-1].ok)
+        self.assertEqual(
+            [s.step_id for s in session.plan_steps], ["step_001", "step_002"]
+        )
+
+        # User taps "Replan from here". Now the walk consumes the staged
+        # replan, truncates the tail, re-plans, and (no steps left) completes.
+        session.handle_user_hint_response("step_002", "acknowledge_off")
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        await session.handle_user_completion_response(confirmed=True, note=None)
+        await wait_for_idle(session)
+
+        # Plan tail trimmed to completed prefix only after the user chose to.
+        self.assertEqual(
+            [s.step_id for s in session.plan_steps], ["step_001"]
+        )
+        self.assertTrue(
+            any(
+                "step step_002" in entry.content
+                for entry in session.history
+                if entry.role == "user"
+            )
+        )
+
+    async def test_capped_head_regrows_instead_of_completing(self) -> None:
+        """In STEP_TOOLS_ENABLED=on mode, exhausting the head should
+        loop back to the planner instead of dropping into the 'no more
+        steps' completion proposal — that's the whole point of the
+        capped-head A/B."""
+        events: list[Any] = []
+        # Plan 1: one step. After walking it, capped-head mode should
+        # call the planner again rather than propose completion.
+        # Plan 2: another step. After walking it, the planner asks for
+        # completion explicitly (the legitimate end).
+        first_plan = update_plan_call(click_item(human_text="First."))
+        second_plan = update_plan_call(click_item(human_text="Second."))
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=first_plan)],
+                [LLMToolCallEvent(tool_call=second_plan)],
+                [LLMToolCallEvent(tool_call=REQUEST_COMPLETION_CALL)],
+            ]
+        )
+        fast_llm = _FixedTextLLM('{"verdict":"on_track","evidence":"ok"}')
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+            step_tools_mode="capped_head",
+        )
+
+        await session.handle_user_message("go")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        # Without the capped-head branch, here the backend would propose
+        # completion ("no more steps to suggest") and require the user
+        # to reject. Instead, the planner is called and step_002 lands.
+        await wait_until(lambda: session.awaiting_step_id == "step_002")
+        await session.handle_step_started("step_002", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_002", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        # Now the planner calls tutorial_request_completion. THIS
+        # proposal is legitimate (LLM-sourced, not backend fallback).
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        proposals = [
+            e for e in events if isinstance(e, CompletionProposedEvent)
+        ]
+        # No spurious "no more steps to suggest" proposal anywhere.
+        for proposal in proposals:
+            self.assertNotIn("no more steps to suggest", proposal.reason)
+        self.assertEqual(
+            session.completed_step_ids, ["step_001", "step_002"]
+        )
+
+    async def test_full_plan_mode_unchanged_completion_path(self) -> None:
+        """Default mode (full_plan) keeps today's behavior: empty tail
+        after at least one walked step proposes completion."""
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [LLMToolCallEvent(tool_call=update_plan_call(click_item()))],
+                # Second planner call: emits nothing useful (text only).
+                [LLMTextDelta(text="done")],
+            ]
+        )
+        fast_llm = _FixedTextLLM('{"verdict":"on_track","evidence":"ok"}')
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            fast_llm=fast_llm,
+            emit=await collect_events(events),
+            # Default mode left explicit for clarity.
+            step_tools_mode="full_plan",
+        )
+
+        await session.handle_user_message("go")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: session.awaiting_step_id == "step_001")
+        await session.handle_step_started("step_001", action_index=0)
+        await wait_until(lambda: session.status == "awaiting_confirmation")
+        await session.handle_user_confirmation(
+            "step_001", action_index=0, confirmed=True, note=None
+        )
+        await send_next_requested_screen(session, events)
+        await wait_until(
+            lambda: any(isinstance(e, CompletionProposedEvent) for e in events)
+        )
+        proposals = [
+            e for e in events if isinstance(e, CompletionProposedEvent)
+        ]
+        # In full_plan mode this proposal IS expected.
+        self.assertTrue(
+            any("no more steps to suggest" in p.reason for p in proposals)
+        )
+
+    async def test_legacy_cancel_verification_clears_task(self) -> None:
+        # _cancel_verification is still wired from input handlers as a
+        # defensive no-op. Verify it cleans up a manually-spawned task.
+        async def never() -> None:
+            await asyncio.sleep(60)
+
+        session = TutorialSession(
+            session_id="s1",
+            llm=ScriptedLLM([]),
+            emit=await collect_events([]),
+        )
+        session.verifying_step_id = "step_001"
+        session.verification_task = asyncio.create_task(never())
+
+        await session.handle_step_started("step_001", action_index=0)
+
+        self.assertIsNone(session.verifying_step_id)
+        self.assertIsNone(session.verification_task)
+
+
+class _FixedTextLLM:
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+
+    def complete_text(self, request: LLMRequest) -> str:
+        return self.raw
+
+    def stream_text(self, request: LLMRequest):  # pragma: no cover
+        raise NotImplementedError
+
+    def stream_tutorial_tool_calls(self, request: LLMRequest):  # pragma: no cover
+        raise NotImplementedError
+
+    def stream_tutorial_events(self, request: LLMRequest):  # pragma: no cover
+        raise NotImplementedError
+
+
 async def wait_for_idle(session: TutorialSession) -> None:
     for task in (session.current_task, session.draft_plan_task):
         if task is None:
@@ -420,6 +808,185 @@ def tiny_png_base64() -> str:
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIAAAUAAen"
         "k1AAAAABJRU5ErkJggg=="
     )
+
+
+class GroundingStrategyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parallel_mode_kicks_off_draft_plan(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM([[LLMTextDelta(text="ok")]])
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+        self.assertEqual(session.grounding_strategy, "parallel")
+
+        await session.handle_user_message("Do a thing.")
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertIsNotNone(session.draft_plan_task)
+        self.assertFalse(llm.requests[0].enable_search_grounding)
+
+    async def test_planner_mode_skips_draft_plan_and_enables_search(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM([[LLMTextDelta(text="ok")]])
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            emit=await collect_events(events),
+            grounding_strategy="planner",
+        )
+
+        await session.handle_user_message("Do a thing.")
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        self.assertIsNone(session.draft_plan_task)
+        self.assertTrue(llm.requests[0].enable_search_grounding)
+
+
+class WebSearchOverlayEventTests(unittest.IsolatedAsyncioTestCase):
+    async def test_llm_web_search_events_fan_out_to_overlay(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                [
+                    LLMWebSearchStarted(query="set up Stripe webhook"),
+                    LLMWebSearchCompleted(
+                        query="set up Stripe webhook", elapsed_ms=123.4
+                    ),
+                    LLMTextDelta(text="Here's how."),
+                ]
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            emit=await collect_events(events),
+            grounding_strategy="planner",
+        )
+
+        await session.handle_user_message("How do I set up a Stripe webhook?")
+        await send_next_requested_screen(session, events)
+        await wait_for_idle(session)
+
+        started = [e for e in events if isinstance(e, WebSearchStartedEvent)]
+        completed = [e for e in events if isinstance(e, WebSearchCompletedEvent)]
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0].query, "set up Stripe webhook")
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0].query, "set up Stripe webhook")
+        self.assertAlmostEqual(completed[0].elapsed_ms, 123.4)
+        self.assertEqual(completed[0].source_count, 0)
+
+
+def _split(text: str, parts: int) -> list[str]:
+    size = max(1, len(text) // parts)
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def _streamed_update_plan_turn(
+    *items: dict[str, Any], call_id: str = "c1", parts: int = 3
+) -> list[LLMStreamEvent]:
+    """One agent turn whose update_plan args stream as deltas, followed by
+    the authoritative tool call — mirroring the real OpenAI event order."""
+    args = json.dumps({"plan_reasoning": "x", "plan": list(items)})
+    deltas: list[LLMStreamEvent] = [
+        LLMToolCallArgsDelta(name="tutorial_update_plan", delta=chunk, call_id=call_id)
+        for chunk in _split(args, parts)
+    ]
+    call = TutorialToolCall(name="tutorial_update_plan", arguments=args)
+    return [*deltas, LLMToolCallEvent(tool_call=call)]
+
+
+class PlanStreamPreviewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_previews_stream_before_plan_ready(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                _streamed_update_plan_turn(
+                    click_item("Open Settings.", confidence=0.9),
+                    click_item("Click Billing.", confidence=0.6),
+                ),
+                [LLMTextDelta(text="Looks done.")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Open settings then billing.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: any(isinstance(e, PlanReadyEvent) for e in events))
+
+        previews = [e for e in events if isinstance(e, PlanStepPreviewEvent)]
+        self.assertEqual(
+            [(p.index, p.instruction, p.confidence) for p in previews],
+            [(0, "Open Settings.", 0.9), (1, "Click Billing.", 0.6)],
+        )
+        # Every preview must arrive before the authoritative plan.
+        first_plan = next(
+            i for i, e in enumerate(events) if isinstance(e, PlanReadyEvent)
+        )
+        last_preview = max(
+            i for i, e in enumerate(events) if isinstance(e, PlanStepPreviewEvent)
+        )
+        self.assertLess(last_preview, first_plan)
+
+        # The authoritative plan is unaffected by previewing.
+        plan = next(e for e in events if isinstance(e, PlanReadyEvent)).plan
+        self.assertEqual(
+            [s.instruction for s in plan.steps],
+            ["Open Settings.", "Click Billing."],
+        )
+
+    async def test_no_previews_when_flag_disabled(self) -> None:
+        events: list[Any] = []
+        llm = ScriptedLLM(
+            [
+                _streamed_update_plan_turn(click_item("Open Settings.")),
+                [LLMTextDelta(text="Looks done.")],
+            ]
+        )
+        session = TutorialSession(
+            session_id="s1",
+            llm=llm,
+            emit=await collect_events(events),
+            plan_stream_preview=False,
+        )
+
+        await session.handle_user_message("Open settings.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: any(isinstance(e, PlanReadyEvent) for e in events))
+
+        self.assertFalse(any(isinstance(e, PlanStepPreviewEvent) for e in events))
+        plan = next(e for e in events if isinstance(e, PlanReadyEvent)).plan
+        self.assertEqual([s.instruction for s in plan.steps], ["Open Settings."])
+
+    async def test_new_call_id_resets_preview(self) -> None:
+        events: list[Any] = []
+        # Two update_plan calls in one turn with different ids: the second
+        # supersedes the first, so a reset must fire and only the last plan
+        # is authoritative.
+        turn = [
+            *_streamed_update_plan_turn(
+                click_item("Stale step."), call_id="c1"
+            )[:-1],
+            *_streamed_update_plan_turn(
+                click_item("Real step."), call_id="c2"
+            ),
+        ]
+        llm = ScriptedLLM([turn, [LLMTextDelta(text="Looks done.")]])
+        session = TutorialSession(
+            session_id="s1", llm=llm, emit=await collect_events(events)
+        )
+
+        await session.handle_user_message("Do the thing.")
+        await send_next_requested_screen(session, events)
+        await wait_until(lambda: any(isinstance(e, PlanReadyEvent) for e in events))
+
+        self.assertTrue(any(isinstance(e, PlanStreamResetEvent) for e in events))
+        plan = next(e for e in events if isinstance(e, PlanReadyEvent)).plan
+        self.assertEqual([s.instruction for s in plan.steps], ["Real step."])
 
 
 if __name__ == "__main__":

@@ -18,7 +18,15 @@ import json
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from backend.plan_merge import TailCandidate
 from backend.tutorial_schema import (
@@ -26,13 +34,21 @@ from backend.tutorial_schema import (
     TutorialAction,
     TutorialPlan,
     TutorialStep,
+    normalize_tutorial_plan,
     remove_gemini_unsupported_schema_keys,
 )
 
 
 UPDATE_PLAN_TOOL_NAME = "tutorial_update_plan"
 REQUEST_SCREEN_TOOL_NAME = "tutorial_request_screen"
-TUTORIAL_TOOL_NAMES = frozenset({UPDATE_PLAN_TOOL_NAME, REQUEST_SCREEN_TOOL_NAME})
+REQUEST_COMPLETION_TOOL_NAME = "tutorial_request_completion"
+ASK_USER_TOOL_NAME = "tutorial_ask_user"
+TUTORIAL_TOOL_NAMES = frozenset({
+    UPDATE_PLAN_TOOL_NAME,
+    REQUEST_SCREEN_TOOL_NAME,
+    REQUEST_COMPLETION_TOOL_NAME,
+    ASK_USER_TOOL_NAME,
+})
 
 INVALID_TOOL_CALL = "invalid_tool_call"
 INVALID_TOOL_ARGUMENTS = "invalid_tool_arguments"
@@ -103,7 +119,21 @@ class _ActionPayloadBase(_StrictModel):
 
 class ClickAction(_ActionPayloadBase):
     kind: Literal["click"]
-    agent_description: str = Field(min_length=1)
+    agent_description: str = Field(
+        min_length=1,
+        description=(
+            "Short target name handed to a visual-grounding model. Use the "
+            "canonical on-screen label or conventional control name as a "
+            "human would say it: 'Sign up', 'the Apple menu', 'the "
+            "username field', 'the Storage row in System Settings'. 2–8 "
+            "words. Add a small parent-container disambiguator only when "
+            "identity is genuinely ambiguous ('Sign up in the page "
+            "header'). Do NOT describe pixel appearance (color, shape, "
+            "icon glyph), absolute position ('top-right', 'lower-left', "
+            "'above the divider'), or chain multiple spatial clauses — "
+            "the grounder sees the same screen and does the looking."
+        ),
+    )
     requires_confirmation: bool = Field(
         default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
     )
@@ -112,7 +142,21 @@ class ClickAction(_ActionPayloadBase):
 class TypeAction(_ActionPayloadBase):
     kind: Literal["type"]
     copiable_text: str = Field(min_length=1)
-    agent_description: str = Field(min_length=1)
+    agent_description: str = Field(
+        min_length=1,
+        description=(
+            "Short target name handed to a visual-grounding model. Use the "
+            "canonical on-screen label or conventional control name as a "
+            "human would say it: 'Sign up', 'the Apple menu', 'the "
+            "username field', 'the Storage row in System Settings'. 2–8 "
+            "words. Add a small parent-container disambiguator only when "
+            "identity is genuinely ambiguous ('Sign up in the page "
+            "header'). Do NOT describe pixel appearance (color, shape, "
+            "icon glyph), absolute position ('top-right', 'lower-left', "
+            "'above the divider'), or chain multiple spatial clauses — "
+            "the grounder sees the same screen and does the looking."
+        ),
+    )
     requires_confirmation: bool = Field(
         default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
     )
@@ -142,6 +186,23 @@ class WaitAction(_ActionPayloadBase):
     )
 
 
+class UserChoiceAction(_ActionPayloadBase):
+    kind: Literal["user_choice"]
+    prompt: str = Field(
+        min_length=1,
+        description=(
+            "Short instruction shown to the user when the next move is a "
+            "free choice they make themselves — picking which item to open, "
+            "typing their own username, entering a search query they care "
+            "about, etc. There is no deterministic target or string; the "
+            "overlay renders this prompt and waits for the user to act."
+        ),
+    )
+    requires_confirmation: bool = Field(
+        default=True, description=REQUIRES_CONFIRMATION_DESCRIPTION
+    )
+
+
 ActionPayload = Annotated[
     Union[
         ClickAction,
@@ -149,6 +210,7 @@ ActionPayload = Annotated[
         ScrollAction,
         PressKeyAction,
         WaitAction,
+        UserChoiceAction,
     ],
     Field(discriminator="kind"),
 ]
@@ -160,6 +222,19 @@ class PlanItem(_StrictModel):
     )
     human_text: str = Field(min_length=1, description="One concise on-screen instruction.")
     confidence: float = Field(ge=0.0, le=1.0, description=CONFIDENCE_DESCRIPTION)
+    expected_screen_summary: str | None = Field(
+        default=None,
+        description=(
+            "Short phrase (<= 12 words) naming the dominant visible UI "
+            "the user should see when this step is on screen — e.g. "
+            "'GitHub repository Settings page with Danger Zone visible'. "
+            "Used as a cheap cosine-similarity check against the "
+            "verifier's screen_summary to confirm on_track without a "
+            "second full vision call. Concrete and specific to the app "
+            "and route in front of the user; null if you genuinely don't "
+            "know what they'll see."
+        ),
+    )
     actions: list[ActionPayload] = Field(
         min_length=1,
         description=(
@@ -167,7 +242,7 @@ class PlanItem(_StrictModel):
             "user-perceived intent. Each action is a JSON object whose "
             "discriminator field is named exactly \"kind\" (NOT \"action\" or "
             "\"type\"), with value one of: \"click\", \"type\", \"scroll\", "
-            "\"press_key\", \"wait\". The remaining fields depend on kind "
+            "\"press_key\", \"wait\", \"user_choice\". The remaining fields depend on kind "
             "(see the per-variant schemas). One step per user intent; "
             "decompose into atomic actions inside. Set "
             "requires_confirmation=true on the action whose result the user "
@@ -218,8 +293,101 @@ class TutorialRequestScreenArguments(_StrictModel):
     reason: str = Field(min_length=1)
 
 
+class TutorialRequestCompletionArguments(_StrictModel):
+    reason: str = Field(
+        min_length=1,
+        description=(
+            "One short sentence summarising why you believe the user's goal "
+            "is reached. The backend shows this to the user verbatim and "
+            "asks them to confirm before ending the tutorial."
+        ),
+    )
+
+
+class AskUserQuestion(_StrictModel):
+    question_id: str = Field(
+        min_length=1,
+        description=(
+            "Short kebab-case slug unique within this call. The user's "
+            "answer comes back keyed by this id. Examples: 'email-client', "
+            "'sharing-scope'."
+        ),
+    )
+    question: str = Field(
+        min_length=1,
+        description=(
+            "One concrete question, <= 20 words, plain language. Avoid "
+            "jargon and yes/no framing when an options choice would be "
+            "clearer."
+        ),
+    )
+    response_mode: Literal["options", "free_text"] = Field(
+        description=(
+            "'options' (preferred): present 2-4 suggested answers; the "
+            "user may still write their own. 'free_text': no suggestions, "
+            "only a text field. Default to 'options' unless the answer "
+            "space is genuinely open-ended (a name, a URL, a freeform "
+            "query)."
+        ),
+    )
+    options: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "2-4 short suggestions (<= 6 words each, mutually exclusive) "
+            "when response_mode='options'. Must be empty when "
+            "response_mode='free_text'. The user can always supply their "
+            "own answer either way; these are suggestions, not an "
+            "exclusive set."
+        ),
+    )
+
+
+class TutorialAskUserArguments(_StrictModel):
+    reason: str = Field(
+        min_length=1,
+        description=(
+            "One sentence: what about the goal is ambiguous and why these "
+            "answers change the plan. Logged and shown as a subline above "
+            "the question stack."
+        ),
+    )
+    questions: list[AskUserQuestion] = Field(
+        min_length=1,
+        max_length=4,
+        description=(
+            "1-4 independent clarifying questions to ask in a single "
+            "batch. Bundle related decisions into one batch rather than "
+            "drip-feeding them one at a time -- every batch costs the user "
+            "a round-trip. Each question must have a unique question_id."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> "TutorialAskUserArguments":
+        seen: set[str] = set()
+        for q in self.questions:
+            if q.question_id in seen:
+                raise ValueError(f"Duplicate question_id: {q.question_id!r}")
+            seen.add(q.question_id)
+            if q.response_mode == "options" and len(q.options) < 2:
+                raise ValueError(
+                    f"{q.question_id}: response_mode='options' requires 2-4 options."
+                )
+            if q.response_mode == "free_text" and q.options:
+                raise ValueError(
+                    f"{q.question_id}: response_mode='free_text' must omit options."
+                )
+        return self
+
+
 class _ToolCallPayload(_StrictModel):
-    name: Literal["tutorial_update_plan", "tutorial_request_screen"]
+    name: Literal[
+        "tutorial_update_plan",
+        "tutorial_request_screen",
+        "tutorial_request_completion",
+        "tutorial_ask_user",
+    ]
     arguments: dict[str, Any]
 
 
@@ -229,6 +397,8 @@ class _ToolCallList(_StrictModel):
 
 _tool_call_list_adapter = TypeAdapter(_ToolCallList)
 _update_plan_adapter = TypeAdapter(TutorialUpdatePlanArguments)
+_request_completion_adapter = TypeAdapter(TutorialRequestCompletionArguments)
+_ask_user_adapter = TypeAdapter(TutorialAskUserArguments)
 
 
 # ---------------- Schema export (for LLM clients) ----------------
@@ -261,6 +431,36 @@ def openai_tutorial_tool_definitions() -> list[dict[str, Any]]:
                 "rest of the turn is discarded."
             ),
             model=TutorialRequestScreenArguments,
+        ),
+        _build_openai_tool(
+            name=REQUEST_COMPLETION_TOOL_NAME,
+            description=(
+                "Propose that the user's goal is reached and the tutorial "
+                "should end. The backend shows your reason to the user and "
+                "asks them to confirm before terminating the session. Only "
+                "call this when the latest screen — or the user's last "
+                "message — gives you a concrete reason to believe the goal "
+                "is met. Do not use this as a way to abandon a stuck plan."
+            ),
+            model=TutorialRequestCompletionArguments,
+        ),
+        _build_openai_tool(
+            name=ASK_USER_TOOL_NAME,
+            description=(
+                "Ask the user 1-4 clarifying questions when their goal is "
+                "genuinely ambiguous and multiple reasonable workflows "
+                "fit. You may ask on any turn, as often as the workflow "
+                "genuinely needs it -- but must be the sole tool call in "
+                "its turn, and never re-ask something already answered. "
+                "Bundle independent questions into a single call (up to 4) "
+                "rather than chaining calls -- every batch costs a human "
+                "round-trip. Prefer response_mode='options' with 2-4 "
+                "mutually exclusive suggestions; the user can always "
+                "supply their own answer. Do not use this to confirm "
+                "details you can verify on screen or to ask permission to "
+                "start."
+            ),
+            model=TutorialAskUserArguments,
         ),
     ]
 
@@ -332,6 +532,40 @@ def is_update_plan_call(call: TutorialToolCall) -> bool:
     return call.name == UPDATE_PLAN_TOOL_NAME
 
 
+def is_request_completion_call(call: TutorialToolCall) -> bool:
+    return call.name == REQUEST_COMPLETION_TOOL_NAME
+
+
+def is_ask_user_call(call: TutorialToolCall) -> bool:
+    return call.name == ASK_USER_TOOL_NAME
+
+
+def parse_ask_user_arguments(call: TutorialToolCall) -> TutorialAskUserArguments:
+    if call.name != ASK_USER_TOOL_NAME:
+        raise TutorialToolCallError(
+            INVALID_TOOL_CALL,
+            f"Expected {ASK_USER_TOOL_NAME}, got {call.name!r}.",
+        )
+    try:
+        return _ask_user_adapter.validate_json(call.arguments)
+    except ValidationError as error:
+        raise TutorialToolCallError(
+            INVALID_TOOL_ARGUMENTS,
+            f"Invalid arguments for {call.name}: {error}",
+        ) from error
+
+
+def parse_request_completion_reason(call: TutorialToolCall) -> str:
+    try:
+        arguments = _request_completion_adapter.validate_json(call.arguments)
+    except ValidationError as error:
+        raise TutorialToolCallError(
+            INVALID_TOOL_ARGUMENTS,
+            f"Invalid arguments for {call.name}: {error}",
+        ) from error
+    return arguments.reason
+
+
 def parse_request_screen_reason(call: TutorialToolCall) -> str:
     try:
         payload = json.loads(call.arguments)
@@ -382,6 +616,7 @@ def _step_template_from_item(item: PlanItem) -> TutorialStep:
         instruction=item.human_text,
         actions=actions,
         confidence=item.confidence,
+        expected_screen_summary=item.expected_screen_summary,
     )
 
 
@@ -420,6 +655,12 @@ def _action_from_payload(payload: ActionPayload, human_text: str) -> TutorialAct
             duration_ms=payload.duration_ms,
             requires_confirmation=payload.requires_confirmation,
         )
+    if isinstance(payload, UserChoiceAction):
+        return TutorialAction(
+            type="user_choice",
+            prompt=payload.prompt,
+            requires_confirmation=payload.requires_confirmation,
+        )
     raise TutorialToolCallError(  # pragma: no cover — discriminated union is exhaustive
         INVALID_TOOL_ARGUMENTS,
         f"Unsupported action payload kind: {type(payload).__name__}",
@@ -438,9 +679,10 @@ def _infer_scroll_direction(text: str) -> Literal["up", "down", "left", "right"]
 
 
 def plan_from_steps(goal: str, steps: list[TutorialStep]) -> TutorialPlan:
-    return TutorialPlan(
+    plan = TutorialPlan(
         schema_version="tutorial_plan.v1",
         goal=goal,
         summary="Follow the streamed tutorial actions.",
         steps=steps,
     )
+    return normalize_tutorial_plan(plan)

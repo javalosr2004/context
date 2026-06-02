@@ -1,14 +1,31 @@
 from __future__ import annotations
 
 import base64
+import logging
+import time
 from collections.abc import Iterator
 from typing import Any
 
 from openai import OpenAI
 
 from backend.images import UploadedImage
-from backend.llm import LLMRequest, LLMStreamEvent, LLMTextDelta, LLMToolCallEvent
-from backend.tutorial_tools import TutorialToolCall, openai_tutorial_tool_definitions
+from backend.llm import (
+    LLMRequest,
+    LLMStreamEvent,
+    LLMTextDelta,
+    LLMToolCallArgsDelta,
+    LLMToolCallEvent,
+    LLMWebSearchCompleted,
+    LLMWebSearchStarted,
+)
+from backend.tutorial_tools import (
+    UPDATE_PLAN_TOOL_NAME,
+    TutorialToolCall,
+    openai_tutorial_tool_definitions,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClient:
@@ -16,8 +33,8 @@ class OpenAIClient:
         self,
         api_key: str,
         model: str,
-        reasoning_effort: str = "medium",
-        verbosity: str = "medium",
+        reasoning_effort: str | None = "medium",
+        verbosity: str | None = "medium",
         base_url: str | None = None,
     ) -> None:
         client_options: dict[str, str] = {"api_key": api_key}
@@ -67,6 +84,20 @@ class OpenAIClient:
                 yield event.tool_call
 
     def stream_tutorial_events(self, request: LLMRequest) -> Iterator[LLMStreamEvent]:
+        tools = openai_tutorial_tool_definitions()
+        tool_names = [tool.get("name") or tool.get("type") for tool in tools]
+        if request.enable_search_grounding:
+            tool_names.append("web_search")
+        logger.info(
+            "[llm] stream start",
+            extra={
+                "model": self._model,
+                "tool_count": len(tool_names),
+                "tool_names": tool_names,
+                "enable_search_grounding": request.enable_search_grounding,
+            },
+        )
+        started_at = time.perf_counter()
         stream = self._client.responses.create(
             model=self._model,
             input=build_input(request),
@@ -77,14 +108,86 @@ class OpenAIClient:
                 enable_search_grounding=request.enable_search_grounding,
                 response_mime_type=request.response_mime_type,
                 response_schema=request.response_schema,
-                tools=openai_tutorial_tool_definitions(),
+                tools=tools,
             ),
         )
 
+        first_event_logged = False
+        text_delta_count = 0
+        tool_call_count = 0
+        tool_args_delta_count = 0
+        web_search_count = 0
+        other_count = 0
+        # Function-call argument deltas arrive without the tool name; only
+        # the output_item.added event carries it. Map item_id -> name so we
+        # can attribute streamed args to the right tool.
+        function_call_names: dict[str, str] = {}
+        # When the planner runs web_search the API streams Started before
+        # Completed; we stamp elapsed_ms here because it's the only place
+        # both timestamps are visible. Track the last Started across all
+        # in-flight searches — OpenAI emits at most one in flight per
+        # response, so a single timestamp suffices.
+        last_search_started_at: float | None = None
         for event in stream:
+            if not first_event_logged:
+                logger.info(
+                    "[llm] stream first_event",
+                    extra={
+                        "model": self._model,
+                        "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    },
+                )
+                first_event_logged = True
+            event_type = getattr(event, "type", "")
+            if event_type == "response.output_item.added":
+                item = getattr(event, "item", None)
+                if getattr(item, "type", "") == "function_call":
+                    item_id = getattr(item, "id", "") or ""
+                    if item_id:
+                        function_call_names[item_id] = getattr(item, "name", "") or ""
+            elif event_type == "response.function_call_arguments.delta":
+                delta = getattr(event, "delta", None)
+                item_id = getattr(event, "item_id", "") or ""
+                if delta and function_call_names.get(item_id) == UPDATE_PLAN_TOOL_NAME:
+                    tool_args_delta_count += 1
+                    yield LLMToolCallArgsDelta(
+                        name=UPDATE_PLAN_TOOL_NAME, delta=delta, call_id=item_id
+                    )
+                continue
             stream_event = stream_event_from_response_event(event)
-            if stream_event is not None:
-                yield stream_event
+            if stream_event is None:
+                other_count += 1
+                continue
+            if isinstance(stream_event, LLMTextDelta):
+                text_delta_count += 1
+            elif isinstance(stream_event, LLMToolCallEvent):
+                tool_call_count += 1
+            elif isinstance(stream_event, LLMWebSearchStarted):
+                web_search_count += 1
+                last_search_started_at = time.perf_counter()
+            elif isinstance(stream_event, LLMWebSearchCompleted):
+                if last_search_started_at is not None:
+                    elapsed_ms = (
+                        time.perf_counter() - last_search_started_at
+                    ) * 1000.0
+                    stream_event = LLMWebSearchCompleted(
+                        query=stream_event.query, elapsed_ms=elapsed_ms
+                    )
+                    last_search_started_at = None
+            yield stream_event
+
+        logger.info(
+            "[llm] stream end",
+            extra={
+                "model": self._model,
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "text_delta_count": text_delta_count,
+                "tool_call_count": tool_call_count,
+                "tool_args_delta_count": tool_args_delta_count,
+                "web_search_count": web_search_count,
+                "other_event_count": other_count,
+            },
+        )
 
 
 def build_input(request: LLMRequest) -> list[dict[str, Any]]:
@@ -105,21 +208,28 @@ def build_image_content(image: UploadedImage) -> dict[str, Any]:
     return {
         "type": "input_image",
         "image_url": f"data:{image.mime_type};base64,{encoded}",
+        # Force full-resolution vision tokens. Default "auto" downsamples
+        # large screenshots, which costs us UI-label legibility.
+        "detail": "high",
     }
 
 
 def build_response_params(
-    reasoning_effort: str,
-    verbosity: str,
+    reasoning_effort: str | None,
+    verbosity: str | None,
     enable_search_grounding: bool,
     response_mime_type: str | None,
     response_schema: dict[str, Any] | None,
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {
-        "reasoning": {"effort": reasoning_effort},
-        "text": {"format": build_text_format(response_mime_type, response_schema), "verbosity": verbosity},
+    text: dict[str, Any] = {
+        "format": build_text_format(response_mime_type, response_schema),
     }
+    if verbosity is not None:
+        text["verbosity"] = verbosity
+    params: dict[str, Any] = {"text": text}
+    if reasoning_effort is not None:
+        params["reasoning"] = {"effort": reasoning_effort}
     if tools:
         params["tools"] = tools.copy()
     if enable_search_grounding:
@@ -152,7 +262,56 @@ def stream_event_from_response_event(event: object) -> LLMStreamEvent | None:
     if tool_call is not None:
         return LLMToolCallEvent(tool_call=tool_call)
 
+    web_search = web_search_event_from_response_event(event)
+    if web_search is not None:
+        return web_search
+
     return None
+
+
+def web_search_event_from_response_event(
+    event: object,
+) -> LLMWebSearchStarted | LLMWebSearchCompleted | None:
+    """Detect lifecycle events for OpenAI's native web_search tool.
+
+    The Responses API surfaces a web_search_call as a regular output item:
+      - ``response.output_item.added`` fires when the model starts a
+        search. The item carries ``type='web_search_call'`` and an
+        ``action`` whose ``query`` may already be populated.
+      - ``response.output_item.done`` fires when the search finishes.
+        The final item shape carries ``action.query`` and a status.
+
+    We map these to Started/Completed. The Completed event's
+    ``elapsed_ms`` field is filled in by the streaming loop, which is
+    the only place we know when the matching Started actually fired.
+    """
+    event_type = getattr(event, "type", "")
+    if event_type not in {
+        "response.output_item.added",
+        "response.output_item.done",
+    }:
+        return None
+    item = getattr(event, "item", None)
+    if getattr(item, "type", "") != "web_search_call":
+        return None
+    query = _web_search_query_from_item(item)
+    if event_type == "response.output_item.added":
+        return LLMWebSearchStarted(query=query)
+    return LLMWebSearchCompleted(query=query)
+
+
+def _web_search_query_from_item(item: object) -> str:
+    action = getattr(item, "action", None)
+    if action is None:
+        return ""
+    query = getattr(action, "query", None)
+    if isinstance(query, str):
+        return query
+    if isinstance(action, dict):
+        value = action.get("query")
+        if isinstance(value, str):
+            return value
+    return ""
 
 
 def build_text_format(

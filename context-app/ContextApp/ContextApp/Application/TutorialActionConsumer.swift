@@ -31,14 +31,21 @@ final class TutorialActionConsumer {
             referenceImageData: nil,
             imageEncodingConfig: .groundingRequest,
             submittedAtUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds,
-            tooltip: step.instruction
+            tooltip: step.instruction,
+            copiableText: Self.copiableText(for: action)
         )
         return await groundInstruction(instruction)
     }
 
+    static func copiableText(for action: TutorialAction) -> String? {
+        guard case .type(let typeAction) = action else { return nil }
+        let trimmed = typeAction.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : typeAction.text
+    }
+
     static func skipsGrounding(action: TutorialAction) -> Bool {
         switch action {
-        case .scroll, .pressKey, .wait, .confirm:
+        case .scroll, .pressKey, .wait, .confirm, .userChoice:
             return true
         case .type(let action):
             return action.target == nil
@@ -66,16 +73,10 @@ final class TutorialActionConsumer {
 
     static func groundingInstructionText(for step: TutorialStep, actionIndex: Int) -> String {
         guard actionIndex >= 0, actionIndex < step.actions.count else {
-            return step.instruction
+            return ""
         }
-        guard
-            let description = targetDescription(for: step.actions[actionIndex])?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-            !description.isEmpty
-        else {
-            return step.instruction
-        }
-        return "\(step.instruction)\n\nTarget: \(description)"
+        return targetDescription(for: step.actions[actionIndex])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private static func targetDescription(for action: TutorialAction) -> String? {
@@ -94,7 +95,7 @@ final class TutorialActionConsumer {
             return action.target?.description
         case .drag(let action):
             return action.target.description
-        case .pressKey, .wait, .confirm:
+        case .pressKey, .wait, .confirm, .userChoice:
             return nil
         }
     }

@@ -53,6 +53,7 @@ class TutorialAction(TutorialSchemaModel):
         "scroll",
         "drag",
         "wait",
+        "user_choice",
     ] = Field(description="Action type supported by the overlay tutorial player.")
     target: ActionTarget | None = Field(
         default=None,
@@ -75,6 +76,14 @@ class TutorialAction(TutorialSchemaModel):
         ge=0,
         le=10000,
         description="Wait duration in milliseconds. Only used when type is 'wait'.",
+    )
+    prompt: str | None = Field(
+        default=None,
+        description=(
+            "Free-text prompt for the user when type is 'user_choice'. "
+            "The user is expected to take whatever action best fits "
+            "(click, type, etc.); there is no deterministic target."
+        ),
     )
     requires_confirmation: bool = Field(
         description=(
@@ -104,6 +113,23 @@ class TutorialStep(TutorialSchemaModel):
         ge=0.0,
         le=1.0,
         description="Model confidence from 0.0 to 1.0.",
+    )
+    logical_id: str | None = Field(
+        default=None,
+        description=(
+            "Server-assigned identity that is stable across replans. "
+            "Set by the session via embedding similarity against prior "
+            "steps; planner output never carries this."
+        ),
+    )
+    expected_screen_summary: str | None = Field(
+        default=None,
+        description=(
+            "Optional short phrase (<= 12 words) naming the dominant "
+            "visible UI the user should see when this step is on screen. "
+            "Compared against the verifier's screen_summary via cosine "
+            "similarity to short-circuit the on_track decision."
+        ),
     )
 
 
@@ -169,6 +195,35 @@ class UserMessageIntent(TutorialSchemaModel):
     )
 
 
+class SearchQueryRefinement(TutorialSchemaModel):
+    """One concise web search query grounded in the user's screen."""
+
+    query: str = Field(
+        min_length=1,
+        max_length=200,
+        description=(
+            "A single web search query (roughly 5-12 words) that names the "
+            "specific OS, app, and version visible on screen alongside the "
+            "user's goal. Avoid generic phrasings."
+        ),
+    )
+
+
+def parse_search_query_refinement(raw_json: str) -> SearchQueryRefinement:
+    try:
+        return SearchQueryRefinement.model_validate_json(raw_json)
+    except ValidationError as error:
+        raise TutorialPlanValidationError(
+            "LLM returned an invalid search query refinement."
+        ) from error
+
+
+def search_query_refinement_response_schema() -> dict[str, Any]:
+    return remove_gemini_unsupported_schema_keys(
+        SearchQueryRefinement.model_json_schema()
+    )
+
+
 def parse_user_message_intent(raw_json: str) -> UserMessageIntent:
     try:
         return UserMessageIntent.model_validate_json(raw_json)
@@ -199,6 +254,7 @@ def parse_tutorial_plan(raw_json: str) -> TutorialPlan:
     try:
         plan = TutorialPlan.model_validate_json(raw_json)
         validate_tutorial_plan_semantics(plan)
+        normalize_tutorial_plan(plan)
         return plan
     except (ValidationError, ValueError) as error:
         raise TutorialPlanValidationError(
@@ -257,6 +313,12 @@ def validate_action_semantics(action: TutorialAction) -> None:
     if action.type == "wait" and action.duration_ms is None:
         raise ValueError("wait action requires duration_ms")
 
+    if action.type == "user_choice":
+        if not has_text(action.prompt):
+            raise ValueError("user_choice action requires prompt")
+        if action.target is not None:
+            raise ValueError("user_choice action must not carry a target")
+
 
 def require_target(action: TutorialAction) -> None:
     if action.target is None:
@@ -265,3 +327,55 @@ def require_target(action: TutorialAction) -> None:
 
 def has_text(value: str | None) -> bool:
     return value is not None and bool(value.strip())
+
+
+def normalize_tutorial_plan(plan: TutorialPlan) -> TutorialPlan:
+    """Apply deterministic post-processing to a validated plan in-place.
+
+    Currently collapses a `click` action that is immediately followed within
+    the same step by a `type` action on the same target: the click is
+    redundant since clicking to type *is* the typing gesture, and emitting
+    both shows the user two highlights on the same UI region.
+    """
+    for step in plan.steps:
+        step.actions = _collapse_click_then_type_same_target(step.actions)
+    return plan
+
+
+def _collapse_click_then_type_same_target(
+    actions: list[TutorialAction],
+) -> list[TutorialAction]:
+    result: list[TutorialAction] = []
+    index = 0
+    while index < len(actions):
+        current = actions[index]
+        following = actions[index + 1] if index + 1 < len(actions) else None
+        if (
+            current.type == "click"
+            and following is not None
+            and following.type == "type"
+            and current.target is not None
+            and following.target is not None
+            and _targets_equal(current.target, following.target)
+        ):
+            index += 1  # drop the click; emit the type on the next iteration
+            continue
+        result.append(current)
+        index += 1
+    return result
+
+
+def _targets_equal(left: ActionTarget, right: ActionTarget) -> bool:
+    return (
+        left.kind == right.kind
+        and _normalized(left.label) == _normalized(right.label)
+        and _normalized(left.role) == _normalized(right.role)
+        and _normalized(left.description) == _normalized(right.description)
+    )
+
+
+def _normalized(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip().lower()
+    return stripped if stripped else None

@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Product Critique — Context / Tutorial Overlay</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --accent: #b8002e;
+    --warn: #c25700;
+    --ok: #1f6f3e;
+    --rule: #d8d6cf;
+    --code-bg: #f0ede4;
+    --card-bg: #ffffff;
+    --shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  html { background: var(--bg); }
+  body {
+    color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 56px 32px 96px;
+  }
+  h1 {
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 0 0 8px;
+    letter-spacing: -0.5px;
+  }
+  h2 {
+    font-size: 24px;
+    margin: 48px 0 12px;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 6px;
+  }
+  h3 {
+    font-size: 18px;
+    margin: 28px 0 8px;
+    color: var(--fg);
+  }
+  h4 {
+    font-size: 15px;
+    margin: 20px 0 6px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+  .tldr {
+    background: var(--card-bg);
+    border-left: 4px solid var(--accent);
+    padding: 16px 20px;
+    margin: 24px 0;
+    box-shadow: var(--shadow);
+  }
+  .tldr strong { color: var(--accent); }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+  }
+  tr:hover td { background: #faf8f1; }
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font: 13px "SF Mono", Menlo, monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 12px 16px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font: 13px/1.5 "SF Mono", Menlo, monospace;
+  }
+  blockquote {
+    border-left: 3px solid var(--rule);
+    margin: 12px 0;
+    padding: 4px 16px;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .v-cut { background: #fbe9ec; color: var(--accent); }
+  .v-keep { background: #e6f1ea; color: var(--ok); }
+  .v-warn { background: #fff0e1; color: var(--warn); }
+  .pivot {
+    background: var(--card-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 20px 24px;
+    margin: 20px 0;
+    box-shadow: var(--shadow);
+  }
+  .pivot h3 {
+    margin-top: 0;
+    color: var(--accent);
+  }
+  .pivot-grid {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 8px 18px;
+    font-size: 14px;
+    margin-top: 12px;
+  }
+  .pivot-grid .label {
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    padding-top: 2px;
+  }
+  .score {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+  .bar {
+    display: inline-block;
+    height: 6px;
+    background: var(--rule);
+    border-radius: 3px;
+    width: 120px;
+    overflow: hidden;
+    vertical-align: middle;
+  }
+  .bar > span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  ul, ol { padding-left: 24px; }
+  li { margin: 4px 0; }
+  hr { border: none; border-top: 1px solid var(--rule); margin: 40px 0; }
+  .footnote {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .callout {
+    background: #fff0e1;
+    border-left: 4px solid var(--warn);
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  .kill-list { columns: 2; column-gap: 32px; }
+  .kill-list li { break-inside: avoid; }
+  @media (max-width: 700px) {
+    body { padding: 32px 16px; }
+    .kill-list { columns: 1; }
+    .pivot-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Product Critique — Context / Tutorial Overlay</h1>
+<div class="meta">2026-05-21 · Focus: use case, scope creep, real users, missing must-haves, and pivots worth considering. Companion to <code>docs/project-audit.md</code>.</div>
+
+<div class="tldr">
+  <strong>TL;DR.</strong> The pitch is "live overlay tutorial that teaches while you work." The codebase says you are building a GUI-agent research platform with an overlay glued to the front. The use case as written is too vague to be a wedge, the user is undefined, and ~60% of what is built does not serve the stated product. The features a real user would need to adopt this — sharing, distribution, auth, redaction, multi-OS, browser integration, deterministic targeting fallbacks — none are implemented. Meanwhile you have built a search engine, a VLM grounding stack, and two frontends. Cut hard or pick a different product. There are <strong>seven pivots</strong> worth considering; section 8 ranks them.
+</div>
+
+<h2>1. The use case — does it survive contact with a real user?</h2>
+
+<h3>1.1 The pitch (README, verbatim)</h3>
+<blockquote>"Record a workflow once, replay as a live overlay tutorial. Examples: setting up Git, navigating internal tools, completing multi-step web flows."</blockquote>
+
+<h3>1.2 The five-second user test</h3>
+<p>Three real personas, three honest answers:</p>
+
+<h4>Person A — New hire at a 500-person company</h4>
+<p>Their manager Slacks them a Scribe link. They click it, see numbered screenshots with arrows, follow along in a browser tab while doing the real work in another tab. Done in 4 minutes.</p>
+<p><strong>Would they install your Mac app?</strong> No. The friction (install native app, grant screen-recording permission, grant accessibility permission, sign in, learn the overlay's UI) exceeds the value of "live overlay" by 100×. The Scribe link won the second the manager copy-pasted it into Slack.</p>
+
+<h4>Person B — Senior engineer setting up Git</h4>
+<p>They run <code>brew install git</code>, paste their SSH key, move on. They will not record a tutorial. They will not watch one. They open Stack Overflow if anything breaks. <strong>Your example use case is wrong for this persona</strong> — they were never the market.</p>
+
+<h4>Person C — A 65-year-old learning Photoshop</h4>
+<p>This is the only persona who <em>genuinely</em> benefits from a live overlay. They cannot translate a YouTube video into the action in front of them. The overlay solves a real cognitive-load problem.</p>
+<p><strong>But:</strong> they are probably on Windows. They do not know what a "macOS overlay" is. Their grandchild who might install it for them is not paying for software.</p>
+
+<div class="callout">
+The use case the README claims (developer / employee productivity) is the use case where you <em>lose to Scribe and Loom</em>. The use case where you would actually win (accessibility / cognitive-assist) is <em>not what the README or roadmap describes</em>, and the codebase does not optimize for it.
+</div>
+
+<h3>1.3 Use cases that would survive contact with reality</h3>
+
+<table>
+<tr><th>Thesis</th><th>Product shape</th><th>Why it could work</th></tr>
+<tr>
+  <td><strong>Cognitive-assist coaching</strong></td>
+  <td>Mac overlay that walks non-technical users through complex apps (CAD, Photoshop, tax software, EHR)</td>
+  <td>Live overlay is genuinely better than video for low-tech-confidence users. Hospitals, clinics, accounting firms pay for this.</td>
+</tr>
+<tr>
+  <td><strong>GUI-agent training data flywheel</strong></td>
+  <td>Recording + Holo-described action dataset; overlay is the collection UX, not the product</td>
+  <td>The dataset is monetizable to LLM labs even if no end user ever loves the overlay. Anthropic, OpenAI, Adept-style co's actively buy this.</td>
+</tr>
+<tr>
+  <td><strong>Enterprise SOP enforcement</strong></td>
+  <td>Compliance officer records a procedure; overlay <em>gates</em> employee actions until each step is confirmed</td>
+  <td>"Did you actually run the safety check?" Regulated industries (pharma, finance, clinical) pay seven figures for this.</td>
+</tr>
+<tr>
+  <td><strong>Live coach for support reps</strong></td>
+  <td>CS agent watches the rep's screen; overlay nudges in real time during a customer call</td>
+  <td>Real B2B SaaS market (Gong, Chorus territory); requires multi-user coordination you have not built.</td>
+</tr>
+</table>
+
+<p>The current pitch is none of these clearly. It is the Venn-diagram center that no one actually lives in.</p>
+
+<hr>
+
+<h2>2. Scope creep — what does not belong</h2>
+
+<p><code>backend/CLAUDE.md</code>, verbatim:</p>
+<blockquote>"Don't over-engineer early. Start flat, extract modules only when a boundary becomes necessary."</blockquote>
+
+<p>Reality, taken from the repo this morning:</p>
+
+<table>
+<tr><th>Built today</th><th>Should have been</th><th>Why it is creep</th></tr>
+<tr>
+  <td><code>docker/enrichment-layer/</code> — Brave Search + Playwright + trafilatura + SQLite tutorial corpus</td>
+  <td>Nothing, or a hardcoded JSON of 3 example tutorials</td>
+  <td>This is a search engine. You are one person.</td>
+</tr>
+<tr>
+  <td><code>docker/gui-actor-inference/</code> with DeTR + Colab launcher</td>
+  <td>One grounding call to one model</td>
+  <td>Two grounding stacks (<code>gui-actor-inference</code> + <code>gui-grounding</code>) where one would do.</td>
+</tr>
+<tr>
+  <td><code>docker/recording-enrichment/</code> as separate container</td>
+  <td>Inline Holo call from the Swift app</td>
+  <td>Microservices premature; you have one user (yourself).</td>
+</tr>
+<tr>
+  <td><code>backend/web_ground.py</code> + planner web search tool + <code>GROUNDING_STRATEGY</code> A/B</td>
+  <td>Nothing. The model knows enough.</td>
+  <td>Web grounding for <em>tutorial generation</em> is solving a problem no user has reported.</td>
+</tr>
+<tr>
+  <td>PDF upload as planner input</td>
+  <td>Nothing</td>
+  <td>"We accept PDFs" is a feature looking for a user.</td>
+</tr>
+<tr>
+  <td><code>STEP_TOOLS_ENABLED</code> capped-head vs full-plan A/B</td>
+  <td>Pick one and ship</td>
+  <td>A/B tests require traffic; you have no users.</td>
+</tr>
+<tr>
+  <td><code>instruction_verifier</code> + strict gate + parallel verifier (half-removed)</td>
+  <td>Skip verification, ask the user "did this work?"</td>
+  <td>The MVP explicitly said manual confirmation was fine "for now."</td>
+</tr>
+<tr>
+  <td>Async monitor LLM (planner/monitor split per roadmap)</td>
+  <td>One model, one call per turn</td>
+  <td>Optimization for a system that does not yet have correctness.</td>
+</tr>
+<tr>
+  <td><code>backend/embeddings_client.py</code> + logical-id resolver for plan-merge</td>
+  <td>Replace the plan when it changes</td>
+  <td>Cosine-similarity step matching exists only because you emit full plans every turn — a problem you created.</td>
+</tr>
+<tr>
+  <td>Electron frontend <em>and</em> Swift <code>ContextApp</code></td>
+  <td>One frontend</td>
+  <td>You are forking yourself in half.</td>
+</tr>
+<tr>
+  <td>SpecKit ceremony (<code>.specify/memory/constitution.md</code> v3.1.0)</td>
+  <td>Just write code</td>
+  <td>Process theater on top of a project where <code>xcodebuild test</code> has been broken for 16 days.</td>
+</tr>
+<tr>
+  <td><code>conversations.py</code> + <code>session_event_log.py</code> persistence "for training/debugging"</td>
+  <td>A JSON file</td>
+  <td>You are storing data you do not yet read.</td>
+</tr>
+</table>
+
+<h3>The pattern</h3>
+<p>Every one of these was a <em>reasonable</em> idea taken out of order. The discipline CLAUDE.md asked for — "extract modules only when a boundary becomes necessary" — has been inverted. You extracted modules in anticipation of boundaries that may never matter.</p>
+
+<p><strong>Honest count of scope creep:</strong> roughly 60% of the codebase serves a use case that does not yet have a user. The other 40% (recording + overlay + plan + walk loop) is the actual MVP.</p>
+
+<hr>
+
+<h2>3. Who would actually use this — and would they?</h2>
+
+<table>
+<tr><th>Segment</th><th>Install?</th><th>Pay?</th><th>Are you serving them?</th></tr>
+<tr><td>Developers doing dev-onboarding</td><td>No — they read docs</td><td>No</td><td>The Git example is delusional</td></tr>
+<tr><td>Non-technical employees in big cos</td><td>If IT pushes it</td><td>Employer would, but you need WalkMe-level distribution</td><td>No — no admin console, no SSO, no analytics</td></tr>
+<tr><td>Elderly / low-confidence users</td><td>If their kid installs it</td><td>No — they don't buy software</td><td>Possibly, but you are Mac-only and they are mostly on Windows</td></tr>
+<tr><td>Compliance-bound workers (pharma, finance, EHR)</td><td>Yes, if mandated</td><td>Their employer pays a <em>lot</em></td><td>No — no audit trail, no signoff, no role-based access</td></tr>
+<tr><td>LLM labs buying GUI-agent training data</td><td>N/A — they buy the dataset, not the app</td><td>Yes, six-to-seven figures</td><td>No — no schema versioning, no export, no labels</td></tr>
+<tr><td>Customer-success / sales-enablement teams</td><td>If it integrates with their LMS</td><td>Their employer pays</td><td>No — no LMS integration, no completion tracking</td></tr>
+<tr><td>Hobbyists making YouTube how-tos</td><td>Maybe — but they prefer Loom</td><td>No</td><td>No — no export to shareable artifact</td></tr>
+</table>
+
+<p><strong>There is no segment where the current build is "the best option available."</strong> Every segment either has a better alternative today or needs features you have not built.</p>
+
+<h3>The uncomfortable thought experiment</h3>
+<p>If you launched today and got 100 signups, what would you ship them?</p>
+<ol>
+  <li>They install the Mac app. (Lose Windows/Linux users.)</li>
+  <li>They grant screen-recording permission. (Lose the security-conscious.)</li>
+  <li>They record a tutorial. Holo enrichment runs. The dataset gets a new row.</li>
+  <li>They share it with… <strong>how?</strong> There is no share link. No export. No web viewer. The tutorial lives on disk.</li>
+  <li>They replay it themselves. The verifier loops on <code>"unsure"</code> (see <code>instruction_verifier.ANALYSIS.md</code>). They give up.</li>
+</ol>
+<p>You cannot launch — not because the tech is too hard, but because <strong>the distribution loop does not exist</strong>. Scribe's entire business is the paste-this-link-in-Slack moment. You have no link.</p>
+
+<hr>
+
+<h2>4. What real users would need — and isn't built</h2>
+
+<h3>4.1 Distribution and sharing — completely missing</h3>
+<ul>
+  <li><strong>Shareable artifact.</strong> A URL, PDF, Notion embed — something you can paste into Slack. Without this the tutorial never escapes the recorder's laptop.</li>
+  <li><strong>Web viewer.</strong> Replay surface that works without installing the app. Otherwise you are gating your own growth.</li>
+  <li><strong>Browser extension.</strong> For web-app tutorials (80% of internal-tools and onboarding flows), a Chrome extension beats a native overlay every time.</li>
+</ul>
+
+<h3>4.2 Authoring — half-built</h3>
+<ul>
+  <li><strong>Edit after recording.</strong> Record once is unrealistic; reality is you mess up step 4 and need to re-record just that step. Not supported.</li>
+  <li><strong>Step narration / annotation.</strong> Users need to add "click here <em>because</em> X." Holo's action description is fine for actions, not for <em>teaching</em>.</li>
+  <li><strong>Branching.</strong> "If you see this dialog, click Cancel; otherwise continue." Real tutorials need conditional logic.</li>
+  <li><strong>Variables / parameterization.</strong> "Enter your email" — you cannot record one user's literal email and replay it for a different user.</li>
+</ul>
+
+<h3>4.3 Trust and safety — completely missing</h3>
+<ul>
+  <li><strong>PII redaction at record time.</strong> Explicitly deferred in README. First time someone records a flow touching a password field, you have a liability problem. Must land before any real user.</li>
+  <li><strong>Secure field detection.</strong> <code>type=password</code> fields, 2FA codes, credit cards — must be blocked from frame capture by default.</li>
+  <li><strong>Audit trail.</strong> For compliance: who recorded, who replayed, when, did they confirm each step.</li>
+  <li><strong>Data residency.</strong> Where do the screenshots live? Who can see them? No answer anywhere in the codebase.</li>
+</ul>
+
+<h3>4.4 Cross-platform — abandoned by decision</h3>
+<ul>
+  <li>Mac-only forever under current architecture. But: internal-tools market is 60% Windows; browser-app tutorials are OS-agnostic.</li>
+  <li>The "no AX" decision (<code>feedback_no_ax_in_recorder.md</code>) is a portability hedge for portability you will never ship. You pay the accuracy cost today for an option you will not exercise.</li>
+</ul>
+
+<h3>4.5 Deterministic fallbacks — missing</h3>
+<ul>
+  <li>VLM grounding alone will fail on small targets, occluded targets, custom-rendered apps (Electron, Figma, games).</li>
+  <li>Real systems use a <em>layered</em> approach: AX tree → DOM → OCR → VLM, in that order. You are using only the most expensive and least reliable layer.</li>
+</ul>
+
+<h3>4.6 Replay quality — under-invested</h3>
+<ul>
+  <li>"Did the app respond?" Currently the user confirms. Real product needs automatic state detection (the verifier exists but per the analysis doc is too unreliable).</li>
+  <li>"What if the app updated?" UI redesigns break recorded tutorials. No re-grounding workflow exists; tutorials decay to garbage in 6 months.</li>
+  <li>Speed control, pause, rewind, skip — none of it in <code>ChatPopupView.swift</code> by inspection.</li>
+</ul>
+
+<h3>4.7 Measurement — does not exist</h3>
+<ul>
+  <li>No completion-rate tracking. Did the user finish?</li>
+  <li>No drop-off analytics. Which step did they get stuck on?</li>
+  <li>No user-facing A/B variants. (The two A/B flags you have are internal model selection.)</li>
+  <li>No eval suite on a benchmark. <code>docs/eval-harness-changes.html</code> — changes to what baseline?</li>
+</ul>
+<p>Without measurement you cannot tell if the overlay beats a Loom. You cannot tell if a planner change helped. You are flying blind.</p>
+
+<h3>4.8 Auth, billing, admin — not started</h3>
+<p>No accounts, teams, SSO, billing, admin console. Not premature — <strong>required to ship to anyone but yourself</strong>. WalkMe is a $7B company because of these, not because of their overlay.</p>
+
+<hr>
+
+<h2>5. Where you are lacking, ranked by damage</h2>
+
+<ol>
+  <li><strong>No shareable artifact.</strong> You cannot grow without a link to paste. Existential.</li>
+  <li><strong>No PII redaction.</strong> First-customer blocker; legal kills the deal.</li>
+  <li><strong>No measurement.</strong> Cannot improve what you cannot see. The verifier-loop incident is the canary.</li>
+  <li><strong>No deterministic targeting layer.</strong> VLM-only grounding hits a quality ceiling you cannot pass.</li>
+  <li><strong>No defined ICP.</strong> Every other lack is downstream. You cannot prioritize features for a user you have not chosen.</li>
+  <li><strong>No cross-platform path.</strong> Mac-only kills 90% of viable markets.</li>
+  <li><strong>No editing post-recording.</strong> Perfect-or-restart rituals do not survive contact with humans.</li>
+  <li><strong>No competitive teardown in writing.</strong> If you cannot articulate why you beat Scribe in a sentence, the product cannot win.</li>
+</ol>
+
+<hr>
+
+<h2>6. What to cut — concrete kill list</h2>
+
+<h3>Tier 1 — gone this week <span class="verdict v-cut">cut</span></h3>
+<ul class="kill-list">
+  <li><code>electron/</code> — pick Swift, kill the fork</li>
+  <li><code>docker/enrichment-layer/</code> — Brave + Playwright + corpus</li>
+  <li><code>docker/gui-actor-inference/</code> — second grounding stack</li>
+  <li><code>docker/workers/omniparser/</code></li>
+  <li><code>docker/workers/ui-segmentation/</code></li>
+  <li><code>docker/workers/ffmpeg-crop/</code></li>
+  <li><code>backend/web_ground.py</code> + planner web search</li>
+  <li><code>GROUNDING_STRATEGY=planner</code> branch</li>
+  <li><code>STEP_TOOLS_ENABLED</code> A/B — pick one mode</li>
+  <li>PDF upload as planner input</li>
+  <li><code>backend/embeddings_client.py</code> + logical-id resolver</li>
+</ul>
+
+<h3>Tier 2 — gone within a month <span class="verdict v-warn">defer</span></h3>
+<ul>
+  <li>Parallel verifier scaffolding (<code>_start_verification</code>, <code>_run_verification</code>, <code>_cancel_verification</code>, <code>pending_verification_replan</code>) — stop saying "one commit" and actually delete it per <code>remove-spaghetti.md</code></li>
+  <li>Draft-plan pre-pipeline (<code>_kick_off_draft_plan</code>, <code>_await_draft_plan</code>, <code>DraftPlanReadyEvent</code>) — speculative architecture before the basic plan works</li>
+  <li>Both A/B flags (<code>STEP_TOOLS_ENABLED</code>, <code>GROUNDING_STRATEGY</code>) — pick winners</li>
+  <li><code>conversations.py</code> + <code>session_event_log.py</code> persistence — recording data you do not yet consume</li>
+  <li>SpecKit ceremony in <code>context-app/.specify/</code> — process overhead on a project that cannot run its own tests</li>
+  <li>Half of <code>ChatPopupView.swift</code> — 2,477 lines of SwiftUI is a refactor target, not a feature</li>
+</ul>
+
+<h3>Tier 3 — re-evaluate after picking an ICP <span class="verdict v-keep">hold</span></h3>
+<ul>
+  <li>Async monitor LLM (planner/monitor split per <code>tutorial_agent_roadmap.md</code>) — defer until the single-model loop is reliable</li>
+  <li><code>recording-enrichment/</code> as a separate container — inline into backend until a real reason to split</li>
+  <li>AppKit polish (<code>StabilityIndicatorController</code>, <code>ErrorIndicatorController</code>, <code>EdgeTabController</code>, <code>FocusMaskController</code>) — UI affordances for a use case you have not validated</li>
+</ul>
+
+<hr>
+
+<h2>7. The honest scoreboard</h2>
+
+<table>
+<tr><th>Dimension</th><th>Current state</th><th>Score</th></tr>
+<tr><td>Engineering ambition</td><td>Planner/monitor/verifier, multi-container, multimodal</td><td><span class="bar"><span style="width: 95%"></span></span></td></tr>
+<tr><td>Engineering discipline</td><td>2,605-line god-file; broken tests; stale docstrings</td><td><span class="bar"><span style="width: 30%"></span></span></td></tr>
+<tr><td>Product clarity</td><td>Three possible ICPs, none chosen</td><td><span class="bar"><span style="width: 15%"></span></span></td></tr>
+<tr><td>Distribution loop</td><td>None — no share link, no web viewer</td><td><span class="bar"><span style="width: 0%"></span></span></td></tr>
+<tr><td>Trust &amp; safety</td><td>No PII redaction, no audit, no data residency</td><td><span class="bar"><span style="width: 5%"></span></span></td></tr>
+<tr><td>Measurement</td><td>No completion tracking, no eval baseline</td><td><span class="bar"><span style="width: 10%"></span></span></td></tr>
+<tr><td>Defensibility vs Scribe / WalkMe / Computer Use</td><td>Not articulated</td><td><span class="bar"><span style="width: 10%"></span></span></td></tr>
+<tr><td>Differentiated wedge (adaptive guidance)</td><td>Real but unreliable per verifier incident</td><td><span class="bar"><span style="width: 35%"></span></span></td></tr>
+</table>
+
+<hr>
+
+<h2>8. Pivots worth considering</h2>
+
+<p>Seven pivots, ordered roughly by how much of the current codebase they preserve. The first three keep most of what you have built; the latter four require harder cuts but have clearer business shape.</p>
+
+<!-- PIVOT 1 -->
+<div class="pivot">
+  <h3>Pivot 1 — GUI-Agent Training Data Platform</h3>
+  <p><em>"We sell labeled GUI-action recordings to LLM labs. The overlay is the collection UX."</em></p>
+  <div class="pivot-grid">
+    <span class="label">Reuses</span><span>~70% of code: recording subsystem (entirely), Holo enrichment, recording-enrichment container, session-event log, persistence, gui-grounding</span>
+    <span class="label">Cuts</span><span>The entire overlay-tutorial agent (<code>tutorial_session.py</code>, planner, monitor, verifier), the Swift overlay UX past basic capture, enrichment-layer (web search)</span>
+    <span class="label">Adds</span><span>Schema versioning, label review UI, dataset export pipeline (JSONL + frames + actions), licensing/usage agreement, anonymization tooling</span>
+    <span class="label">Buyers</span><span>Anthropic, OpenAI, Google DeepMind, Adept-equivalents, ByteDance UI-TARS team, academic labs</span>
+    <span class="label">Revenue shape</span><span>One-off dataset licenses ($50k–$500k each) or annual enterprise data subscription. Possibly bounties for specific app coverage ("we need 10k Excel sessions").</span>
+    <span class="label">Risks</span><span>Sales cycle is long (6–12mo). Labs increasingly synthesize data internally. Legal complexity around screen capture of proprietary apps. <em>You are competing with Scale AI, Surge, Invisible.</em></span>
+    <span class="label">Time to revenue</span><span>3–6 months to first paid pilot if you already have a contact at a lab</span>
+    <span class="label">Honest take</span><span>This is the pivot that <em>most preserves your work</em>, and the codebase already half-believes it (run persistence "for training/debugging" in the roadmap). The downside is you become a services business, not a product.</span>
+  </div>
+  <div class="score">Fit with current code: <span class="bar"><span style="width: 85%"></span></span></div>
+</div>
+
+<!-- PIVOT 2 -->
+<div class="pivot">
+  <h3>Pivot 2 — Compliance / SOP Enforcement for Regulated Industries</h3>
+  <p><em>"Pharma, clinical, finance — your employees must follow procedure. Our overlay gates each step and produces an auditable trail."</em></p>
+  <div class="pivot-grid">
+    <span class="label">Reuses</span><span>Overlay, walk loop, step confirmation, verifier (with real budget to make it work), recording pipeline</span>
+    <span class="label">Cuts</span><span>Web search / enrichment-layer, PDF upload, gui-actor-inference second stack, planner/monitor split, draft-plan pre-pipeline</span>
+    <span class="label">Adds</span><span>Audit trail (immutable signed log), role-based access, SSO/SAML, admin console, completion certificates, integration with QMS systems (Veeva, MasterControl), HIPAA / 21 CFR Part 11 compliance</span>
+    <span class="label">Buyers</span><span>Compliance officers at pharma manufacturers, hospital IT, clinical trial CROs, banks under SR 11-7, accounting firms</span>
+    <span class="label">Revenue shape</span><span>Enterprise SaaS, $50k–$500k ACV. Heavy upfront procurement; high retention once embedded.</span>
+    <span class="label">Risks</span><span>You are not a compliance company today. SOC2 / HIPAA / Part 11 audits take 12+ months. Procurement cycles are brutal. <em>Veeva owns pharma; you are unknown.</em></span>
+    <span class="label">Time to revenue</span><span>9–18 months to first paid contract</span>
+    <span class="label">Honest take</span><span>Highest revenue ceiling of any pivot. Requires the most non-engineering work (sales, compliance certs, partnerships). If you have any pharma/clinical contacts, worth a serious explore.</span>
+  </div>
+  <div class="score">Fit with current code: <span class="bar"><span style="width: 55%"></span></span></div>
+</div>
+
+<!-- PIVOT 3 -->
+<div class="pivot">
+  <h3>Pivot 3 — Cognitive-Assist Coach for Complex Desktop Apps</h3>
+  <p><em>"A live tutor for non-technical users learning Photoshop, AutoCAD, QuickBooks, TurboTax, Logic Pro."</em></p>
+  <div class="pivot-grid">
+    <span class="label">Reuses</span><span>Overlay, plan walk, recording — basically the originally pitched product</span>
+    <span class="label">Cuts</span><span>Enrichment-layer (web search), planner/monitor split, A/B flags, half the docker stack</span>
+    <span class="label">Adds</span><span>Curated tutorial library (you author, not users), in-app purchase, per-app deep targeting (AX integration for the apps you support), voice narration, slow/repeat controls</span>
+    <span class="label">Buyers</span><span>Direct-to-consumer ($10–30/mo subscription); affiliate revenue from app vendors; potentially app vendors themselves (Adobe pays you to make Photoshop learnable)</span>
+    <span class="label">Revenue shape</span><span>Consumer SaaS or B2B2C with app vendors. Lower ACV but faster growth loop if you nail a niche (e.g., "Photoshop for seniors" community).</span>
+    <span class="label">Risks</span><span>YouTube is free. You are competing with the entire internet's existing tutorial content. Curation cost is high. <em>Most users will not pay for what they expect to be free.</em></span>
+    <span class="label">Time to revenue</span><span>6–12 months to meaningful MRR</span>
+    <span class="label">Honest take</span><span>The pivot closest to the original pitch. Probably the most honest "small business" path. Hardest to make venture-scale. Pick if you want to build a real product but not necessarily a unicorn.</span>
+  </div>
+  <div class="score">Fit with current code: <span class="bar"><span style="width: 75%"></span></span></div>
+</div>
+
+<!-- PIVOT 4 -->
+<div class="pivot">
+  <h3>Pivot 4 — Customer Success / Sales Enablement Real-Time Coach</h3>
+  <p><em>"Like Gong, but for the rep's screen. The overlay watches their workflow and nudges them with the next-best action."</em></p>
+  <div class="pivot-grid">
+    <span class="label">Reuses</span><span>Overlay, monitor LLM concept (this is what it was built for), grounding, screen capture</span>
+    <span class="label">Cuts</span><span>Recording-as-tutoring (replaced by knowledge-base-as-coach), planner-emits-plan model, web search</span>
+    <span class="label">Adds</span><span>CRM integration (Salesforce, HubSpot), knowledge base ingestion, real-time call audio integration, manager dashboard, ROI tracking (deals closed with vs without coach)</span>
+    <span class="label">Buyers</span><span>Mid-market and enterprise sales/CS leaders. Gong has trained the market.</span>
+    <span class="label">Revenue shape</span><span>$30–150/seat/month. Strong NRR once embedded with managers.</span>
+    <span class="label">Risks</span><span>Gong, Chorus, Clari are well-funded and already moving into "next-best-action." You are late. <em>Differentiation must be the screen layer specifically, not the AI generally.</em></span>
+    <span class="label">Time to revenue</span><span>6–12 months</span>
+    <span class="label">Honest take</span><span>The planner/monitor architecture you have already half-built is suspiciously well-shaped for this. But the market is competitive and you have no sales motion.</span>
+  </div>
+  <div class="score">Fit with current code: <span class="bar"><span style="width: 60%"></span></span></div>
+</div>
+
+<!-- PIVOT 5 -->
+<div class="pivot">
+  <h3>Pivot 5 — Browser-Extension Scribe Competitor (Shareable How-Tos)</h3>
+  <p><em>"Forget the Mac overlay. Build a Chrome extension that records web flows and produces a beautiful shareable artifact."</em></p>
+  <div class="pivot-grid">
+    <span class="label">Reuses</span><span>Almost nothing — the architectural choices (native Mac, vision-only) are wrong for this</span>
+    <span class="label">Cuts</span><span>Mac overlay, Swift app, Holo grounding (use DOM selectors instead), enrichment-layer</span>
+    <span class="label">Adds</span><span>Chrome / Edge / Firefox extension, web viewer, share links, team workspaces, embeds, PII auto-redaction, GIF/PDF export</span>
+    <span class="label">Buyers</span><span>SMB and mid-market knowledge workers; eventually enterprise via teams plan</span>
+    <span class="label">Revenue shape</span><span>Freemium → $20/user/mo team plan, Scribe's exact playbook</span>
+    <span class="label">Risks</span><span>You are 4 years late and Scribe has $30M+ ARR. <em>You need a 10× differentiator, not parity.</em> One candidate: AI auto-narration / re-recording on UI changes — but that is the hardest part of what you have been building.</span>
+    <span class="label">Time to revenue</span><span>4–8 months</span>
+    <span class="label">Honest take</span><span>Highest market clarity, lowest code reuse. If you take this pivot, do it knowing you are starting over and your wedge must be AI-driven (auto-narration, auto-redaction, auto-update on app changes) — which is exactly the research you have already done.</span>
+  </div>
+  <div class="score">Fit with current code: <span class="bar"><span style="width: 25%"></span></span></div>
+</div>
+
+<!-- PIVOT 6 -->
+<div class="pivot">
+  <h3>Pivot 6 — Accessibility Overlay for Cognitive Disabilities</h3>
+  <p><em>"A live screen tutor for users with cognitive disabilities, dementia, or severe non-technical confidence — funded by health systems and disability programs."</em></p>
+  <div class="pivot-grid">
+    <span class="label">Reuses</span><span>Overlay, plan walk, step confirmation, voice (to add)</span>
+    <span class="label">Cuts</span><span>Enrichment-layer, recording-enrichment, planner/monitor research stack</span>
+    <span class="label">Adds</span><span>Voice narration, large-text mode, simplified vocabulary, caregiver remote setup, integration with home-care platforms, evidence base for clinical efficacy</span>
+    <span class="label">Buyers</span><span>State disability programs, Medicare Advantage plans, home care agencies, senior living facilities, university disability services</span>
+    <span class="label">Revenue shape</span><span>Per-user reimbursement, grants, contracted institutional licenses. Slow but extremely sticky.</span>
+    <span class="label">Risks</span><span>Healthcare procurement is brutal. Clinical efficacy studies take years. <em>Mission-driven market, not a venture market.</em></span>
+    <span class="label">Time to revenue</span><span>12–24 months</span>
+    <span class="label">Honest take</span><span>Probably the highest-impact pivot per dollar. Probably the lowest-return per founder-year. Pick only if you care about this specifically.</span>
+  </div>
+  <div class="score">Fit with current code: <span class="bar"><span style="width: 50%"></span></span></div>
+</div>
+
+<!-- PIVOT 7 -->
+<div class="pivot">
+  <h3>Pivot 7 — Internal Developer Tooling for AI Agent Teams</h3>
+  <p><em>"You have already built half the infrastructure for evaluating GUI agents. Sell the eval harness."</em></p>
+  <div class="pivot-grid">
+    <span class="label">Reuses</span><span>Recording pipeline (as benchmark generator), grounding stacks (as graders), session-event log (as trace store), the partial eval harness in docs</span>
+    <span class="label">Cuts</span><span>Overlay UX entirely (becomes optional viewer), Swift app, end-user-facing flows</span>
+    <span class="label">Adds</span><span>Benchmark catalog, agent comparison UI, regression detection, CI integration, hosted runs, agent fine-tuning hooks</span>
+    <span class="label">Buyers</span><span>AI infra teams at Series B+ companies building agents, internal teams at LLM labs, open-source maintainers (free tier)</span>
+    <span class="label">Revenue shape</span><span>Developer-tools SaaS, $500–10k/mo per team; potentially open-core</span>
+    <span class="label">Risks</span><span>Browserbase, Anthropic Claude evals, LangSmith, and Braintrust are circling. Market exists but is crowded. <em>Differentiation must be the GUI-specificity.</em></span>
+    <span class="label">Time to revenue</span><span>6–9 months for first design partners</span>
+    <span class="label">Honest take</span><span>A clever pivot if you genuinely enjoy infra. The market is hot. Code reuse is medium but the philosophical reuse (everything you have learned about evaluating these systems) is high.</span>
+  </div>
+  <div class="score">Fit with current code: <span class="bar"><span style="width: 65%"></span></span></div>
+</div>
+
+<h3>8.8 Side-by-side ranking</h3>
+<table>
+<tr><th>#</th><th>Pivot</th><th>Code reuse</th><th>Market clarity</th><th>Time to revenue</th><th>Ceiling</th><th>Founder fit</th></tr>
+<tr><td>1</td><td>GUI-agent training data</td><td>★★★★★</td><td>★★★☆☆</td><td>3–6mo</td><td>$10M–50M ARR</td><td>If you like data ops</td></tr>
+<tr><td>2</td><td>Compliance / SOP</td><td>★★★☆☆</td><td>★★★★☆</td><td>9–18mo</td><td>$100M+ ARR</td><td>If you can sell enterprise</td></tr>
+<tr><td>3</td><td>Cognitive-assist coach</td><td>★★★★☆</td><td>★★★☆☆</td><td>6–12mo</td><td>$5M–20M ARR</td><td>Closest to original pitch</td></tr>
+<tr><td>4</td><td>CS / sales coach</td><td>★★★☆☆</td><td>★★★★☆</td><td>6–12mo</td><td>$50M+ ARR (crowded)</td><td>If you can sell to RevOps</td></tr>
+<tr><td>5</td><td>Browser-ext Scribe rival</td><td>★☆☆☆☆</td><td>★★★★★</td><td>4–8mo</td><td>$100M+ ARR (very crowded)</td><td>If you want to restart</td></tr>
+<tr><td>6</td><td>Accessibility overlay</td><td>★★★☆☆</td><td>★★☆☆☆</td><td>12–24mo</td><td>$5M–20M ARR</td><td>If mission-driven</td></tr>
+<tr><td>7</td><td>GUI-agent eval infra</td><td>★★★★☆</td><td>★★★☆☆</td><td>6–9mo</td><td>$10M–50M ARR</td><td>If you like dev tools</td></tr>
+</table>
+
+<h3>8.9 What this comparison says</h3>
+<p>If you optimize for <strong>code reuse</strong>, pivot 1 (training data) is the clear answer — you keep ~70% of what you have built and the codebase already half-leans this way.</p>
+<p>If you optimize for <strong>defensibility and ceiling</strong>, pivot 2 (compliance) wins, but only if you have access to a regulated industry buyer.</p>
+<p>If you optimize for <strong>market clarity and fastest user feedback</strong>, pivot 5 (Scribe rival) wins, but it requires admitting most of the current code is sunk cost.</p>
+<p>The pivot that <strong>does not appear on this list</strong> is "keep doing what you are doing." That is the one to rule out.</p>
+
+<hr>
+
+<h2>9. Bottom line</h2>
+
+<p>The use case as written is too vague to win against the tools that already exist. The user is undefined. The features a real user would need are not built. The features that <em>are</em> built mostly serve a research agenda, not a product.</p>
+
+<p>You are not lacking <em>engineering</em>. You are lacking <em>subtraction</em>, a <em>named user</em>, and a <em>chosen pivot</em>. Until all three happen, every new feature is technical debt with no offsetting customer value.</p>
+
+<div class="tldr">
+<strong>The path forward is to:</strong>
+<ol>
+  <li>Cut 60% of the code (see Tier 1 kill list).</li>
+  <li>Name one user — pick a pivot from section 8.</li>
+  <li>Ship one shareable artifact for that user within 30 days.</li>
+</ol>
+Everything else is procrastination dressed up as progress.
+</div>
+
+</body>
+</html>

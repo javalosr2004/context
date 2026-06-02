@@ -86,7 +86,7 @@ class RenderHistoryTests(unittest.TestCase):
             has_latest_screen=False,
             draft_plan=plan,
         )
-        self.assertIn("Draft plan hypothesis", text)
+        self.assertIn("Web-enriched draft plan", text)
         self.assertIn("Open the Courses menu", text)
         self.assertIn("Click Introduction to Music Theory", text)
 
@@ -97,7 +97,7 @@ class RenderHistoryTests(unittest.TestCase):
             has_latest_screen=False,
             draft_plan=None,
         )
-        self.assertNotIn("Draft plan hypothesis", text)
+        self.assertNotIn("Web-enriched draft plan", text)
 
 
 class SessionDraftPlanIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -159,7 +159,7 @@ class SessionDraftPlanIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         request = session._build_llm_request()
-        self.assertIn("Draft plan hypothesis", request.user_text)
+        self.assertIn("Web-enriched draft plan", request.user_text)
         self.assertIn("Open the Courses menu", request.user_text)
 
     async def test_new_user_message_cancels_stale_draft(self) -> None:

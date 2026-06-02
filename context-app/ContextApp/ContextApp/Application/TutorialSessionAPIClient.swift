@@ -29,6 +29,51 @@ enum TutorialSessionAPIClientError: LocalizedError {
     }
 }
 
+enum StepAnnotationVerdict: String, Codable, Equatable {
+    case correct
+    case offTrack = "off_track"
+    case ambiguous
+}
+
+enum StepAnnotationCategory: String, Codable, Equatable {
+    case plan
+    case grounding
+    case verifier
+    case loop
+}
+
+/// How a user resolved a VerificationHintEvent toast.
+enum TutorialHintResponseAction: String, Codable, Equatable {
+    case acknowledgeOff = "acknowledge_off"
+    case dismiss
+    case timeout
+}
+
+/// Verifier verdict that triggered a VerificationHintEvent. `onTrack` and
+/// `pending` are included for contract completeness with the backend's
+/// 5-way verdict; only the three negative verdicts (unsure, blocked,
+/// diverged) are ever surfaced as a hint. `pending` is consumed entirely
+/// inside the backend retry loop and should never reach the overlay.
+enum TutorialVerificationVerdict: String, Codable, Equatable {
+    case onTrack = "on_track"
+    case unsure
+    case blocked
+    case diverged
+    case pending
+}
+
+struct StepAnnotationCorrections: Codable, Equatable {
+    let instruction: String?
+    let targetBbox: [Double]?
+    let verifierShouldHaveSaid: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case instruction
+        case targetBbox = "target_bbox"
+        case verifierShouldHaveSaid = "verifier_should_have_said"
+    }
+}
+
 struct TutorialSessionScreenSnapshot: Codable, Equatable {
     let mimeType: String
     let dataBase64: String
@@ -52,8 +97,32 @@ struct CreateTutorialSessionResponse: Codable, Equatable {
 enum TutorialSessionClientEvent: Codable, Equatable {
     case userMessage(text: String, uploadedImages: [TutorialSessionScreenSnapshot] = [])
     case stepStarted(stepID: String, actionIndex: Int)
-    case userConfirmation(stepID: String, actionIndex: Int, confirmed: Bool, note: String?)
+    case userConfirmation(
+        stepID: String,
+        actionIndex: Int,
+        confirmed: Bool,
+        note: String?,
+        screen: TutorialSessionScreenSnapshot? = nil
+    )
     case userScreen(requestID: String, screen: TutorialSessionScreenSnapshot)
+    case userCompletionResponse(confirmed: Bool, note: String?)
+    case userAnswer(batchID: String, answers: [TutorialUserAnswer])
+    case userStepAnnotation(
+        stepID: String,
+        actionIndex: Int,
+        frameHash: String?,
+        verdict: StepAnnotationVerdict,
+        category: StepAnnotationCategory?,
+        note: String?,
+        corrections: StepAnnotationCorrections?
+    )
+    /// Response to a `VerificationHintEvent` toast.
+    ///
+    /// `action` is "acknowledge_off" (user confirmed off-track), "dismiss"
+    /// (user explicitly closed the toast), or "timeout" (toast auto-dismissed
+    /// with no interaction). Backend resolves the open hint per verdict —
+    /// see backend/tutorial_session.handle_user_hint_response.
+    case userHintResponse(stepID: String, action: TutorialHintResponseAction)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -65,6 +134,13 @@ enum TutorialSessionClientEvent: Codable, Equatable {
         case requestID = "request_id"
         case confirmed
         case note
+        case frameHash = "frame_hash"
+        case verdict
+        case category
+        case corrections
+        case batchID = "batch_id"
+        case answers
+        case action
     }
 
     init(from decoder: Decoder) throws {
@@ -90,12 +166,41 @@ enum TutorialSessionClientEvent: Codable, Equatable {
                 stepID: try container.decode(String.self, forKey: .stepID),
                 actionIndex: try container.decode(Int.self, forKey: .actionIndex),
                 confirmed: try container.decode(Bool.self, forKey: .confirmed),
-                note: try container.decodeIfPresent(String.self, forKey: .note)
+                note: try container.decodeIfPresent(String.self, forKey: .note),
+                screen: try container.decodeIfPresent(
+                    TutorialSessionScreenSnapshot.self,
+                    forKey: .screen
+                )
             )
         case "user_screen":
             self = .userScreen(
                 requestID: try container.decode(String.self, forKey: .requestID),
                 screen: try container.decode(TutorialSessionScreenSnapshot.self, forKey: .screen)
+            )
+        case "user_completion_response":
+            self = .userCompletionResponse(
+                confirmed: try container.decode(Bool.self, forKey: .confirmed),
+                note: try container.decodeIfPresent(String.self, forKey: .note)
+            )
+        case "user_answer":
+            self = .userAnswer(
+                batchID: try container.decode(String.self, forKey: .batchID),
+                answers: try container.decode([TutorialUserAnswer].self, forKey: .answers)
+            )
+        case "user_step_annotation":
+            self = .userStepAnnotation(
+                stepID: try container.decode(String.self, forKey: .stepID),
+                actionIndex: try container.decode(Int.self, forKey: .actionIndex),
+                frameHash: try container.decodeIfPresent(String.self, forKey: .frameHash),
+                verdict: try container.decode(StepAnnotationVerdict.self, forKey: .verdict),
+                category: try container.decodeIfPresent(StepAnnotationCategory.self, forKey: .category),
+                note: try container.decodeIfPresent(String.self, forKey: .note),
+                corrections: try container.decodeIfPresent(StepAnnotationCorrections.self, forKey: .corrections)
+            )
+        case "user_hint_response":
+            self = .userHintResponse(
+                stepID: try container.decode(String.self, forKey: .stepID),
+                action: try container.decode(TutorialHintResponseAction.self, forKey: .action)
             )
         default:
             throw DecodingError.dataCorruptedError(
@@ -120,16 +225,38 @@ enum TutorialSessionClientEvent: Codable, Equatable {
             try container.encode("step_started", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
             try container.encode(actionIndex, forKey: .actionIndex)
-        case .userConfirmation(let stepID, let actionIndex, let confirmed, let note):
+        case .userConfirmation(let stepID, let actionIndex, let confirmed, let note, let screen):
             try container.encode("user_confirmation", forKey: .type)
             try container.encode(stepID, forKey: .stepID)
             try container.encode(actionIndex, forKey: .actionIndex)
             try container.encode(confirmed, forKey: .confirmed)
             try container.encodeIfPresent(note, forKey: .note)
+            try container.encodeIfPresent(screen, forKey: .screen)
         case .userScreen(let requestID, let screen):
             try container.encode("user_screen", forKey: .type)
             try container.encode(requestID, forKey: .requestID)
             try container.encode(screen, forKey: .screen)
+        case .userCompletionResponse(let confirmed, let note):
+            try container.encode("user_completion_response", forKey: .type)
+            try container.encode(confirmed, forKey: .confirmed)
+            try container.encodeIfPresent(note, forKey: .note)
+        case .userAnswer(let batchID, let answers):
+            try container.encode("user_answer", forKey: .type)
+            try container.encode(batchID, forKey: .batchID)
+            try container.encode(answers, forKey: .answers)
+        case .userStepAnnotation(let stepID, let actionIndex, let frameHash, let verdict, let category, let note, let corrections):
+            try container.encode("user_step_annotation", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+            try container.encode(actionIndex, forKey: .actionIndex)
+            try container.encodeIfPresent(frameHash, forKey: .frameHash)
+            try container.encode(verdict, forKey: .verdict)
+            try container.encodeIfPresent(category, forKey: .category)
+            try container.encodeIfPresent(note, forKey: .note)
+            try container.encodeIfPresent(corrections, forKey: .corrections)
+        case .userHintResponse(let stepID, let action):
+            try container.encode("user_hint_response", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+            try container.encode(action, forKey: .action)
         }
     }
 }
@@ -139,6 +266,39 @@ struct TutorialSessionWebSource: Codable, Equatable {
     let url: String
 }
 
+enum TutorialAssistantQuestionResponseMode: String, Codable, Equatable {
+    case options
+    case freeText = "free_text"
+}
+
+struct TutorialAssistantQuestion: Codable, Equatable, Identifiable {
+    let questionID: String
+    let prompt: String
+    let responseMode: TutorialAssistantQuestionResponseMode
+    let options: [String]
+    let allowsCustomAnswer: Bool
+
+    var id: String { questionID }
+
+    private enum CodingKeys: String, CodingKey {
+        case questionID = "question_id"
+        case prompt
+        case responseMode = "response_mode"
+        case options
+        case allowsCustomAnswer = "allows_custom_answer"
+    }
+}
+
+struct TutorialUserAnswer: Codable, Equatable {
+    let questionID: String
+    let text: String
+
+    private enum CodingKeys: String, CodingKey {
+        case questionID = "question_id"
+        case text
+    }
+}
+
 enum TutorialSessionServerEvent: Codable, Equatable {
     case sessionReady(sessionID: String)
     case statusChanged(status: String, label: String)
@@ -146,6 +306,8 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case textResponse(String)
     case planReady(TutorialPlan)
     case planUpdated(TutorialPlan)
+    case planStepPreview(index: Int, instruction: String, confidence: Double)
+    case planStreamReset
     case draftPlanReady(DraftPlan)
     case tutorialAction(TutorialStep)
     case unknown(type: String)
@@ -158,6 +320,15 @@ enum TutorialSessionServerEvent: Codable, Equatable {
     case planDiff(frozenPrefixLen: Int, newTailLen: Int, refinedCurrent: Bool, totalSteps: Int)
     case stepProgress(stepID: String, stepIndex: Int, totalSteps: Int, actionIndex: Int, totalActions: Int)
     case sessionCompleted
+    case completionProposed(reason: String, source: String)
+    case assistantQuestion(batchID: String, reason: String, questions: [TutorialAssistantQuestion])
+    case instructionVerificationStarted(stepID: String)
+    case instructionVerified(stepID: String, ok: Bool, reason: String?)
+    /// Soft toast emitted on any negative verifier verdict. `autoReplanning`
+    /// tells the overlay whether the backend has already staged a replan
+    /// that will fire on toast timeout (true for diverged/blocked; false
+    /// for unsure — those need explicit user acknowledgement to replan).
+    case verificationHint(stepID: String, verdict: TutorialVerificationVerdict, reason: String, autoReplanning: Bool)
     case error(code: String, message: String)
 
     private enum CodingKeys: String, CodingKey {
@@ -172,6 +343,7 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case actionIndex = "action_index"
         case requestID = "request_id"
         case reason
+        case source
         case code
         case message
         case query
@@ -186,6 +358,14 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case totalSteps = "total_steps"
         case stepIndex = "step_index"
         case totalActions = "total_actions"
+        case ok
+        case batchID = "batch_id"
+        case questions
+        case verdict
+        case autoReplanning = "auto_replanning"
+        case index
+        case instruction
+        case confidence
     }
 
     init(from decoder: Decoder) throws {
@@ -208,6 +388,14 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             self = .planReady(try container.decode(TutorialPlan.self, forKey: .plan))
         case "plan_updated":
             self = .planUpdated(try container.decode(TutorialPlan.self, forKey: .plan))
+        case "plan_step_preview":
+            self = .planStepPreview(
+                index: try container.decode(Int.self, forKey: .index),
+                instruction: try container.decode(String.self, forKey: .instruction),
+                confidence: try container.decode(Double.self, forKey: .confidence)
+            )
+        case "plan_stream_reset":
+            self = .planStreamReset
         case "draft_plan_ready":
             self = .draftPlanReady(try container.decode(DraftPlan.self, forKey: .plan))
         case "tutorial_action":
@@ -258,6 +446,34 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             )
         case "session_completed":
             self = .sessionCompleted
+        case "completion_proposed":
+            self = .completionProposed(
+                reason: try container.decode(String.self, forKey: .reason),
+                source: try container.decode(String.self, forKey: .source)
+            )
+        case "assistant_question":
+            self = .assistantQuestion(
+                batchID: try container.decode(String.self, forKey: .batchID),
+                reason: try container.decode(String.self, forKey: .reason),
+                questions: try container.decode([TutorialAssistantQuestion].self, forKey: .questions)
+            )
+        case "instruction_verification_started":
+            self = .instructionVerificationStarted(
+                stepID: try container.decode(String.self, forKey: .stepID)
+            )
+        case "instruction_verified":
+            self = .instructionVerified(
+                stepID: try container.decode(String.self, forKey: .stepID),
+                ok: try container.decode(Bool.self, forKey: .ok),
+                reason: try container.decodeIfPresent(String.self, forKey: .reason)
+            )
+        case "verification_hint":
+            self = .verificationHint(
+                stepID: try container.decode(String.self, forKey: .stepID),
+                verdict: try container.decode(TutorialVerificationVerdict.self, forKey: .verdict),
+                reason: try container.decode(String.self, forKey: .reason),
+                autoReplanning: try container.decode(Bool.self, forKey: .autoReplanning)
+            )
         case "error":
             self = .error(
                 code: try container.decode(String.self, forKey: .code),
@@ -291,6 +507,13 @@ enum TutorialSessionServerEvent: Codable, Equatable {
         case .planUpdated(let plan):
             try container.encode("plan_updated", forKey: .type)
             try container.encode(plan, forKey: .plan)
+        case .planStepPreview(let index, let instruction, let confidence):
+            try container.encode("plan_step_preview", forKey: .type)
+            try container.encode(index, forKey: .index)
+            try container.encode(instruction, forKey: .instruction)
+            try container.encode(confidence, forKey: .confidence)
+        case .planStreamReset:
+            try container.encode("plan_stream_reset", forKey: .type)
         case .draftPlanReady(let plan):
             try container.encode("draft_plan_ready", forKey: .type)
             try container.encode(plan, forKey: .plan)
@@ -339,6 +562,29 @@ enum TutorialSessionServerEvent: Codable, Equatable {
             try container.encode(totalActions, forKey: .totalActions)
         case .sessionCompleted:
             try container.encode("session_completed", forKey: .type)
+        case .completionProposed(let reason, let source):
+            try container.encode("completion_proposed", forKey: .type)
+            try container.encode(reason, forKey: .reason)
+            try container.encode(source, forKey: .source)
+        case .assistantQuestion(let batchID, let reason, let questions):
+            try container.encode("assistant_question", forKey: .type)
+            try container.encode(batchID, forKey: .batchID)
+            try container.encode(reason, forKey: .reason)
+            try container.encode(questions, forKey: .questions)
+        case .instructionVerificationStarted(let stepID):
+            try container.encode("instruction_verification_started", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+        case .instructionVerified(let stepID, let ok, let reason):
+            try container.encode("instruction_verified", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+            try container.encode(ok, forKey: .ok)
+            try container.encodeIfPresent(reason, forKey: .reason)
+        case .verificationHint(let stepID, let verdict, let reason, let autoReplanning):
+            try container.encode("verification_hint", forKey: .type)
+            try container.encode(stepID, forKey: .stepID)
+            try container.encode(verdict, forKey: .verdict)
+            try container.encode(reason, forKey: .reason)
+            try container.encode(autoReplanning, forKey: .autoReplanning)
         case .error(let code, let message):
             try container.encode("error", forKey: .type)
             try container.encode(code, forKey: .code)

@@ -3,11 +3,11 @@ services:
     build:
       context: ./docker/enrichment-layer
     ports:
-      - "7000:8000"
+      - "7001:8000"
     volumes:
       - enrichment_data:/data
     env_file:
-      - .env
+      - ./docker/enrichment-layer/.env
     environment:
       - DATA_DIR=/data
       - DATABASE_URL=sqlite:////data/index.db
@@ -23,13 +23,62 @@ services:
     ports:
       - "8001:8000"
     env_file:
-      - .env
+      - ./backend/.env
     environment:
       - LOG_LEVEL=INFO
       - ENRICHMENT_URL=http://enrichment-layer:8000
+      - CONTEXT_SESSIONS_DIR=/data/sessions
+    volumes:
+      - backend_sessions:/data/sessions
     depends_on:
       enrichment-layer:
         condition: service_healthy
 
+  recording-enrichment:
+    build:
+      context: ./docker/recording-enrichment
+    ports:
+      - "7100:8000"
+    volumes:
+      - recording_enrichment_data:/data
+    # Reuse the gui-grounding Holo creds — same upstream API (HAI_API_KEY /
+    # HAI_BASE_URL / HOLO_MODEL). Without this the worker boots without a
+    # describer and writes empty events.enriched.jsonl, marking recordings
+    # ready with no descriptions.
+    env_file:
+      - ./docker/gui-grounding/.env
+    environment:
+      - DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  gui-grounding:
+    build:
+      context: ./docker/gui-grounding
+    env_file:
+      - ./docker/gui-grounding/.env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  gateway:
+    image: caddy:2-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+      - recording-enrichment
+      - gui-grounding
+    restart: unless-stopped
+
 volumes:
   enrichment_data:
+  recording_enrichment_data:
+  backend_sessions:

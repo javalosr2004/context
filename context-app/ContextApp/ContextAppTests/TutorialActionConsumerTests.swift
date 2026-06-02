@@ -18,7 +18,7 @@ final class TutorialActionConsumerTests: XCTestCase {
 
         XCTAssertEqual(
             TutorialActionConsumer.groundingInstructionText(for: step, actionIndex: 0),
-            "Click the New repository button.\n\nTarget: Starts repository creation"
+            "Starts repository creation"
         )
     }
 
@@ -38,7 +38,7 @@ final class TutorialActionConsumerTests: XCTestCase {
 
         XCTAssertEqual(
             TutorialActionConsumer.groundingInstructionText(for: step, actionIndex: 0),
-            "Click the icon."
+            ""
         )
     }
 
@@ -66,7 +66,7 @@ final class TutorialActionConsumerTests: XCTestCase {
         XCTAssertEqual(object?.keys.sorted(), ["instruction"])
         XCTAssertEqual(
             object?["instruction"] as? String,
-            "Scroll down to the billing section.\n\nTarget: The app settings window"
+            "The app settings window"
         )
     }
 
@@ -85,6 +85,44 @@ final class TutorialActionConsumerTests: XCTestCase {
         )
         let action: TutorialAction = .type(TypeAction(target: target, text: "hello", requiresConfirmation: true))
         XCTAssertFalse(TutorialActionConsumer.skipsGrounding(action: action))
+    }
+
+    func testSkipsGroundingForUserChoice() {
+        let action: TutorialAction = .userChoice(UserChoiceAction(
+            prompt: "Type the username you want to use.",
+            requiresConfirmation: true
+        ))
+        XCTAssertTrue(TutorialActionConsumer.skipsGrounding(action: action))
+    }
+
+    func testConsumeDoesNotInvokeGrounderForUserChoice() async {
+        let step = TutorialStep(
+            stepId: "step-uc",
+            instruction: "Pick a repo.",
+            actions: [.userChoice(UserChoiceAction(
+                prompt: "Click any repo in the list.",
+                requiresConfirmation: true
+            ))],
+            confidence: 0.8
+        )
+        var grounderCalled = false
+        var nonSpatialCalled = false
+        let consumer = TutorialActionConsumer(
+            groundInstruction: { _ in
+                grounderCalled = true
+                return "grounded"
+            },
+            presentNonSpatial: { _, _ in
+                nonSpatialCalled = true
+                return "non-spatial"
+            }
+        )
+
+        let result = await consumer.consume(step: step, actionIndex: 0)
+
+        XCTAssertEqual(result, "non-spatial")
+        XCTAssertFalse(grounderCalled)
+        XCTAssertTrue(nonSpatialCalled)
     }
 
     func testConsumeDispatchesGroundingInstruction() async {
@@ -109,6 +147,6 @@ final class TutorialActionConsumerTests: XCTestCase {
         let result = await consumer.consume(step: step, actionIndex: 0)
 
         XCTAssertEqual(result, "highlighted")
-        XCTAssertEqual(receivedText, "Click the search field.")
+        XCTAssertEqual(receivedText, "")
     }
 }

@@ -21,16 +21,18 @@ VALID_PLAN_JSON = """
     {
       "step_id": "step_001",
       "instruction": "Click the New repository button.",
-      "action": {
-        "type": "click",
-        "target": {
-          "kind": "element",
-          "label": "New repository",
-          "role": "button"
+      "actions": [
+        {
+          "type": "click",
+          "target": {
+            "kind": "element",
+            "label": "New repository",
+            "role": "button"
+          },
+          "requires_confirmation": false
         }
-      },
-      "confidence": 0.86,
-      "requires_confirmation": false
+      ],
+      "confidence": 0.86
     }
   ]
 }

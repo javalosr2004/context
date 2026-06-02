@@ -137,6 +137,57 @@ final class ChatMessageStoreTests: XCTestCase {
             ]
         )
     }
+
+    // MARK: - Plan preview
+
+    func testAppendPlanPreviewStepCoalescesIntoOneMessage() {
+        let store = ChatMessageStore()
+
+        store.appendPlanPreviewStep(index: 0, instruction: "Open Settings.", confidence: 0.9)
+        store.appendPlanPreviewStep(index: 1, instruction: "Click Billing.", confidence: 0.6)
+
+        XCTAssertEqual(store.messages.count, 1)
+        guard case .tutorialPlanPreview(let preview) = store.messages[0].content else {
+            return XCTFail("expected a plan preview message")
+        }
+        XCTAssertEqual(preview.steps.map(\.index), [0, 1])
+        XCTAssertEqual(preview.steps.map(\.instruction), ["Open Settings.", "Click Billing."])
+    }
+
+    func testAppendPlanPreviewStepReplacesSameIndex() {
+        let store = ChatMessageStore()
+
+        store.appendPlanPreviewStep(index: 0, instruction: "Old text.", confidence: 0.5)
+        store.appendPlanPreviewStep(index: 0, instruction: "New text.", confidence: 0.8)
+
+        guard case .tutorialPlanPreview(let preview) = store.messages[0].content else {
+            return XCTFail("expected a plan preview message")
+        }
+        XCTAssertEqual(preview.steps.count, 1)
+        XCTAssertEqual(preview.steps[0].instruction, "New text.")
+        XCTAssertEqual(preview.steps[0].confidence, 0.8)
+    }
+
+    func testAppendPlanPreviewStepIgnoresBlankInstruction() {
+        let store = ChatMessageStore()
+
+        let message = store.appendPlanPreviewStep(index: 0, instruction: "   ", confidence: 0.9)
+
+        XCTAssertNil(message)
+        XCTAssertTrue(store.messages.isEmpty)
+    }
+
+    func testClearPlanPreviewRemovesOnlyPreviewMessages() {
+        let store = ChatMessageStore()
+        store.appendUserText("Do the thing")
+        store.appendPlanPreviewStep(index: 0, instruction: "Streaming step.", confidence: 0.9)
+
+        let changed = store.clearPlanPreview()
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(store.messages.map(\.role), [.user])
+        XCTAssertFalse(store.clearPlanPreview())
+    }
 }
 
 final class MarkdownTextRendererTests: XCTestCase {

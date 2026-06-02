@@ -1,31 +1,51 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 final class PopupController {
     private let boundsKeeper: ScreenBoundsKeeper
-    private let iconPanel: IconPanel
     private let minimumVisible: CGFloat
     private let popupPanel: PopupPanel
     private(set) var state: PopupState
 
     init(
         popupPanel: PopupPanel,
-        iconPanel: IconPanel,
         initialFrame: CGRect,
         boundsKeeper: ScreenBoundsKeeper = ScreenBoundsKeeper(),
         minimumVisible: CGFloat = 80
     ) {
         self.popupPanel = popupPanel
-        self.iconPanel = iconPanel
         self.boundsKeeper = boundsKeeper
         self.minimumVisible = minimumVisible
         self.state = .expanded(frame: initialFrame)
+        popupPanel.popupDelegate = self
     }
 
     func showPopup() {
         popupPanel.orderFrontRegardless()
-        iconPanel.orderOut(nil)
         state = .expanded(frame: popupPanel.frame)
+    }
+
+    func toggle() {
+        switch state {
+        case .expanded:
+            collapse()
+        case .collapsed:
+            restore()
+        }
+    }
+
+    func collapse() {
+        let frame = popupPanel.frame
+        popupPanel.orderOut(nil)
+        state = .collapsed(lastFrame: frame)
+    }
+
+    func restore() {
+        let frame = state.lastExpandedFrame
+        popupPanel.setFrame(frame, display: true)
+        popupPanel.orderFrontRegardless()
+        state = .expanded(frame: frame)
     }
 
     func fitPopupHeight(to screenFrame: CGRect, minimumHeight: CGFloat = PopupState.minimumSize.height, verticalMargin: CGFloat = 64) {
@@ -43,57 +63,26 @@ final class PopupController {
         nextFrame.size.height = nextHeight
         nextFrame = boundsKeeper.clamp(frame: nextFrame, into: screenFrame, minimumVisible: minimumVisible)
         popupPanel.setFrame(nextFrame, display: true)
-        state = state.expanded(at: nextFrame)
-    }
-
-    func minify() {
-        let iconFrame = iconFrameBesidePopup()
-        iconPanel.setFrame(iconFrame, display: true)
-        popupPanel.orderOut(nil)
-        iconPanel.orderFrontRegardless()
-        state = state.minified(at: iconFrame.origin)
-    }
-
-    func restore() {
-        let popupFrame = restoredPopupFrame()
-        popupPanel.setFrame(popupFrame, display: true)
-        iconPanel.orderOut(nil)
-        popupPanel.orderFrontRegardless()
-        state = state.expanded(at: popupFrame)
-    }
-
-    func moveIcon(by delta: CGSize) {
-        guard iconPanel.isVisible else { return }
-
-        let frame = iconPanel.frame.offsetBy(dx: delta.width, dy: delta.height)
-        iconPanel.setFrame(frame, display: true)
-        state = state.minified(at: frame.origin)
+        state = .expanded(frame: nextFrame)
     }
 
     func reclamp(to screenFrame: CGRect) {
-        if popupPanel.isVisible {
-            let frame = boundsKeeper.clamp(frame: popupPanel.frame, into: screenFrame, minimumVisible: minimumVisible)
-            popupPanel.setFrame(frame, display: true)
-            state = state.expanded(at: frame)
+        let clamp: (CGRect) -> CGRect = { [boundsKeeper, minimumVisible] frame in
+            boundsKeeper.clamp(frame: frame, into: screenFrame, minimumVisible: minimumVisible)
         }
-
-        if iconPanel.isVisible {
-            let frame = boundsKeeper.clamp(frame: iconPanel.frame, into: screenFrame, minimumVisible: minimumVisible / 2)
-            iconPanel.setFrame(frame, display: true)
-            state = state.minified(at: frame.origin)
-        }
-    }
-
-    private func iconFrameBesidePopup() -> CGRect {
-        CGRect(x: popupPanel.frame.minX, y: popupPanel.frame.minY, width: 56, height: 56)
-    }
-
-    private func restoredPopupFrame() -> CGRect {
         switch state {
-        case .expanded(let frame):
-            return frame
-        case .minified:
-            return popupPanel.frame
+        case .expanded:
+            let frame = clamp(popupPanel.frame)
+            popupPanel.setFrame(frame, display: true)
+            state = .expanded(frame: frame)
+        case .collapsed(let lastFrame):
+            state = .collapsed(lastFrame: clamp(lastFrame))
         }
+    }
+}
+
+extension PopupController: PopupPanelDelegate {
+    func popupPanelDidRequestCollapse() {
+        collapse()
     }
 }

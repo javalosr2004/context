@@ -5,16 +5,22 @@ import unittest
 from typing import Any
 
 from backend.tutorial_tools import (
+    ASK_USER_TOOL_NAME,
     INVALID_TOOL_ARGUMENTS,
     INVALID_TOOL_CALL,
+    REQUEST_COMPLETION_TOOL_NAME,
     REQUEST_SCREEN_TOOL_NAME,
     UPDATE_PLAN_TOOL_NAME,
     TutorialToolCall,
     TutorialToolCallError,
     candidates_from_arguments,
+    is_ask_user_call,
+    is_request_completion_call,
     is_request_screen_call,
     is_update_plan_call,
     openai_tutorial_tool_definitions,
+    parse_ask_user_arguments,
+    parse_request_completion_reason,
     parse_request_screen_reason,
     parse_update_plan_arguments,
 )
@@ -35,10 +41,18 @@ class TutorialToolDispatchTests(unittest.TestCase):
         self.assertTrue(is_request_screen_call(screen_call))
         self.assertFalse(is_update_plan_call(screen_call))
 
-    def test_openai_tool_definitions_expose_two_tools(self) -> None:
+    def test_openai_tool_definitions_expose_four_tools(self) -> None:
         defs = openai_tutorial_tool_definitions()
         names = {tool["name"] for tool in defs}
-        self.assertEqual(names, {UPDATE_PLAN_TOOL_NAME, REQUEST_SCREEN_TOOL_NAME})
+        self.assertEqual(
+            names,
+            {
+                UPDATE_PLAN_TOOL_NAME,
+                REQUEST_SCREEN_TOOL_NAME,
+                REQUEST_COMPLETION_TOOL_NAME,
+                ASK_USER_TOOL_NAME,
+            },
+        )
 
     def test_parse_request_screen_reason(self) -> None:
         call = TutorialToolCall(
@@ -46,6 +60,29 @@ class TutorialToolDispatchTests(unittest.TestCase):
             arguments='{"reason": "verify the click landed"}',
         )
         self.assertEqual(parse_request_screen_reason(call), "verify the click landed")
+
+    def test_request_completion_call_helpers(self) -> None:
+        call = TutorialToolCall(
+            name=REQUEST_COMPLETION_TOOL_NAME,
+            arguments='{"reason": "Signup confirmation visible."}',
+        )
+        self.assertTrue(is_request_completion_call(call))
+        self.assertFalse(is_request_completion_call(
+            TutorialToolCall(name=UPDATE_PLAN_TOOL_NAME, arguments="{}")
+        ))
+        self.assertEqual(
+            parse_request_completion_reason(call),
+            "Signup confirmation visible.",
+        )
+
+    def test_parse_request_completion_rejects_empty_reason(self) -> None:
+        call = TutorialToolCall(
+            name=REQUEST_COMPLETION_TOOL_NAME,
+            arguments='{"reason": ""}',
+        )
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_request_completion_reason(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_ARGUMENTS)
 
 
 def _click_payload(description: str = "Green New button.") -> dict[str, Any]:
@@ -199,6 +236,46 @@ class UpdatePlanParsingTests(unittest.TestCase):
             parse_update_plan_arguments(call)
         self.assertEqual(error.exception.code, INVALID_TOOL_CALL)
 
+    def test_parse_user_choice_item(self) -> None:
+        call = TutorialToolCall(
+            name=UPDATE_PLAN_TOOL_NAME,
+            arguments=_update_plan_args(
+                [
+                    _plan_item(
+                        {
+                            "kind": "user_choice",
+                            "prompt": "Type the username you want to use.",
+                        },
+                        human_text="Pick a username.",
+                        confidence=0.8,
+                    )
+                ]
+            ),
+        )
+        candidates = candidates_from_arguments(parse_update_plan_arguments(call))
+        action = candidates[0].step_template.actions[0]
+        self.assertEqual(action.type, "user_choice")
+        self.assertEqual(action.prompt, "Type the username you want to use.")
+        self.assertIsNone(action.target)
+        self.assertTrue(action.requires_confirmation)
+
+    def test_user_choice_without_prompt_is_rejected(self) -> None:
+        call = TutorialToolCall(
+            name=UPDATE_PLAN_TOOL_NAME,
+            arguments=_update_plan_args(
+                [
+                    _plan_item(
+                        {"kind": "user_choice"},
+                        human_text="Pick something.",
+                        confidence=0.7,
+                    )
+                ]
+            ),
+        )
+        with self.assertRaises(TutorialToolCallError) as error:
+            parse_update_plan_arguments(call)
+        self.assertEqual(error.exception.code, INVALID_TOOL_ARGUMENTS)
+
     def test_confirm_action_kind_is_rejected(self) -> None:
         call = TutorialToolCall(
             name=UPDATE_PLAN_TOOL_NAME,
@@ -215,6 +292,139 @@ class UpdatePlanParsingTests(unittest.TestCase):
         with self.assertRaises(TutorialToolCallError) as error:
             parse_update_plan_arguments(call)
         self.assertEqual(error.exception.code, INVALID_TOOL_ARGUMENTS)
+
+
+class TutorialAskUserTests(unittest.TestCase):
+    def _call(self, **kwargs: Any) -> TutorialToolCall:
+        return TutorialToolCall(
+            name=ASK_USER_TOOL_NAME,
+            arguments=json.dumps(kwargs),
+        )
+
+    def test_is_ask_user_call_dispatch(self) -> None:
+        ask_call = self._call(reason="ambiguous goal", questions=[])
+        self.assertTrue(is_ask_user_call(ask_call))
+        self.assertFalse(
+            is_ask_user_call(
+                TutorialToolCall(name=UPDATE_PLAN_TOOL_NAME, arguments="{}")
+            )
+        )
+
+    def test_parse_options_question(self) -> None:
+        call = self._call(
+            reason="Which email client are you using?",
+            questions=[
+                {
+                    "question_id": "client",
+                    "question": "Which email client?",
+                    "response_mode": "options",
+                    "options": ["Mail", "Gmail", "Outlook"],
+                }
+            ],
+        )
+        args = parse_ask_user_arguments(call)
+        self.assertEqual(len(args.questions), 1)
+        self.assertEqual(args.questions[0].response_mode, "options")
+        self.assertEqual(args.questions[0].options, ["Mail", "Gmail", "Outlook"])
+
+    def test_parse_free_text_question(self) -> None:
+        call = self._call(
+            reason="Need the user's preferred name.",
+            questions=[
+                {
+                    "question_id": "name",
+                    "question": "What name should appear on the account?",
+                    "response_mode": "free_text",
+                    "options": [],
+                }
+            ],
+        )
+        args = parse_ask_user_arguments(call)
+        self.assertEqual(args.questions[0].response_mode, "free_text")
+        self.assertEqual(args.questions[0].options, [])
+
+    def test_options_mode_requires_two_options(self) -> None:
+        call = self._call(
+            reason="x",
+            questions=[
+                {
+                    "question_id": "q",
+                    "question": "Which?",
+                    "response_mode": "options",
+                    "options": ["only-one"],
+                }
+            ],
+        )
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_ask_user_arguments(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_ARGUMENTS)
+
+    def test_free_text_mode_rejects_options(self) -> None:
+        call = self._call(
+            reason="x",
+            questions=[
+                {
+                    "question_id": "q",
+                    "question": "What?",
+                    "response_mode": "free_text",
+                    "options": ["nope"],
+                }
+            ],
+        )
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_ask_user_arguments(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_ARGUMENTS)
+
+    def test_rejects_duplicate_question_ids(self) -> None:
+        call = self._call(
+            reason="x",
+            questions=[
+                {
+                    "question_id": "dup",
+                    "question": "First?",
+                    "response_mode": "options",
+                    "options": ["A", "B"],
+                },
+                {
+                    "question_id": "dup",
+                    "question": "Second?",
+                    "response_mode": "options",
+                    "options": ["A", "B"],
+                },
+            ],
+        )
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_ask_user_arguments(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_ARGUMENTS)
+
+    def test_rejects_more_than_four_questions(self) -> None:
+        call = self._call(
+            reason="x",
+            questions=[
+                {
+                    "question_id": f"q{i}",
+                    "question": f"Q{i}?",
+                    "response_mode": "options",
+                    "options": ["A", "B"],
+                }
+                for i in range(5)
+            ],
+        )
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_ask_user_arguments(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_ARGUMENTS)
+
+    def test_rejects_empty_questions(self) -> None:
+        call = self._call(reason="x", questions=[])
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_ask_user_arguments(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_ARGUMENTS)
+
+    def test_rejects_wrong_tool_name(self) -> None:
+        call = TutorialToolCall(name=UPDATE_PLAN_TOOL_NAME, arguments="{}")
+        with self.assertRaises(TutorialToolCallError) as ctx:
+            parse_ask_user_arguments(call)
+        self.assertEqual(ctx.exception.code, INVALID_TOOL_CALL)
 
 
 if __name__ == "__main__":

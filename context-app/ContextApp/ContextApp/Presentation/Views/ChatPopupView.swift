@@ -34,10 +34,84 @@ private struct TutorialPeekSteps {
     let next: TutorialStepDisplayItem?
 }
 
-private struct TutorialAnswerDisplay {
+private struct StatusChip: Identifiable, Equatable {
+    let id: String
+    let icon: String?
+    let text: String
+    let showsDot: Bool
+}
+
+private struct ChipEnterModifier: ViewModifier, Animatable {
+    var progress: Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        // progress: 0 = hidden (small, offset, transparent), 1 = resting.
+        let clamped = min(max(progress, 0), 1)
+        let scale = 0.62 + 0.38 * clamped
+        let xOffset = (1 - clamped) * -6 // slide in from leading edge
+        let opacity = clamped
+        return content
+            .scaleEffect(scale, anchor: .leading)
+            .offset(x: xOffset)
+            .opacity(opacity)
+    }
+}
+
+private struct ChipExitModifier: ViewModifier, Animatable {
+    var progress: Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View {
+        // progress: 1 = resting, 0 = exited (collapses in place, no slide).
+        let clamped = min(max(progress, 0), 1)
+        let scale = 0.84 + 0.16 * clamped
+        let opacity = clamped
+        return content
+            .scaleEffect(scale, anchor: .center)
+            .opacity(opacity)
+    }
+}
+
+private struct StepChipFlash: Equatable {
     let id: UUID
-    let question: String
-    let answer: String
+    let text: String
+    let icon: String
+}
+
+private struct SkeletonShimmer: View {
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .overlay(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.00),
+                            Color.white.opacity(0.22),
+                            Color.white.opacity(0.00)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: width * 0.6)
+                    .offset(x: phase * width)
+                )
+                .clipped()
+                .onAppear {
+                    withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                        phase = 1.4
+                    }
+                }
+        }
+    }
 }
 
 private struct PopupBlurBackground: NSViewRepresentable {
@@ -62,9 +136,12 @@ struct ChatPopupView: View {
     private static let maximumChatResponseHeight: CGFloat = 500
 
     @ObservedObject var sessionController: TutorialSessionController
+    @ObservedObject var recordingController: RecordingController
     let onTutorialStepSelected: (TutorialStep) async -> String
     let onInputInstruction: (InstructionInput) async -> String
     let onMinify: () -> Void
+    let onShowRecordings: () -> Void
+    let onToggleChatHistory: () -> Void
 
     @State private var activeStepID: String?
     @State private var expandedStepID: String?
@@ -73,14 +150,16 @@ struct ChatPopupView: View {
     @State private var stepJSONPreview: StepJSONPreview?
     @State private var instructionDraft = ""
     @State private var isInstructionInputVisible = false
+    @AppStorage("eval_mode_enabled") private var evalModeEnabled: Bool = false
     @State private var isSendingInstruction = false
     @State private var jpegQuality = 70
     @State private var loadingWordIndex = 0
     @State private var maxImageWidth = 1280
     @State private var referenceImageData: Data?
     @State private var referenceImageName: String?
-    @State private var dismissedAnswerID: UUID?
     @State private var nowPulse: Bool = false
+    @State private var stepChipFlash: StepChipFlash?
+    @State private var lastSeenTotalSteps: Int?
     @FocusState private var isMessageFieldFocused: Bool
 
     private static let launcherSuggestions: [String] = [
@@ -100,14 +179,20 @@ struct ChatPopupView: View {
 
     init(
         sessionController: TutorialSessionController,
+        recordingController: RecordingController,
         onTutorialStepSelected: @escaping (TutorialStep) async -> String,
         onInputInstruction: @escaping (InstructionInput) async -> String,
-        onMinify: @escaping () -> Void
+        onMinify: @escaping () -> Void,
+        onShowRecordings: @escaping () -> Void,
+        onToggleChatHistory: @escaping () -> Void
     ) {
         self.sessionController = sessionController
+        self.recordingController = recordingController
         self.onTutorialStepSelected = onTutorialStepSelected
         self.onInputInstruction = onInputInstruction
         self.onMinify = onMinify
+        self.onShowRecordings = onShowRecordings
+        self.onToggleChatHistory = onToggleChatHistory
     }
 
     var body: some View {
@@ -117,21 +202,51 @@ struct ChatPopupView: View {
             if isTutorialFinished {
                 finishedTutorialView
             } else if latestPlan == nil {
-                if let answer = latestTutorialAnswer {
-                    answerCard(answer)
+                statusChipRow
+
+                if sessionController.status.isBusy {
+                    tutorialMeta
                 }
 
-                launcherView
+                if !sessionController.planPreviewSteps.isEmpty {
+                    streamingPreviewSteps(sessionController.planPreviewSteps)
+                }
+
+                if let prompt = sessionController.pendingCompletionPrompt {
+                    completionPromptCard(prompt)
+                }
+
+                if !sessionController.status.isBusy
+                    && sessionController.pendingCompletionPrompt == nil {
+                    launcherView
+                }
             } else {
+                statusChipRow
+
                 tutorialMeta
 
-                if let answer = latestTutorialAnswer {
-                    answerCard(answer)
+                if let prompt = sessionController.pendingCompletionPrompt {
+                    completionPromptCard(prompt)
                 }
 
-                peekStack
-                    .opacity(isTutorialPaused ? 0.35 : 1)
-                    .allowsHitTesting(!isTutorialPaused)
+                if !sessionController.planPreviewSteps.isEmpty {
+                    // A replan is streaming: keep the completed step anchored
+                    // and show the new tail filling in, then hand back to the
+                    // interactive peek once plan_updated lands.
+                    replanningPreview(sessionController.planPreviewSteps)
+                } else {
+                    peekStack
+                        .opacity(sessionController.pendingCompletionPrompt != nil ? 0.35 : 1)
+                        .allowsHitTesting(sessionController.pendingCompletionPrompt == nil)
+                }
+            }
+
+            if let hint = sessionController.awaitingHintResponse {
+                verificationHintCard(hint)
+            }
+
+            if let batch = sessionController.pendingQuestionBatch {
+                questionCard(batch)
             }
 
             askBar
@@ -199,10 +314,46 @@ struct ChatPopupView: View {
     }
 
     private var handoffChrome: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             nativeWindowControlSpacer
 
             Spacer()
+
+            Button(action: { recordingController.toggleRecording() }) {
+                Image(systemName: recordingController.isRecording ? "stop.circle.fill" : "record.circle")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(recordingController.isRecording ? Color.red : OverlayTheme.secondaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(OverlayTheme.quietFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .help(recordingController.isRecording ? "Stop recording" : "Record a workflow")
+
+            Button(action: onShowRecordings) {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(OverlayTheme.quietFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .help("Show recordings")
+
+            Button(action: onToggleChatHistory) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(OverlayTheme.quietFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .help("Toggle chat history")
 
             Button(action: startNewChat) {
                 Image(systemName: "square.and.pencil")
@@ -229,19 +380,24 @@ struct ChatPopupView: View {
     private var tutorialMeta: some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-            Text(tutorialName)
-                .font(.system(size: 11, weight: .medium))
-                .tracking(0.44)
-                .textCase(.uppercase)
-                .foregroundStyle(OverlayTheme.tertiaryText)
-                .lineLimit(1)
+                if latestPlan == nil {
+                    SkeletonShimmer()
+                        .frame(width: 140, height: 11)
+                        .clipShape(Capsule())
+                } else {
+                    Text(tutorialName)
+                        .font(.system(size: 11, weight: .medium))
+                        .tracking(0.44)
+                        .textCase(.uppercase)
+                        .foregroundStyle(OverlayTheme.tertiaryText)
+                        .lineLimit(1)
+                }
 
                 Spacer()
 
-                Text(metaRightText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(OverlayTheme.tertiaryText)
-                    .lineLimit(1)
+                if !metaRightText.isEmpty {
+                    stepProgressPill(text: metaRightText)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 2)
@@ -418,7 +574,7 @@ struct ChatPopupView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(kind == .done || !canToggleStep(step))
+        .allowsHitTesting(kind != .done && canToggleStep(step))
         .contextMenu {
             Button {
                 showStepJSONPreview(for: step)
@@ -551,6 +707,7 @@ struct ChatPopupView: View {
         case .scroll(let a): return "Scroll \(a.direction.rawValue)"
         case .wait(let a): return "Wait \(a.durationMs)ms"
         case .confirm: return "Confirm"
+        case .userChoice(let a): return truncate(a.prompt, max: 48)
         }
     }
 
@@ -640,8 +797,15 @@ struct ChatPopupView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .disabled(!canSubmitDraft)
                 .help("Send")
-            } else {
-                keyboardHint("⌘K")
+            }
+
+            if evalModeEnabled, currentStepForAdvance != nil {
+                evalAnnotationButton(systemName: "checkmark", help: "Mark step correct") {
+                    Task { await sessionController.sendStepAnnotation(verdict: .correct) }
+                }
+                evalAnnotationButton(systemName: "xmark", help: "Mark step off-track") {
+                    Task { await sessionController.sendStepAnnotation(verdict: .offTrack) }
+                }
             }
 
             Button(action: advanceCurrentStep) {
@@ -667,6 +831,24 @@ struct ChatPopupView: View {
         }
     }
 
+    private func evalAnnotationButton(
+        systemName: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color.white.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .help(help)
+    }
+
     private func keyboardHint(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 10.5, weight: .regular, design: .monospaced))
@@ -681,61 +863,58 @@ struct ChatPopupView: View {
             )
     }
 
-    private func answerCard(_ answer: TutorialAnswerDisplay) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 11, weight: .medium))
+    private func questionCard(_ batch: PendingQuestionBatch) -> some View {
+        QuestionCardView(
+            batch: batch,
+            onSubmit: { answers in
+                Task { await sessionController.submitQuestionAnswers(answers) }
+            }
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
 
-                Text("Answer · tutorial paused")
+    @ViewBuilder
+    private func completionPromptCard(_ prompt: PendingCompletionPrompt) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: 11, weight: .medium))
+                Text(prompt.source == .llm ? "Looks done?" : "No more steps")
                     .font(.system(size: 10.5, weight: .medium))
                     .tracking(0.42)
                     .textCase(.uppercase)
             }
             .foregroundStyle(OverlayTheme.tertiaryText)
 
-            Text("\"\(answer.question)\"")
-                .font(.system(size: 12).italic())
-                .foregroundStyle(OverlayTheme.secondaryText)
-                .lineLimit(2)
+            Text(prompt.reason)
+                .font(.system(size: 13.5))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
 
-            ScrollView {
-                MarkdownTextView(text: answer.answer)
-                    .font(.system(size: 13.5))
-                    .lineSpacing(3)
-                    .foregroundStyle(OverlayTheme.primaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: Self.maximumChatResponseHeight)
-            .scrollContentBackground(.hidden)
-
-            if sessionController.status.isBusy {
-                typingDots
-                    .padding(.top, 1)
-            } else {
-                HStack(spacing: 6) {
-                    Button("↩ Resume tutorial") {
-                        dismissLatestAnswer()
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(OverlayTheme.invertedForeground)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(OverlayTheme.invertedAccent)
-                    .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
-
-                    Button("Ask follow-up") {
-                        isMessageFieldFocused = true
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(OverlayTheme.secondaryText)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
+            HStack(spacing: 6) {
+                Button("Finish tutorial") {
+                    Task { await sessionController.confirmCompletion() }
                 }
-                .padding(.top, 4)
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OverlayTheme.invertedForeground)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(OverlayTheme.invertedAccent)
+                .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+
+                Button("Keep going") {
+                    Task { await sessionController.rejectCompletion() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
             }
+            .padding(.top, 2)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -749,6 +928,101 @@ struct ChatPopupView: View {
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 4)
+    }
+
+    /// Decision modal for a verifier hint. The verifier is advisory: it flags
+    /// that the current screen may not match the next step, and the user owns
+    /// the call. "I'm on track" (`dismiss`) overrides the verifier and keeps
+    /// the step; "Replan from here" (`acknowledgeOff`) truncates and re-plans.
+    /// No interaction auto-resolves to "continue" (`timeout`) after
+    /// `hintDecisionTimeoutSeconds` — we never yank the user out of a flow they
+    /// may still be working through. See backend/tutorial_session.handle_user_hint_response.
+    private func verificationHintCard(_ hint: PendingVerificationHint) -> some View {
+        let title: String = {
+            switch hint.verdict {
+            case .unsure:
+                return "Not sure this matches"
+            case .diverged, .blocked:
+                return "Looks like we're off track"
+            case .onTrack, .pending:
+                // onTrack and pending should never surface as a hint:
+                // onTrack proceeds silently; pending is consumed by the
+                // backend retry loop. Render defensively rather than
+                // crash if the contract drifts.
+                return "Heads up"
+            }
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 11, weight: .medium))
+                Text(title)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.42)
+                    .textCase(.uppercase)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(OverlayTheme.tertiaryText)
+
+            if !hint.reason.isEmpty {
+                Text(hint.reason)
+                    .font(.system(size: 13))
+                    .foregroundStyle(OverlayTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await sessionController.respondToHint(action: .dismiss) }
+                } label: {
+                    Text("I'm on track")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(OverlayTheme.primaryText)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous)
+                                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await sessionController.respondToHint(action: .acknowledgeOff) }
+                } label: {
+                    Text("Replan from here")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(OverlayTheme.invertedForeground)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
+                        .background(OverlayTheme.invertedAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .task(id: hint.stepID) {
+            // Auto-resolve to "continue" if the user doesn't decide. .task(id:)
+            // is cancelled when the hint goes away (a tap clears the slot) or
+            // when a new hint replaces it, so this won't fire late. Kept under
+            // the backend's gate-decision backstop so the client drives timeout.
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            await sessionController.respondToHint(action: .timeout)
+        }
     }
 
     private var typingDots: some View {
@@ -925,14 +1199,14 @@ struct ChatPopupView: View {
 
     private var loadingText: String {
         switch sessionController.status {
-        case .preparingScreen, .sending:
+        case .preparingScreen, .sending, .verifying:
             return sessionController.status.label
         case .planning(let label):
             if !sessionController.webSources.isEmpty {
                 return "\(label) · \(sessionController.webSources.count) source\(sessionController.webSources.count == 1 ? "" : "s")"
             }
             return label
-        case .ready, .awaitingConfirmation, .completed, .failed:
+        case .ready, .awaitingConfirmation, .awaitingCompletion, .completed, .failed:
             return Self.loadingWords[loadingWordIndex]
         }
     }
@@ -1061,6 +1335,186 @@ struct ChatPopupView: View {
         }
     }
 
+    private var statusChips: [StatusChip] {
+        var chips: [StatusChip] = []
+
+        if sessionController.status.isBusy {
+            chips.append(StatusChip(
+                id: "status",
+                icon: nil,
+                text: sessionController.status.label,
+                showsDot: true
+            ))
+        } else if case .awaitingConfirmation = sessionController.status {
+            chips.append(StatusChip(
+                id: "status",
+                icon: "questionmark.circle",
+                text: "Awaiting confirmation",
+                showsDot: false
+            ))
+        }
+
+        if !sessionController.webSources.isEmpty {
+            let count = sessionController.webSources.count
+            chips.append(StatusChip(
+                id: "sources",
+                icon: "link",
+                text: "\(count) source\(count == 1 ? "" : "s")",
+                showsDot: false
+            ))
+        }
+
+        if let flash = stepChipFlash {
+            chips.append(StatusChip(
+                id: "step",
+                icon: flash.icon,
+                text: flash.text,
+                showsDot: false
+            ))
+        }
+
+        return chips
+    }
+
+    @ViewBuilder
+    private var statusChipRow: some View {
+        let chips = statusChips
+        let chipIDs = chips.map { $0.id }
+        Group {
+            if !chips.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(chips.enumerated()), id: \.element.id) { index, chip in
+                        statusChipView(chip)
+                            .transition(chipTransition(forIndex: index, totalIncoming: chips.count))
+                            .zIndex(Double(chips.count - index))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
+            }
+        }
+        .animation(.spring(response: 0.42, dampingFraction: 0.82, blendDuration: 0.15), value: chipIDs)
+        .onChange(of: planDiffSignature) { _ in handlePlanDiffChange() }
+        .onChange(of: sessionController.stepProgress?.totalSteps ?? 0) { newTotal in
+            if newTotal > 0 { lastSeenTotalSteps = newTotal }
+        }
+    }
+
+    private func chipTransition(forIndex index: Int, totalIncoming: Int) -> AnyTransition {
+        // Stagger only when the row is populating fresh (≥2 chips arriving together).
+        let delay = totalIncoming >= 2 ? Double(index) * 0.04 : 0
+        let insertion = AnyTransition.modifier(
+            active: ChipEnterModifier(progress: 0),
+            identity: ChipEnterModifier(progress: 1)
+        )
+        .animation(.spring(response: 0.40, dampingFraction: 0.78).delay(delay))
+
+        let removal = AnyTransition.modifier(
+            active: ChipExitModifier(progress: 0),
+            identity: ChipExitModifier(progress: 1)
+        )
+        .animation(.spring(response: 0.28, dampingFraction: 0.95))
+
+        return .asymmetric(insertion: insertion, removal: removal)
+    }
+
+    private var planDiffSignature: String {
+        guard let diff = sessionController.lastPlanDiff else { return "" }
+        return "\(diff.frozenPrefixLen)|\(diff.newTailLen)|\(diff.refinedCurrent)|\(diff.totalSteps)"
+    }
+
+    private func handlePlanDiffChange() {
+        guard let diff = sessionController.lastPlanDiff else { return }
+        let prior = lastSeenTotalSteps ?? diff.totalSteps
+        let delta = diff.totalSteps - prior
+        lastSeenTotalSteps = diff.totalSteps
+
+        let flash: StepChipFlash
+        if delta > 0 {
+            flash = StepChipFlash(
+                id: UUID(),
+                text: "+\(delta) step\(delta == 1 ? "" : "s")",
+                icon: "plus.circle"
+            )
+        } else if delta < 0 {
+            flash = StepChipFlash(
+                id: UUID(),
+                text: "\(delta) step\(delta == -1 ? "" : "s")",
+                icon: "minus.circle"
+            )
+        } else if diff.refinedCurrent {
+            flash = StepChipFlash(id: UUID(), text: "Refined", icon: "wand.and.stars")
+        } else {
+            return
+        }
+
+        stepChipFlash = flash
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            if stepChipFlash?.id == flash.id {
+                stepChipFlash = nil
+            }
+        }
+    }
+
+    private func stepProgressPill(text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "list.number")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(OverlayTheme.tertiaryText)
+            Text(text)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.32, dampingFraction: 0.9), value: text)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(OverlayTheme.quietFill)
+        .clipShape(Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+    }
+
+    private func statusChipView(_ chip: StatusChip) -> some View {
+        HStack(spacing: 5) {
+            if chip.showsDot {
+                Circle()
+                    .fill(OverlayTheme.secondaryText)
+                    .frame(width: 5, height: 5)
+                    .opacity(nowPulse ? 1.0 : 0.35)
+                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: nowPulse)
+                    .onAppear { nowPulse = true }
+            } else if let icon = chip.icon {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(OverlayTheme.tertiaryText)
+            }
+
+            Text(chip.text)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.32, dampingFraction: 0.9), value: chip.text)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(OverlayTheme.quietFill)
+        .clipShape(Capsule(style: .continuous))
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+    }
+
     private var statusText: String {
         if isSendingInstruction {
             return "Reading screen"
@@ -1106,21 +1560,14 @@ struct ChatPopupView: View {
     }
 
     private var metaRightText: String {
-        if isTutorialPaused {
-            return "paused"
-        }
         guard let plan = latestPlan, !plan.steps.isEmpty, let currentStepIndex else {
-            return sessionController.status.label.lowercased()
+            return ""
         }
         return "\(currentStepIndex + 1) of \(plan.steps.count)"
     }
 
     private var isTutorialFinished: Bool {
         sessionController.status == .completed
-    }
-
-    private var isTutorialPaused: Bool {
-        latestTutorialAnswer != nil
     }
 
     private var peekSteps: TutorialPeekSteps {
@@ -1139,15 +1586,6 @@ struct ChatPopupView: View {
             : nil
 
         return TutorialPeekSteps(done: doneStep, now: nowStep, next: nextStep)
-    }
-
-    private var latestTutorialAnswer: TutorialAnswerDisplay? {
-        guard let latestTutorialText = latestTextMessage(role: .tutorial) else { return nil }
-        guard latestTutorialText.id != dismissedAnswerID else { return nil }
-        guard !latestTutorialText.text.caseInsensitiveEquals("Tutorial completed.") else { return nil }
-        guard let latestUserText = latestTextMessage(role: .user) else { return nil }
-        guard latestTutorialText.createdAt >= latestUserText.createdAt else { return nil }
-        return TutorialAnswerDisplay(id: latestTutorialText.id, question: latestUserText.text, answer: latestTutorialText.text)
     }
 
     private var composerPlaceholder: String {
@@ -1175,18 +1613,6 @@ struct ChatPopupView: View {
         return plan.steps[currentStepIndex]
     }
 
-    private func latestTextMessage(role: ChatMessageRole) -> (id: UUID, text: String, createdAt: Date)? {
-        for message in sessionController.messages.reversed() where message.role == role {
-            if case .text(let text) = message.content {
-                let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmedText.isEmpty {
-                    return (message.id, trimmedText, message.createdAt)
-                }
-            }
-        }
-        return nil
-    }
-
     private func displayItem(
         for step: TutorialStep,
         index: Int,
@@ -1204,12 +1630,6 @@ struct ChatPopupView: View {
         toggleStepExpansion(step)
     }
 
-    private func dismissLatestAnswer() {
-        dismissedAnswerID = latestTutorialAnswer?.id
-        draft = ""
-        isMessageFieldFocused = false
-    }
-
     @ViewBuilder
     private func messageRow(_ message: ChatMessage) -> some View {
         switch message.content {
@@ -1219,7 +1639,52 @@ struct ChatPopupView: View {
         case .tutorialPlan(let plan):
             tutorialPlanRow(plan)
                 .id(message.id)
+        case .tutorialPlanPreview(let preview):
+            tutorialPlanPreviewRow(preview)
+                .id(message.id)
         }
+    }
+
+    private func tutorialPlanPreviewRow(_ preview: PlanPreview) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Building tutorial…")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                }
+
+                ForEach(preview.steps) { step in
+                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                        Text("\(step.index + 1)")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, alignment: .trailing)
+                        Text(step.instruction)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(OverlayTheme.assistantBubble)
+            .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                    .stroke(OverlayTheme.hairline, lineWidth: 1)
+            )
+            .animation(.easeOut(duration: 0.18), value: preview.steps.count)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func textMessageRow(_ text: String, role: ChatMessageRole) -> some View {
@@ -1358,6 +1823,8 @@ struct ChatPopupView: View {
             if isExpanded {
                 stepDropdown(step)
             }
+
+            stepNextButtonRow(for: step)
         }
         .background(OverlayTheme.strongerFill)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
@@ -1365,6 +1832,82 @@ struct ChatPopupView: View {
             RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
                 .stroke(isHighlighted ? Color.accentColor.opacity(0.45) : OverlayTheme.hairline, lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func stepNextButtonRow(for step: TutorialStep) -> some View {
+        let enabled = canAdvanceCurrentStep && currentStepForAdvance?.stepId == step.stepId
+        HStack {
+            Spacer()
+            Button(action: advanceCurrentStep) {
+                Text("Next")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 7)
+                    .foregroundStyle(enabled ? Color.white : Color.white.opacity(0.5))
+                    .background(enabled ? Color.accentColor : Color.accentColor.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .help("Advance to the next step")
+            .keyboardShortcut(.return, modifiers: [])
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+    }
+
+    private func replanningPreview(_ steps: [PlanPreviewStep]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let doneStep = peekSteps.done {
+                peekStepRow(kind: .done, title: doneStep.title, step: doneStep.step)
+            }
+
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.72)
+                Text("Re-routing…")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.63)
+                    .textCase(.uppercase)
+                    .foregroundStyle(OverlayTheme.tertiaryText)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+
+            streamingPreviewSteps(steps)
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+    }
+
+    private func streamingPreviewSteps(_ steps: [PlanPreviewStep]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(steps) { step in
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Text("\(step.index + 1).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary.opacity(0.8))
+                        .frame(width: 18, alignment: .trailing)
+
+                    Text(step.instruction)
+                        .font(.system(size: 13))
+                        .foregroundStyle(OverlayTheme.primaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeOut(duration: 0.18), value: steps.count)
     }
 
     private func upcomingStepList(_ steps: [TutorialStepDisplayItem]) -> some View {
@@ -1465,6 +2008,7 @@ struct ChatPopupView: View {
         case .type(let a): return a.target?.description
         case .scroll(let a): return a.target?.description
         case .pressKey(let a): return "Key: \(a.key)"
+        case .userChoice(let a): return a.prompt
         case .wait, .confirm: return nil
         }
     }
@@ -1516,6 +2060,8 @@ struct ChatPopupView: View {
             return "clock"
         case .confirm:
             return "checkmark.circle"
+        case .userChoice:
+            return "hand.tap"
         }
     }
 
@@ -1601,7 +2147,8 @@ struct ChatPopupView: View {
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.image]
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let response = SystemDialogPresenter.runSynchronously { panel.runModal() }
+        guard response == .OK, let url = panel.url else { return }
 
         do {
             referenceImageData = try Data(contentsOf: url)
@@ -1792,5 +2339,262 @@ private struct DraftPlanPreviewSheet: View {
         }
         .padding(16)
         .frame(width: 452)
+    }
+}
+
+// MARK: - Clarifying question card
+
+/// Renders a turn-0 ``PendingQuestionBatch`` from the planner: 1-4
+/// questions in a vertical stack, each with either a chip-list of
+/// suggested options plus an "Other..." text field, or a single
+/// free-text field. The Send button only enables once every question
+/// has a non-empty answer.
+private struct QuestionCardView: View {
+    let batch: PendingQuestionBatch
+    let onSubmit: ([String: String]) -> Void
+
+    @State private var selectedOption: [String: String] = [:]
+    @State private var customText: [String: String] = [:]
+    @State private var isCustom: [String: Bool] = [:]
+
+    private var answers: [String: String] {
+        var result: [String: String] = [:]
+        for question in batch.questions {
+            let value = currentAnswer(for: question)
+            if !value.isEmpty {
+                result[question.questionID] = value
+            }
+        }
+        return result
+    }
+
+    private var canSubmit: Bool {
+        answers.count == batch.questions.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(batch.questions) { question in
+                    questionBlock(question)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button(action: submit) {
+                    Text(batch.questions.count == 1 ? "Send answer" : "Send answers")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(canSubmit ? OverlayTheme.invertedForeground : OverlayTheme.tertiaryText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(canSubmit ? OverlayTheme.invertedAccent : OverlayTheme.strongerFill)
+                        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSubmit)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(OverlayTheme.answerSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 11, weight: .medium))
+                Text("Quick question\(batch.questions.count == 1 ? "" : "s")")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .tracking(0.42)
+                    .textCase(.uppercase)
+            }
+            .foregroundStyle(OverlayTheme.tertiaryText)
+
+            Text(batch.reason)
+                .font(.system(size: 12))
+                .foregroundStyle(OverlayTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func questionBlock(_ question: TutorialAssistantQuestion) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(question.prompt)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(OverlayTheme.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            switch question.responseMode {
+            case .options:
+                optionsField(question)
+            case .freeText:
+                freeTextField(question)
+            }
+        }
+    }
+
+    private func optionsField(_ question: TutorialAssistantQuestion) -> some View {
+        let chosen = selectedOption[question.questionID]
+        let isOther = isCustom[question.questionID] ?? false
+
+        return VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 6) {
+                ForEach(question.options, id: \.self) { option in
+                    optionChip(
+                        title: option,
+                        isSelected: !isOther && chosen == option,
+                        action: {
+                            selectedOption[question.questionID] = option
+                            isCustom[question.questionID] = false
+                        }
+                    )
+                }
+                if question.allowsCustomAnswer {
+                    optionChip(
+                        title: "Other…",
+                        isSelected: isOther,
+                        action: {
+                            isCustom[question.questionID] = true
+                            selectedOption[question.questionID] = nil
+                        }
+                    )
+                }
+            }
+
+            if isOther {
+                customTextField(for: question, placeholder: "Type your answer")
+            }
+        }
+    }
+
+    private func freeTextField(_ question: TutorialAssistantQuestion) -> some View {
+        customTextField(for: question, placeholder: "Type your answer")
+    }
+
+    private func customTextField(for question: TutorialAssistantQuestion, placeholder: String) -> some View {
+        TextField(
+            placeholder,
+            text: Binding(
+                get: { customText[question.questionID] ?? "" },
+                set: { customText[question.questionID] = $0 }
+            )
+        )
+        .textFieldStyle(.plain)
+        .font(.system(size: 12.5))
+        .foregroundStyle(OverlayTheme.primaryText)
+        .tint(OverlayTheme.primaryText)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(OverlayTheme.strongerFill)
+        .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: OverlayTheme.compactCornerRadius, style: .continuous)
+                .stroke(OverlayTheme.hairline, lineWidth: 0.5)
+        )
+        .onSubmit {
+            if canSubmit { submit() }
+        }
+    }
+
+    private func optionChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isSelected ? OverlayTheme.invertedForeground : OverlayTheme.primaryText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? OverlayTheme.invertedAccent : OverlayTheme.strongerFill)
+                .clipShape(RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: OverlayTheme.smallButtonCornerRadius, style: .continuous)
+                        .stroke(isSelected ? Color.clear : OverlayTheme.hairline, lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func currentAnswer(for question: TutorialAssistantQuestion) -> String {
+        switch question.responseMode {
+        case .freeText:
+            return (customText[question.questionID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        case .options:
+            if isCustom[question.questionID] ?? false {
+                return (customText[question.questionID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return (selectedOption[question.questionID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func submit() {
+        guard canSubmit else { return }
+        onSubmit(answers)
+    }
+}
+
+/// Minimal flow layout for wrapping option chips. Native ``Layout``
+/// keeps this lightweight; we don't depend on a third-party package.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let rows = layoutRows(subviews: subviews, maxWidth: maxWidth)
+        let height = rows.reduce(CGFloat(0)) { partial, row in
+            partial + row.height + (partial == 0 ? 0 : spacing)
+        }
+        return CGSize(width: maxWidth.isFinite ? maxWidth : rows.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let maxWidth = bounds.width
+        let rows = layoutRows(subviews: subviews, maxWidth: maxWidth)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                let size = subviews[item.index].sizeThatFits(.unspecified)
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: y),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var items: [(index: Int, width: CGFloat)] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func layoutRows(subviews: Subviews, maxWidth: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let projected = current.width + (current.items.isEmpty ? 0 : spacing) + size.width
+            if !current.items.isEmpty && projected > maxWidth {
+                rows.append(current)
+                current = Row()
+            }
+            current.items.append((index, size.width))
+            current.width += (current.items.count == 1 ? 0 : spacing) + size.width
+            current.height = max(current.height, size.height)
+        }
+        if !current.items.isEmpty { rows.append(current) }
+        return rows
     }
 }

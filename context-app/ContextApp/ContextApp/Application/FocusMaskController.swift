@@ -1,13 +1,16 @@
 import AppKit
 import SwiftUI
+import os
 
 @MainActor
 final class FocusMaskController {
+    private static let log = Logger(subsystem: "ContextApp", category: "FocusMask")
+
     private let clickClassifier: FocusMaskClickClassifier
     private let interactiveWindowsProvider: () -> [NSWindow]
     private let layout: FocusMaskLayout
     private let onExit: () -> Void
-    private let onInsideClick: () -> Void
+    private let onInsideClick: () -> Bool
     private let onOutsideClick: () -> Void
     private let screenProvider: () -> NSScreen?
 
@@ -23,7 +26,7 @@ final class FocusMaskController {
         screenProvider: @escaping () -> NSScreen?,
         interactiveWindowsProvider: @escaping () -> [NSWindow] = { [] },
         onExit: @escaping () -> Void,
-        onInsideClick: @escaping () -> Void = {},
+        onInsideClick: @escaping () -> Bool = { true },
         onOutsideClick: @escaping () -> Void = {}
     ) {
         self.clickClassifier = clickClassifier
@@ -40,21 +43,23 @@ final class FocusMaskController {
 
         hide()
         paddedCutout = layout.paddedCutout(screenFrame: screen.frame, targetFrame: cutoutFrame)
-        dimPanels = layout
-            .dimmingRects(screenFrame: screen.frame, targetFrame: cutoutFrame)
-            .map(makeDimPanel)
 
         showExitPanel(on: screen.frame)
         installClickMonitors()
+        Self.log.info("show cutout=\(self.rectString(self.paddedCutout), privacy: .public) appActive=\(NSApp.isActive, privacy: .public) frontmost=\(self.frontmostBundleID(), privacy: .public)")
     }
 
     func hide() {
+        let wasActive = !dimPanels.isEmpty
         removeClickMonitors()
         dimPanels.forEach { $0.orderOut(nil) }
         dimPanels = []
         exitPanel?.orderOut(nil)
         exitPanel = nil
         paddedCutout = CGRect.null
+        if wasActive {
+            Self.log.info("hide")
+        }
     }
 
     private func makeDimPanel(frame: CGRect) -> FocusMaskPanel {
@@ -88,14 +93,19 @@ final class FocusMaskController {
     }
 
     private func installClickMonitors() {
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] _ in
+            let location = NSEvent.mouseLocation
             Task { @MainActor [weak self] in
-                self?.handleClick(at: NSEvent.mouseLocation, eventWindow: nil)
+                guard let self else { return }
+                Self.log.info("click source=global at=\(self.pointString(location), privacy: .public) appActive=\(NSApp.isActive, privacy: .public) frontmost=\(self.frontmostBundleID(), privacy: .public)")
+                self.handleClick(at: location, eventWindow: nil)
             }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self else { return event }
-            self.handleClick(at: NSEvent.mouseLocation, eventWindow: event.window)
+            let location = NSEvent.mouseLocation
+            Self.log.info("click source=local at=\(self.pointString(location), privacy: .public) window=\(String(describing: event.window), privacy: .public) appActive=\(NSApp.isActive, privacy: .public) frontmost=\(self.frontmostBundleID(), privacy: .public)")
+            self.handleClick(at: location, eventWindow: event.window)
             return event
         }
     }
@@ -126,17 +136,33 @@ final class FocusMaskController {
             cutout: paddedCutout,
             isIgnoredControl: isIgnoredInteractiveWindow(eventWindow)
         )
+        Self.log.info("classify result=\(String(describing: target), privacy: .public) cutout=\(self.rectString(self.paddedCutout), privacy: .public)")
 
         switch target {
         case .ignoredControl, nil:
             return
         case .insideCutout:
-            hide()
-            onInsideClick()
+            let shouldDismiss = onInsideClick()
+            Self.log.info("inside-click shouldDismiss=\(shouldDismiss, privacy: .public)")
+            if shouldDismiss { hide() }
         case .outsideCutout:
+            Self.log.info("outside-click")
             hide()
             onOutsideClick()
         }
+    }
+
+    private func pointString(_ p: CGPoint) -> String {
+        String(format: "(%.0f,%.0f)", p.x, p.y)
+    }
+
+    private func rectString(_ r: CGRect) -> String {
+        if r.isNull { return "null" }
+        return String(format: "(%.0f,%.0f %.0fx%.0f)", r.minX, r.minY, r.width, r.height)
+    }
+
+    private func frontmostBundleID() -> String {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
     }
 }
 

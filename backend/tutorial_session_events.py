@@ -38,10 +38,22 @@ class UserMessageEvent(TutorialSessionEventModel):
     uploaded_images: list[ScreenSnapshot] = Field(default_factory=list)
 
 
-class UserAnswerEvent(TutorialSessionEventModel):
-    type: Literal["user_answer"]
+class UserAnswer(TutorialSessionEventModel):
     question_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
+
+
+class UserAnswerEvent(TutorialSessionEventModel):
+    """User's reply to an AssistantQuestionEvent batch.
+
+    Every question_id from the batch must appear exactly once in
+    ``answers`` for the backend to accept the response. The overlay is
+    responsible for collecting all answers before submitting.
+    """
+
+    type: Literal["user_answer"]
+    batch_id: str = Field(min_length=1)
+    answers: list[UserAnswer] = Field(min_length=1)
 
 
 class StepStartedEvent(TutorialSessionEventModel):
@@ -56,6 +68,10 @@ class UserConfirmationEvent(TutorialSessionEventModel):
     action_index: int = Field(ge=0)
     confirmed: bool
     note: str | None = None
+    # Stable post-action screen the client captured after waiting for the
+    # screen to settle. When present, the backend treats it as latest_screen
+    # and skips the request_screen round-trip before replanning.
+    screen: ScreenSnapshot | None = None
 
 
 class UserScreenEvent(TutorialSessionEventModel):
@@ -64,12 +80,77 @@ class UserScreenEvent(TutorialSessionEventModel):
     screen: ScreenSnapshot
 
 
+class StepAnnotationCorrections(TutorialSessionEventModel):
+    """Optional human corrections attached to an off-track verdict.
+
+    Each field targets a specific agent so the extractor can emit per-agent
+    eval fixtures without re-parsing free text.
+    """
+
+    instruction: str | None = None
+    target_bbox: tuple[float, float, float, float] | None = None
+    verifier_should_have_said: Literal["ok", "blocked"] | None = None
+
+
+class UserStepAnnotationEvent(TutorialSessionEventModel):
+    """Human eval annotation attached to a step.
+
+    Emitted by the overlay when the user toggles eval mode and marks a step.
+    ``verdict`` is the minimum payload; ``category`` and ``corrections`` are
+    populated when the annotator drills in.
+    """
+
+    type: Literal["user_step_annotation"]
+    step_id: str = Field(min_length=1)
+    action_index: int = Field(ge=0)
+    frame_hash: str | None = None
+    verdict: Literal["correct", "off_track", "ambiguous"]
+    category: Literal["plan", "grounding", "verifier", "loop"] | None = None
+    note: str | None = None
+    corrections: StepAnnotationCorrections | None = None
+
+
+class UserCompletionResponseEvent(TutorialSessionEventModel):
+    """User reply to a CompletionProposedEvent.
+
+    confirmed=True  -> end the session.
+    confirmed=False -> keep going; ``note`` is appended to history so the
+    planner sees the user's reason for continuing.
+    """
+
+    type: Literal["user_completion_response"]
+    confirmed: bool
+    note: str | None = None
+
+
+class UserHintResponseEvent(TutorialSessionEventModel):
+    """User's response to a VerificationHintEvent toast.
+
+    ``acknowledge_off`` — user tapped the toast confirming the system is off
+    track. Force a replan regardless of verdict.
+
+    ``dismiss`` — user explicitly closed the toast. Suppress any pending
+    auto-replan (overrides the verifier).
+
+    ``timeout`` — toast auto-dismissed with no interaction. Behavior is
+    verdict-dependent on the backend: unsure -> continue, diverged/blocked
+    -> apply the auto-replan that was staged when the hint was emitted.
+    """
+
+    type: Literal["user_hint_response"]
+    step_id: str = Field(min_length=1)
+    action: Literal["acknowledge_off", "dismiss", "timeout"]
+
+
 ClientSessionEvent = Annotated[
     UserMessageEvent
     | UserAnswerEvent
     | StepStartedEvent
     | UserConfirmationEvent
-    | UserScreenEvent,
+    | UserScreenEvent
+    | UserCompletionResponseEvent
+    | UserStepAnnotationEvent
+    | UserHintResponseEvent,
     Field(discriminator="type"),
 ]
 
@@ -91,10 +172,29 @@ class StatusChangedEvent(TutorialSessionEventModel):
     label: str
 
 
+class AssistantQuestion(TutorialSessionEventModel):
+    question_id: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    response_mode: Literal["options", "free_text"]
+    options: list[str] = Field(default_factory=list)
+    # Always true in v1 — the overlay always exposes an "Other..." field
+    # alongside any suggested options. Kept on the wire so the Swift side
+    # can branch on it later without a protocol change.
+    allows_custom_answer: bool = True
+
+
 class AssistantQuestionEvent(TutorialSessionEventModel):
+    """A batch of 1-4 clarifying questions the planner needs answered
+    before it commits to a plan.
+
+    The overlay renders all questions at once and waits to collect every
+    answer before sending a UserAnswerEvent keyed by ``batch_id``.
+    """
+
     type: Literal["assistant_question"] = "assistant_question"
-    question_id: str
-    prompt: str
+    batch_id: str
+    reason: str
+    questions: list[AssistantQuestion]
 
 
 class DraftPlanReadyEvent(TutorialSessionEventModel):
@@ -110,6 +210,26 @@ class PlanReadyEvent(TutorialSessionEventModel):
 class PlanUpdatedEvent(TutorialSessionEventModel):
     type: Literal["plan_updated"] = "plan_updated"
     plan: TutorialPlan
+
+
+class PlanStreamResetEvent(TutorialSessionEventModel):
+    """A fresh tutorial_update_plan call started streaming; the overlay
+    should drop any preview rows emitted for an earlier call this turn.
+    Cosmetic — the authoritative plan still arrives via plan_ready/updated."""
+
+    type: Literal["plan_stream_reset"] = "plan_stream_reset"
+
+
+class PlanStepPreviewEvent(TutorialSessionEventModel):
+    """One step instruction parsed from the still-streaming update_plan
+    arguments, rendered ahead of the merged plan for a no-wait feel. Carries
+    only what a row needs; the full step (actions, real step_id) arrives in
+    the authoritative plan, which REPLACES these previews."""
+
+    type: Literal["plan_step_preview"] = "plan_step_preview"
+    index: int = Field(ge=0)
+    instruction: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class TutorialActionEvent(TutorialSessionEventModel):
@@ -153,6 +273,11 @@ class ScreenRequestedEvent(TutorialSessionEventModel):
 class WebSearchSource(TutorialSessionEventModel):
     title: str
     url: str
+    # Full snippet text the planner actually ingested. Stored on the wire
+    # so the grounding-faithfulness judge can score whether downstream
+    # claims are supported by what was retrieved. May be empty for native
+    # provider search where snippet content isn't exposed to us.
+    content: str = ""
 
 
 class WebSearchStartedEvent(TutorialSessionEventModel):
@@ -195,6 +320,92 @@ class SessionCompletedEvent(TutorialSessionEventModel):
     type: Literal["session_completed"] = "session_completed"
 
 
+class CompletionProposedEvent(TutorialSessionEventModel):
+    """Backend is asking the user to confirm that the tutorial is finished.
+
+    ``source="llm"``   — the planner called tutorial_request_completion.
+    ``source="backend"`` — the plan ran out and the backend is double-checking
+    instead of auto-completing.
+
+    The session waits for a UserCompletionResponseEvent before either firing
+    SessionCompletedEvent (on confirmed=True) or re-engaging the planner
+    (on confirmed=False).
+    """
+
+    type: Literal["completion_proposed"] = "completion_proposed"
+    reason: str
+    source: Literal["llm", "backend"]
+
+
+class InstructionVerificationStartedEvent(TutorialSessionEventModel):
+    type: Literal["instruction_verification_started"] = (
+        "instruction_verification_started"
+    )
+    step_id: str
+
+
+class InstructionVerifiedEvent(TutorialSessionEventModel):
+    type: Literal["instruction_verified"] = "instruction_verified"
+    step_id: str
+    ok: bool
+    reason: str | None = None
+    # Full verifier output kept on the wire so eval fixtures can score the
+    # 4-way verdict, not just the coarse ok bool. See instruction_verifier.py.
+    verdict: Literal["on_track", "blocked", "diverged", "unsure"] | None = None
+    screen_summary: str | None = None
+
+
+class VerificationHintEvent(TutorialSessionEventModel):
+    """Soft, non-modal toast surfaced by the overlay when the verifier
+    returned a negative verdict.
+
+    ``auto_replanning`` tells the overlay how to behave on timeout:
+    True  -> verdict was diverged/blocked (high confidence); the backend
+             has already staged a replan that will fire on toast timeout.
+             The toast can show a "re-routing…" affordance.
+    False -> verdict was unsure (low confidence); the backend will NOT
+             replan unless the user explicitly acknowledges via
+             UserHintResponseEvent { action: acknowledge_off }.
+    """
+
+    type: Literal["verification_hint"] = "verification_hint"
+    step_id: str
+    verdict: Literal["unsure", "blocked", "diverged"]
+    reason: str
+    auto_replanning: bool
+
+
+class LLMToolCallSummary(TutorialSessionEventModel):
+    name: str
+    arguments_chars: int = Field(ge=0)
+
+
+class LLMCallEvent(TutorialSessionEventModel):
+    """One LLM round-trip the session made. Full prompt/response are
+    stored as a sidecar JSON file at ``llm_calls/{call_id}.json``; this
+    event carries only the metadata + a ref so the JSONL stays grep-able.
+
+    ``agent`` is the role the LLM played for this call (``planner``,
+    ``verifier``, ``draft_planner``, ``query_refiner``, ``enricher``).
+    Splitting by role is what lets eval extractors emit per-agent
+    fixtures without re-parsing the trace.
+    """
+
+    type: Literal["llm_call"] = "llm_call"
+    call_id: str
+    agent: str
+    model: str = ""
+    elapsed_ms: float = Field(ge=0)
+    image_count: int = Field(ge=0, default=0)
+    prompt_system_chars: int = Field(ge=0, default=0)
+    prompt_user_chars: int = Field(ge=0, default=0)
+    response_text_chars: int = Field(ge=0, default=0)
+    tool_calls: list[LLMToolCallSummary] = Field(default_factory=list)
+    ok: bool = True
+    error: str | None = None
+    payload_ref: str = ""  # relative path inside the session dir
+
+
 class ErrorEvent(TutorialSessionEventModel):
     type: Literal["error"] = "error"
     code: str
@@ -209,6 +420,8 @@ ServerSessionEvent = (
     | DraftPlanReadyEvent
     | PlanReadyEvent
     | PlanUpdatedEvent
+    | PlanStreamResetEvent
+    | PlanStepPreviewEvent
     | TutorialActionEvent
     | TutorialActionDeltaEvent
     | TutorialTextDeltaEvent
@@ -222,5 +435,10 @@ ServerSessionEvent = (
     | PlanDiffEvent
     | StepProgressEvent
     | SessionCompletedEvent
+    | CompletionProposedEvent
+    | InstructionVerificationStartedEvent
+    | InstructionVerifiedEvent
+    | VerificationHintEvent
+    | LLMCallEvent
     | ErrorEvent
 )

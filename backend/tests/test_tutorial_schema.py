@@ -169,6 +169,66 @@ class TutorialSchemaTests(unittest.TestCase):
                 )
             )
 
+    def test_accepts_user_choice_action(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Pick a repo.",
+  "actions": [{
+    "type": "user_choice",
+    "prompt": "Click on the repo you want to open.",
+    "requires_confirmation": true
+  }],
+  "confidence": 0.8
+}
+""".strip()
+            )
+        )
+        action = plan.steps[0].actions[0]
+        self.assertEqual(action.type, "user_choice")
+        self.assertEqual(action.prompt, "Click on the repo you want to open.")
+        self.assertIsNone(action.target)
+
+    def test_rejects_user_choice_without_prompt(self) -> None:
+        with self.assertRaises(TutorialPlanValidationError):
+            parse_tutorial_plan(
+                build_plan_json(
+                    """
+{
+  "step_id": "step_001",
+  "instruction": "Pick something.",
+  "actions": [{
+    "type": "user_choice",
+    "requires_confirmation": true
+  }],
+  "confidence": 0.8
+}
+""".strip()
+                )
+            )
+
+    def test_rejects_user_choice_with_target(self) -> None:
+        with self.assertRaises(TutorialPlanValidationError):
+            parse_tutorial_plan(
+                build_plan_json(
+                    """
+{
+  "step_id": "step_001",
+  "instruction": "Pick a repo.",
+  "actions": [{
+    "type": "user_choice",
+    "prompt": "Pick a repo.",
+    "target": {"kind": "element", "description": "the repo you want"},
+    "requires_confirmation": true
+  }],
+  "confidence": 0.8
+}
+""".strip()
+                )
+            )
+
     def test_response_schema_exposes_action_enum(self) -> None:
         schema = tutorial_plan_response_schema()
         action_schema = schema["$defs"]["TutorialAction"]
@@ -176,6 +236,7 @@ class TutorialSchemaTests(unittest.TestCase):
         self.assertIn("description", action_schema["properties"]["type"])
         self.assertIn("click", action_schema["properties"]["type"]["enum"])
         self.assertIn("press_key", action_schema["properties"]["type"]["enum"])
+        self.assertIn("user_choice", action_schema["properties"]["type"]["enum"])
 
     def test_response_schema_removes_gemini_unsupported_keywords(self) -> None:
         schema_text = str(tutorial_plan_response_schema())
@@ -183,6 +244,128 @@ class TutorialSchemaTests(unittest.TestCase):
         self.assertNotIn("additionalProperties", schema_text)
         self.assertNotIn("additional_properties", schema_text)
         self.assertNotIn("'default'", schema_text)
+
+
+class TutorialPlanNormalizationTests(unittest.TestCase):
+    def test_drops_click_when_followed_by_type_on_same_target(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Type the URL into the address bar.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "Address bar", "role": "text field"},
+      "requires_confirmation": false
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "Address bar", "role": "text field"},
+      "text": "https://example.com",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        actions = plan.steps[0].actions
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].type, "type")
+
+    def test_preserves_click_when_type_targets_a_different_element(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Open new repo flow.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "New", "role": "button"},
+      "requires_confirmation": true
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "Repo name"},
+      "text": "demo",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        self.assertEqual(len(plan.steps[0].actions), 2)
+
+    def test_preserves_click_when_an_action_intervenes_before_type(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Focus, wait, then type.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "Address bar"},
+      "requires_confirmation": false
+    },
+    {
+      "type": "wait",
+      "duration_ms": 250,
+      "requires_confirmation": false
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "Address bar"},
+      "text": "hi",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        self.assertEqual(len(plan.steps[0].actions), 3)
+
+    def test_target_equality_ignores_whitespace_and_case(self) -> None:
+        plan = parse_tutorial_plan(
+            build_plan_json(
+                """
+{
+  "step_id": "step_001",
+  "instruction": "Type into the address bar.",
+  "actions": [
+    {
+      "type": "click",
+      "target": {"kind": "element", "label": "  Address Bar  "},
+      "requires_confirmation": false
+    },
+    {
+      "type": "type",
+      "target": {"kind": "element", "label": "address bar"},
+      "text": "hi",
+      "requires_confirmation": true
+    }
+  ],
+  "confidence": 0.9
+}
+""".strip()
+            )
+        )
+
+        self.assertEqual(len(plan.steps[0].actions), 1)
+        self.assertEqual(plan.steps[0].actions[0].type, "type")
 
 
 def valid_click_step_json() -> str:

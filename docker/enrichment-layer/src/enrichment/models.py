@@ -9,6 +9,21 @@ class QueryPlan(BaseModel):
     queries: list[str] = Field(default_factory=list)
 
 
+class MultimodalQueryPlan(BaseModel):
+    """Plan emitted by the multimodal /snippets path.
+
+    ``environment`` captures what the screenshot showed (OS, app, region)
+    so downstream consumers can debug why queries look the way they do.
+    ``goal_facets`` decomposes the raw request into varying interpretations
+    of the user's intent; ``queries`` flattens 1-2 queries per facet so
+    the aggregator sees coverage across angles, not a single phrasing.
+    """
+    application: str
+    environment: str = ""
+    goal_facets: list[str] = Field(default_factory=list)
+    queries: list[str] = Field(default_factory=list)
+
+
 class SearchHit(BaseModel):
     query: str
     url: str

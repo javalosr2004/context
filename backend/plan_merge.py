@@ -21,9 +21,13 @@ Contract enforced here:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from backend.tutorial_schema import TutorialStep, validate_step_semantics
+
+
+logger = logging.getLogger(__name__)
 
 
 STEP_ID_PREFIX = "step_"
@@ -70,15 +74,22 @@ def merge_plan_tail(
                 "abandon_awaiting=true is mutually exclusive with "
                 "refines_current=true on the first tail item."
             )
-        if awaiting_step_id is None:
-            raise PlanMergeError(
-                "abandon_awaiting=true requires a live awaiting step."
+        # Forgive the planner when it asks to abandon a step that no
+        # longer exists. This typically happens after a gate-rejection
+        # truncation: the tail was already dropped, so there is no
+        # awaiting step to abandon. Treat that as a plain replan
+        # (append after the frozen prefix) and log for visibility,
+        # matching how refines_current is silently dropped below.
+        no_live_awaiting = awaiting_step_id is None or (
+            not frozen_prefix_ids
+            or frozen_prefix_ids[-1] != awaiting_step_id
+        )
+        if no_live_awaiting:
+            logger.info(
+                "[plan_merge] coercing abandon_awaiting=true → false; "
+                "no live awaiting step to abandon"
             )
-        if not frozen_prefix_ids or frozen_prefix_ids[-1] != awaiting_step_id:
-            raise PlanMergeError(
-                "abandon_awaiting=true requires the awaiting step to be the "
-                "last frozen prefix entry."
-            )
+            abandon_awaiting = False
 
     # Honor refines_current only when there's a live awaiting step at the
     # tail of the frozen prefix. Otherwise drop the bit and append — never
@@ -109,6 +120,16 @@ def merge_plan_tail(
         validate_step_semantics(merged)
         new_steps.append(merged)
 
+    logger.info(
+        "[plan_merge] merged",
+        extra={
+            "step_count": len(new_steps),
+            "tail_count": len(new_tail),
+            "refines_current": refines,
+            "abandon_awaiting": abandon_awaiting,
+            "frozen_prefix_count": len(frozen_prefix_ids),
+        },
+    )
     return PlanMergeResult(plan_steps=new_steps, step_counter=next_step_counter)
 
 

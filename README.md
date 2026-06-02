@@ -1,16 +1,16 @@
 # Context
 
-**An AI that teaches you a workflow live, on your own screen.**
+**An AI that plans a task and walks you through it live, on your own screen.**
 
-Record a task once — the real clicks, keystrokes, and screens. Context replays it as an
-always-on-top overlay that points at the next step *inside the actual app you're using*,
-follows along as you go, and quietly re-plans when your screen doesn't match. It's the
-difference between watching a Loom and having someone sit next to you and guide your hands.
+Context is a primarily **LLM-driven planning → action** app. Point it at a task and the
+planner reads your live screen, commits to a multi-step hypothesis, and streams it back as an
+always-on-top overlay that points at the next step *inside the actual app you're using* —
+firing each action on its own and quietly re-planning when the screen doesn't match. It's the
+difference between reading a doc and having someone sit next to you and guide your hands.
 
-> **Status — early MVP.** This is a primarily **LLM-driven planning → action** system. The
-> backend planner and the live overlay loop are the working core. **Workflow recording is
-> still to be developed** — read the "record once" flow below as the *intended* product, not a
-> finished feature. Treat everything here as MVP-stage and in flux.
+> **Status — early MVP.** The planner and the live overlay loop are the working core. The
+> longer-term wedge — **recording a workflow once** so Context can teach procedures no model
+> knows — is still to be developed. Treat everything here as MVP-stage and in flux.
 
 ## Why this exists
 
@@ -18,10 +18,11 @@ Most "AI assistants" can only help with things the model already knows — Photo
 SaaS, common dev setup. They fall apart the moment you point them at your company's internal
 admin tool, a bespoke enterprise app, or "the specific way our team does onboarding."
 
-Context flips that. **The recording is the source of truth, not the model.** A person who
-knows the procedure records it once; everyone after them gets a live, hands-on tutorial for
-*that exact procedure* — including the procedures no model was ever trained on. That's the
-part general models can't commoditize away.
+Context is built to close that gap. Today it plans from your live screen and guides your
+hands through it. The next phase is the real wedge: a person who knows a procedure **records
+it once**, and everyone after them gets a live, hands-on tutorial for *that exact procedure* —
+including the ones no model was ever trained on. That recorded source of truth is the part
+general models can't commoditize away.
 
 ## Quickstart — just talk to your agent
 
@@ -34,8 +35,8 @@ Hi Claude.
 Read CLAUDE.md in this repo. I want to run Context locally on my Mac.
 
 Walk me through it: set up the Python backend with my Gemini API key, get the
-macOS app building in Xcode, point the app at the local backend, and tell me how
-to record a workflow and replay it as an overlay. Go step by step.
+macOS app building in Xcode, point the app at the local backend, and show me how
+to point it at a task and watch it plan and guide me through it live. Go step by step.
 ```
 
 It already knows the architecture, the ports, the env vars, and the gotchas (they're all in
@@ -66,7 +67,7 @@ open context-app/ContextApp/ContextApp.xcodeproj
 
 Pick the `ContextApp` scheme, set your signing team, **Cmd+R**. Grant Screen Recording +
 Accessibility when asked, then set the app's **Tutorial API** endpoint to
-`http://localhost:8000`. Record a workflow, then replay it as an overlay.
+`http://localhost:8000`. Point it at a task and watch the planner stream a live overlay tutorial.
 
 **3. Precise pointing & enrichment** *(optional — needs an H Company / Holo key)*
 
@@ -80,24 +81,24 @@ docker compose up gui-grounding recording-enrichment
 ## How it works
 
 ```
- Record  ──▶  Plan  ──▶  Walk
- (Swift app)  (backend)  (overlay)
+ Plan  ──▶  Walk            ·  Record  (to be developed)
+ (backend)  (overlay)          (Swift app)
 ```
 
-1. **Record** *(to be developed)* — the macOS app will capture a workflow as events +
-   screenshots, with Holo describing each action. This path is still half-built; today the
-   planner works from an existing recording or straight from the live screen.
-2. **Plan** — the FastAPI backend's planner commits to a multi-step hypothesis from the
+1. **Plan** — the FastAPI backend's planner commits to a multi-step hypothesis from the
    current screen and **streams** the tutorial back as it's generated, so the overlay fills in
    live instead of waiting.
-3. **Walk** — the overlay shows the next step, points at its target on screen, and advances as
-   you act. A lightweight monitor watches each screen and only re-plans on real divergence —
-   it never blocks you between steps.
+2. **Walk** — the overlay shows the next step, points at its target on screen, and fires the
+   next action on its own. A lightweight monitor watches each screen and only re-plans on real
+   divergence — it never blocks you between steps.
+3. **Record** *(to be developed)* — the macOS app will capture a workflow once as events +
+   screenshots, with Holo describing each action, so Context can teach procedures no model
+   knows. Still half-built; today the planner works straight from the live screen.
 
 ## Project structure
 
 ```
-context-app/ContextApp/   # macOS app (Swift/SwiftUI) — recorder + overlay. The real frontend.
+context-app/ContextApp/   # macOS app (Swift/SwiftUI) — live overlay (+ recorder, WIP). The real frontend.
 backend/                  # FastAPI planner + session engine (Python, uv)
   main.py                   # app entry: /tutorials/plan, /tutorial-sessions, WebSocket loop
   tutorial_*.py             # plan schema, session step loop, planner tools

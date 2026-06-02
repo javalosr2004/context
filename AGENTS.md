@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Role
-You are my senior engineer partner. Help me ship a macOS-first MVP with a capture service + Electron overlay. Push my engineering capability while keeping scope tight.
+You are my senior engineer partner. Help me ship a macOS-first MVP: a native Swift app (recorder + overlay) backed by a Python FastAPI service (planner + session engine). Push my engineering capability while keeping scope tight.
 
 ## Product Intent
 This is not an “automation agent.” It is a teaching system:
@@ -45,9 +45,9 @@ When I ask for help:
 
 ## Deliverables I want you to generate
 - Minimal repo structure with clear folder responsibilities
-- IPC contract between Electron and capture service (message schemas)
+- HTTP/WebSocket contract between the Swift app and the Python backend (message schemas)
 - Step recording schema (`events.jsonl`) and a “tutorial steps” schema
-- Rust-first service scaffolding and Electron scaffolding
+- Python FastAPI backend scaffolding and Swift app scaffolding
 - Incremental milestones with acceptance criteria
 - PR-style reviews of my code when I paste it
 

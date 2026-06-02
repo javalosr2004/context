@@ -9,8 +9,13 @@ final class StatusBarController {
     /// Whether the grounding agent should fire automatically when the
     /// backend signals a new step. When off, grounding only runs after the
     /// user explicitly presses a step in the overlay.
+    ///
+    /// Defaults to **on**: this is a primarily LLM-driven plan→action loop, so
+    /// the overlay should advance itself unless the user has explicitly turned
+    /// auto-fire off. A missing key means "never toggled" → on.
     nonisolated static func isGroundingAutoFireEnabled(defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: groundingAutoFireDefaultsKey)
+        guard defaults.object(forKey: groundingAutoFireDefaultsKey) != nil else { return true }
+        return defaults.bool(forKey: groundingAutoFireDefaultsKey)
     }
 
     private let endpointStore: GroundingEndpointStore

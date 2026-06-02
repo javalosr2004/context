@@ -128,7 +128,7 @@ final class TutorialSessionController: ObservableObject {
         ignoredWindowProvider: @escaping () -> [NSWindow] = { [] },
         screenProvider: @escaping () -> NSScreen?,
         screenCaptureTimeoutNanoseconds: UInt64 = 5_000_000_000,
-        isGroundingAutoFireEnabled: @escaping () -> Bool = { false }
+        isGroundingAutoFireEnabled: @escaping () -> Bool = { true }
     ) {
         self.capture = capture
         self.client = client

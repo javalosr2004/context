@@ -7,6 +7,11 @@ always-on-top overlay that points at the next step *inside the actual app you're
 follows along as you go, and quietly re-plans when your screen doesn't match. It's the
 difference between watching a Loom and having someone sit next to you and guide your hands.
 
+> **Status — early MVP.** This is a primarily **LLM-driven planning → action** system. The
+> backend planner and the live overlay loop are the working core. **Workflow recording is
+> still to be developed** — read the "record once" flow below as the *intended* product, not a
+> finished feature. Treat everything here as MVP-stage and in flux.
+
 ## Why this exists
 
 Most "AI assistants" can only help with things the model already knows — Photoshop, popular
@@ -79,8 +84,9 @@ docker compose up gui-grounding recording-enrichment
  (Swift app)  (backend)  (overlay)
 ```
 
-1. **Record** — the macOS app captures a workflow as events + screenshots, and can have Holo
-   describe each action.
+1. **Record** *(to be developed)* — the macOS app will capture a workflow as events +
+   screenshots, with Holo describing each action. This path is still half-built; today the
+   planner works from an existing recording or straight from the live screen.
 2. **Plan** — the FastAPI backend's planner commits to a multi-step hypothesis from the
    current screen and **streams** the tutorial back as it's generated, so the overlay fills in
    live instead of waiting.
@@ -102,6 +108,10 @@ CLAUDE.md                 # full setup + architecture (written for your coding a
 
 ## Status
 
-macOS-first MVP. The core loop — record → plan → live overlay — is the product; the Docker
-grounding stack is an optional accuracy layer. Cross-platform, sharing, and authoring come
-later. See [`CLAUDE.md`](./CLAUDE.md) for the developer-facing details.
+Early macOS-first **MVP**, and built to be treated as one — explicit state, deterministic
+failure modes, no magic. The working core is the **LLM-driven planning → action loop**: the
+backend planner streams a multi-step hypothesis and the overlay walks it on your live screen,
+firing the next action on its own. **Workflow recording is still to be developed** — it's the
+intended front of the funnel but half-built today. The Docker grounding stack is an optional
+accuracy layer. Cross-platform, sharing, and authoring come later. See
+[`CLAUDE.md`](./CLAUDE.md) for the developer-facing details.
